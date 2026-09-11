@@ -5,26 +5,25 @@ export default defineBackground(() => {
   });
 
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message?.type !== 'VCL_ANALYZE_SELECTION' || typeof message.dataUrl !== 'string') return;
+    const isVision = message?.type === 'VCL_ANALYZE_SELECTION' && typeof message.dataUrl === 'string';
+    const isCommerce = message?.type === 'VCL_RESOLVE_PRODUCTS' && message.description && typeof message.description === 'object';
+    if (!isVision && !isCommerce) return;
 
     const requestId = message.requestId;
-    console.debug('[VCL message v2] start', { requestId, tabId: sender.tab?.id, frameId: sender.frameId });
-    void fetch('https://api.vcl.article6.org/analyze-selection', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dataUrl: message.dataUrl }),
+    const endpoint = isVision ? 'analyze-selection' : 'resolve-products';
+    const body = isVision ? { dataUrl: message.dataUrl } : message.description;
+    console.debug('[VCL message v3] start', { requestId, endpoint, tabId: sender.tab?.id, frameId: sender.frameId });
+
+    void fetch(`https://api.vcl.article6.org/${endpoint}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     }).then(async (response) => {
       const payload = await response.json();
-      console.debug('[VCL message v2] fetch JSON', requestId, response.status, JSON.stringify(payload));
-      if (!response.ok) throw new Error(payload?.error || `Vision API failed with HTTP ${response.status}`);
-      console.debug('[VCL message v2] sendResponse', requestId, JSON.stringify(payload));
+      console.debug('[VCL message v3] fetch JSON', requestId, endpoint, response.status, JSON.stringify(payload));
+      if (!response.ok) throw new Error(payload?.error || `VCL API failed with HTTP ${response.status}`);
       sendResponse(payload);
     }).catch((error: unknown) => {
-      const payload = { error: error instanceof Error ? error.message : 'Vision analysis failed.' };
-      console.debug('[VCL message v2] sendResponse error', requestId, JSON.stringify(payload));
-      sendResponse(payload);
+      sendResponse({ error: error instanceof Error ? error.message : 'VCL request failed.' });
     });
-    // Native Chromium before 148 does not use a returned Promise as the response.
     return true;
   });
 });
