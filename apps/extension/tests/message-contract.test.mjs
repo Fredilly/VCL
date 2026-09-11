@@ -11,7 +11,7 @@ const description = { category: 'drinkware', subcategory: 'mug', brand_candidate
   color: 'red', material: 'ceramic', style_attributes: ['plain'], visible_text: [], logos_markings: [], distinctive_features: [], hardware_details: [], shape_silhouette: [], search_terms: ['red mug'], confidence: 0.85, identity_confidence: 0 };
 const commerce = { query: { query: 'red mug' }, products: [], latency_ms: 12 };
 
-async function run({ visionStatus = 200, visionPayload = description, commerceStatus = 200, commercePayload = commerce, closeEarly = false } = {}) {
+async function run({ visionStatus = 200, visionPayload = description, commerceStatus = 200, commercePayload = commerce } = {}) {
   let listener;
   let requests = 0;
   const nodes = new Map();
@@ -20,12 +20,8 @@ async function run({ visionStatus = 200, visionPayload = description, commerceSt
     get firstElementChild() { return this.children[0]; }, addEventListener() {}, remove() { nodes.delete(this.id); } });
   const browser = { action: { onClicked: { addListener() {} } }, runtime: {
     onMessage: { addListener(fn) { listener = fn; } },
-    sendMessage(message) {
-      return new Promise((resolve) => {
-        let open = true;
-        const keepAlive = listener(message, { tab: { id: 1 }, frameId: 0 }, value => { if (open) resolve(value); });
-        if (keepAlive !== true || closeEarly) { open = false; resolve(undefined); }
-      });
+    async sendMessage(message) {
+      return await listener(message, { tab: { id: 1 }, frameId: 0 });
     },
   } };
   const context = vm.createContext({ exports: {}, browser, defineBackground: fn => fn(), console,
@@ -54,12 +50,18 @@ test('valid vision response continues through commerce resolution', async () => 
   assert.equal(requests, 2);
 });
 
-test('premature message channel closure remains visible', async () => {
-  const { panel } = await run({ closeEarly: true });
-  assert.ok(panel.children.some(child => child.textContent === 'Vision provider returned an invalid response'));
+test('background listener returns a promise-backed response instead of callback keepalive', async () => {
+  let listener;
+  const browser = { action: { onClicked: { addListener() {} } }, runtime: { onMessage: { addListener(fn) { listener = fn; } } } };
+  const context = vm.createContext({ exports: {}, browser, defineBackground: fn => fn(), console,
+    fetch: async () => Response.json(description) });
+  vm.runInContext(compile(background), context);
+  const response = listener({ type: 'VCL_ANALYZE_SELECTION', requestId: 'promise-test', dataUrl: 'data:image/png;base64,test' }, { tab: { id: 1 }, frameId: 0 });
+  assert.equal(typeof response?.then, 'function');
+  assert.deepEqual(await response, description);
 });
 
-test('vision upstream error crosses callback boundary', async () => {
+test('vision upstream error crosses promise boundary', async () => {
   const { panel, requests } = await run({ visionStatus: 500, visionPayload: { error: 'Provider unavailable' } });
   assert.ok(panel.children.some(child => child.textContent === 'Provider unavailable'));
   assert.equal(requests, 1);
