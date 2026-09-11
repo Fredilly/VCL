@@ -100,7 +100,7 @@ Do not equate description accuracy with exact SKU accuracy.
 ## Spike 4 — Product resolution
 
 ### Question
-Can the system return products someone would actually consider buying?
+Can the system return products someone would actually consider buying, while creating a credible path toward identifying the same product seen in the video?
 
 ### First adapters
 - eBay Browse/search capabilities
@@ -112,6 +112,100 @@ Do not make Amazon the sole or initial hard dependency.
 ### Pass
 For a curated test set, at least one returned result is judged commercially useful in >= 70% of cases.
 
+### Spike 4b — Resolver reliability
+
+Goal:
+make product resolution fast, resilient, and provider-independent.
+
+Required:
+- hard provider timeouts,
+- distinguish `NO_RESULTS` from provider failure,
+- broaden queries progressively when a narrow query returns nothing,
+- cache successful normalized queries where provider terms permit,
+- support provider fallback / parallel resolution,
+- never expose raw provider errors to users.
+
+Measure:
+- P50 product-resolution latency,
+- P95 product-resolution latency,
+- graceful-response rate,
+- provider failure rate,
+- useful-result rate.
+
+Target before moving on:
+- P50 <= 3 seconds where practical,
+- P95 <= 6 seconds where practical,
+- >99% of requests end in products or a truthful graceful state.
+
+Do not chase 99.9% uptime from one provider. Reliability must come from the resolver architecture.
+
+### Spike 4c — Identity evidence
+
+Goal:
+collect evidence that can distinguish the same product from a merely similar product.
+
+Capture when visible/permitted:
+- logos,
+- text/markings,
+- distinctive design details,
+- likely brand,
+- likely model/product family,
+- colorway,
+- material,
+- hardware/fasteners,
+- shape/silhouette,
+- video title/description/context.
+
+The vision model may propose identity hypotheses, but a model guess is not proof of identity.
+
+### Spike 4d — Candidate verification
+
+Goal:
+verify retrieved product candidates against visual and contextual evidence.
+
+Process:
+1. retrieve candidates,
+2. compare candidate details/images against the selected object,
+3. score evidence agreement,
+4. classify conservatively.
+
+Do not mark a candidate `EXACT` because:
+- a model guessed the brand/model,
+- a text query matched,
+- a shopping provider ranked it first.
+
+### Spike 4e — Multi-frame evidence
+
+Goal:
+use nearby frames when one frame does not contain enough evidence.
+
+Use only when:
+- analysis is user initiated,
+- capture is permitted,
+- additional frames materially improve identification.
+
+Examples:
+- current frame shows shape,
+- next frame reveals a logo,
+- previous frame reveals a clasp, sole, watch face, bag hardware, or full silhouette.
+
+### Spike 4f — Exact-match benchmark
+
+Create a benchmark containing known products where ground truth is available.
+
+Measure separately:
+- exact precision,
+- likely precision,
+- useful-result rate,
+- false-exact rate,
+- no-result rate,
+- latency.
+
+Exact-match ambition:
+increase the share of correctly identified original products over time without increasing false-exact claims.
+
+A correct `LIKELY` or `SIMILAR` label is better than a false `EXACT`.
+
 ---
 
 ## Spike 5 — End-to-end magic
@@ -120,7 +214,9 @@ For a curated test set, at least one returned result is judged commercially usef
 Does the full interaction feel useful?
 
 ### Flow
-`pause -> invoke -> click -> result`
+`invoke -> click -> result`
+
+Pausing is not a product requirement. Analysis remains user initiated.
 
 ### Target
 P50 response time: <= 3 seconds where practical.
