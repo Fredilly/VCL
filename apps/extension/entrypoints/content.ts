@@ -1,11 +1,85 @@
+import { capturePrimaryVideoFrame, type FrameCaptureResult } from '../lib/frame-capture';
+
 const OVERLAY_ID = 'vcl-overlay-root';
+const RESULT_ID = 'vcl-capture-result';
 
 function removeOverlay() {
   document.getElementById(OVERLAY_ID)?.remove();
 }
 
+function removeResult() {
+  document.getElementById(RESULT_ID)?.remove();
+}
+
+function showCaptureResult(result: FrameCaptureResult) {
+  removeResult();
+
+  const panel = document.createElement('div');
+  panel.id = RESULT_ID;
+  Object.assign(panel.style, {
+    position: 'fixed',
+    right: '20px',
+    bottom: '20px',
+    zIndex: '2147483647',
+    width: '340px',
+    maxWidth: 'calc(100vw - 40px)',
+    padding: '14px',
+    borderRadius: '14px',
+    background: '#111',
+    color: '#fff',
+    boxShadow: '0 12px 40px rgba(0,0,0,0.35)',
+    font: '13px system-ui, sans-serif',
+  });
+
+  const title = document.createElement('div');
+  title.textContent = result.ok ? 'VCL frame capture: success' : 'VCL frame capture: unsupported';
+  Object.assign(title.style, { fontWeight: '700', marginBottom: '10px' });
+  panel.appendChild(title);
+
+  if (result.ok) {
+    const image = document.createElement('img');
+    image.src = result.dataUrl;
+    image.alt = 'Captured video frame';
+    Object.assign(image.style, {
+      display: 'block',
+      width: '100%',
+      maxHeight: '220px',
+      objectFit: 'contain',
+      borderRadius: '10px',
+      background: '#000',
+      marginBottom: '10px',
+    });
+    panel.appendChild(image);
+
+    const meta = document.createElement('div');
+    meta.textContent = `${result.sourceWidth}×${result.sourceHeight} → ${result.width}×${result.height} · ${result.currentTime.toFixed(2)}s · ${result.paused ? 'paused' : 'playing'}`;
+    Object.assign(meta.style, { opacity: '0.8' });
+    panel.appendChild(meta);
+  } else {
+    const message = document.createElement('div');
+    message.textContent = `${result.code}: ${result.message}`;
+    Object.assign(message.style, { lineHeight: '1.4', opacity: '0.9' });
+    panel.appendChild(message);
+  }
+
+  const close = document.createElement('button');
+  close.textContent = 'Close';
+  Object.assign(close.style, {
+    marginTop: '12px',
+    padding: '7px 10px',
+    border: '0',
+    borderRadius: '8px',
+    cursor: 'pointer',
+  });
+  close.addEventListener('click', removeResult);
+  panel.appendChild(close);
+
+  document.documentElement.appendChild(panel);
+}
+
 function showOverlay() {
   removeOverlay();
+  removeResult();
 
   const root = document.createElement('div');
   root.id = OVERLAY_ID;
@@ -18,7 +92,7 @@ function showOverlay() {
   });
 
   const label = document.createElement('div');
-  label.textContent = 'VCL · click an object · Esc to close';
+  label.textContent = 'VCL · click to capture current video frame · Esc to close';
   Object.assign(label.style, {
     position: 'fixed',
     top: '16px',
@@ -33,7 +107,18 @@ function showOverlay() {
   });
 
   root.appendChild(label);
-  root.addEventListener('click', removeOverlay, { once: true });
+  root.addEventListener(
+    'click',
+    (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const result = capturePrimaryVideoFrame();
+      removeOverlay();
+      showCaptureResult(result);
+    },
+    { once: true, capture: true },
+  );
+
   document.documentElement.appendChild(root);
 }
 
@@ -51,7 +136,10 @@ export default defineContentScript({
     });
 
     window.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') removeOverlay();
+      if (event.key === 'Escape') {
+        removeOverlay();
+        removeResult();
+      }
     });
   },
 });
