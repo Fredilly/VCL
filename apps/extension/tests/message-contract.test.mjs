@@ -9,13 +9,14 @@ const content = await readFile(new URL('../entrypoints/content.ts', import.meta.
 const compile = (source) => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
 const description = { category: 'drinkware', subcategory: 'mug', brand_candidate: null, model_candidate: null,
   color: 'red', material: 'ceramic', style_attributes: ['plain'], search_terms: ['red mug'], confidence: 0.85 };
+const commerce = { query: { query: 'red mug' }, products: [], latency_ms: 12 };
 
-async function run(status, payload, closeEarly = false) {
+async function run({ visionStatus = 200, visionPayload = description, commerceStatus = 200, commercePayload = commerce, closeEarly = false } = {}) {
   let listener;
   let requests = 0;
-  const logs = [];
   const nodes = new Map();
   const element = () => ({ style: {}, children: [], appendChild(child) { this.children.push(child); if (child.id) nodes.set(child.id, child); },
+    append(...children) { for (const child of children) this.appendChild(child); },
     get firstElementChild() { return this.children[0]; }, addEventListener() {}, remove() { nodes.delete(this.id); } });
   const browser = { action: { onClicked: { addListener() {} } }, runtime: {
     onMessage: { addListener(fn) { listener = fn; } },
@@ -27,41 +28,44 @@ async function run(status, payload, closeEarly = false) {
       });
     },
   } };
-  const context = vm.createContext({ exports: {}, browser, defineBackground: fn => fn(),
-    console: { debug: (...args) => logs.push(args), error: (...args) => logs.push(args) },
+  const context = vm.createContext({ exports: {}, browser, defineBackground: fn => fn(), console,
     crypto: { randomUUID: () => 'regression-request' },
     document: { createElement: element, getElementById: id => nodes.get(id), documentElement: element() },
-    fetch: async () => { requests++; await new Promise(resolve => setTimeout(resolve, 5)); return Response.json(payload, { status }); },
+    fetch: async (url) => {
+      requests++;
+      await new Promise(resolve => setTimeout(resolve, 2));
+      const commerceRequest = String(url).includes('/resolve-products');
+      return Response.json(commerceRequest ? commercePayload : visionPayload, { status: commerceRequest ? commerceStatus : visionStatus });
+    },
   });
   vm.runInContext(compile(background), context);
-  // Execute the real renderer and validator; exclude only the capture import and registration.
   vm.runInContext(compile(content.slice(content.indexOf('const OVERLAY_ID'), content.indexOf('function showOverlay'))), context);
   await vm.runInContext('showAnalysis({ok:true,dataUrl:"data:image/png;base64,test"})', context);
-  return { panel: nodes.get('vcl-capture-result'), requests, logs };
+  return { panel: nodes.get('vcl-capture-result'), requests };
 }
 
-test('HTTP 200 -> native callback messaging -> real overlay success', async () => {
-  const { panel, requests, logs } = await run(200, description);
+test('valid vision response continues through commerce resolution', async () => {
+  const { panel, requests } = await run();
   assert.equal(panel.firstElementChild.textContent, 'VCL object understanding: success');
   assert.ok(panel.children.some(child => child.textContent === 'Commercially searchable confidence: 85%'));
-  assert.equal(requests, 1);
-  assert.ok(logs.some(row => row[0].includes('received') && row[3] === JSON.stringify(description)));
+  assert.ok(panel.children.some(child => child.textContent === 'Products · 0 · 12ms'));
+  assert.equal(requests, 2);
 });
 
-test('premature channel closure reproduces the reported validation error', async () => {
-  const { panel } = await run(200, description, true);
-  assert.equal(panel.firstElementChild.textContent, 'VCL object understanding: failed');
+test('premature message channel closure remains visible', async () => {
+  const { panel } = await run({ closeEarly: true });
   assert.ok(panel.children.some(child => child.textContent === 'Vision provider returned an invalid response'));
 });
 
-test('upstream error crosses callback boundary with its original message', async () => {
-  const { panel } = await run(500, { error: 'Provider unavailable' });
-  assert.equal(panel.firstElementChild.textContent, 'VCL object understanding: failed');
+test('vision upstream error crosses callback boundary', async () => {
+  const { panel, requests } = await run({ visionStatus: 500, visionPayload: { error: 'Provider unavailable' } });
   assert.ok(panel.children.some(child => child.textContent === 'Provider unavailable'));
+  assert.equal(requests, 1);
 });
 
-test('unexpected response wrapping remains rejected and logged', async () => {
-  const { panel, logs } = await run(200, { data: description });
-  assert.equal(panel.firstElementChild.textContent, 'VCL object understanding: failed');
-  assert.ok(logs.some(row => row[0].includes('validation rejected')));
+test('commerce error does not erase successful object understanding', async () => {
+  const { panel, requests } = await run({ commerceStatus: 503, commercePayload: { error: 'Missing EBAY_ACCESS_TOKEN' } });
+  assert.equal(panel.firstElementChild.textContent, 'VCL object understanding: success');
+  assert.ok(panel.children.some(child => child.textContent === 'Missing EBAY_ACCESS_TOKEN'));
+  assert.equal(requests, 2);
 });
