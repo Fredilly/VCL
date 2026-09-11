@@ -36,7 +36,7 @@ export class EbayCommerceProvider implements CommerceProvider {
       title: item.title ?? '',
       brand: query.brand,
       model: query.model,
-      category: item.categories?.[0]?.categoryName ?? query.subcategory || query.category || null,
+      category: item.categories?.[0]?.categoryName ?? (query.subcategory || query.category || null),
       image_reference: item.image?.imageUrl ?? null,
       provenance: 'ebay:browse',
       destination: item.itemWebUrl ?? null,
