@@ -1,8 +1,9 @@
 import { GeminiVisionProvider } from './gemini-vision.js';
 import { GroqVisionProvider } from './groq-vision.js';
 import { normalizeObjectDescription } from './types.js';
-import { buildProductQuery } from './commerce.js';
+import { buildProductQuery, type CommerceProvider } from './commerce.js';
 import { EbayCommerceProvider } from './ebay-commerce.js';
+import { SerpApiCommerceProvider } from './serpapi-commerce.js';
 
 export interface Env {
   GEMINI_API_KEY?: string;
@@ -10,6 +11,8 @@ export interface Env {
   VISION_PROVIDER?: string;
   GEMINI_MODEL?: string;
   EBAY_ACCESS_TOKEN?: string;
+  SERPAPI_API_KEY?: string;
+  COMMERCE_PROVIDER?: string;
 }
 
 const corsHeaders = {
@@ -27,6 +30,19 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function logSafeError(error: unknown): void {
   console.error('VCL API error', error instanceof Error ? { name: error.name, message: error.message } : { name: typeof error, message: String(error) });
+}
+
+function commerceProvider(env: Env): CommerceProvider | null {
+  if (env.COMMERCE_PROVIDER === 'ebay') {
+    return env.EBAY_ACCESS_TOKEN ? new EbayCommerceProvider(env.EBAY_ACCESS_TOKEN) : null;
+  }
+  if (env.COMMERCE_PROVIDER === 'serpapi') {
+    return env.SERPAPI_API_KEY ? new SerpApiCommerceProvider(env.SERPAPI_API_KEY) : null;
+  }
+
+  if (env.SERPAPI_API_KEY) return new SerpApiCommerceProvider(env.SERPAPI_API_KEY);
+  if (env.EBAY_ACCESS_TOKEN) return new EbayCommerceProvider(env.EBAY_ACCESS_TOKEN);
+  return null;
 }
 
 export default {
@@ -50,9 +66,9 @@ export default {
 
       if (url.pathname === '/resolve-products') {
         const description = normalizeObjectDescription(await request.json());
-        if (!env.EBAY_ACCESS_TOKEN) return jsonResponse({ error: 'Missing EBAY_ACCESS_TOKEN' }, 503);
+        const provider = commerceProvider(env);
+        if (!provider) return jsonResponse({ error: 'No configured commerce provider' }, 503);
         const query = buildProductQuery(description);
-        const provider = new EbayCommerceProvider(env.EBAY_ACCESS_TOKEN);
         const started = Date.now();
         const products = await provider.search(query);
         return jsonResponse({ query, products, latency_ms: Date.now() - started });
