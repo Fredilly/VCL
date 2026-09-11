@@ -35,5 +35,5 @@ test('trusted matching video title creates a context-led commerce query', () => 
 
 test('untrusted unrelated video title cannot override visual type', () => {
   const unrelated = { platform: 'youtube', title: 'Nike running shoes review' };
-  assert.equal(verifyProductCandidate(description, candidate("HUGO BOSS Men's Boss Polo Shirt"), unrelated)?.result_class, 'SIMILAR');
+  assert.equal(verifyProductCandidate(description, candidate("HUGO BOSS Men's Boss Polo Shirt"), unrelated), null);
 });
