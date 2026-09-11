@@ -4,12 +4,12 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/local-server.ts",
+    "dev:worker": "wrangler dev",
+    "deploy": "wrangler deploy",
     "build": "tsc -p tsconfig.json",
     "check": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
-    "@types/node": "latest",
-    "tsx": "latest",
     "typescript": "latest"
   }
 }

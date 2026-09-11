@@ -7,7 +7,7 @@ export default defineBackground(() => {
   browser.runtime.onMessage.addListener((message) => {
     if (message?.type !== 'VCL_ANALYZE_SELECTION' || typeof message.dataUrl !== 'string') return;
 
-    return fetch('http://127.0.0.1:8787/analyze-selection', {
+    return fetch('https://api.vcl.article6.org/analyze-selection', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ dataUrl: message.dataUrl }),

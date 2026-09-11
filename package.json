@@ -7,5 +7,8 @@
     "dev:api": "pnpm --filter @vcl/api dev",
     "build": "pnpm -r build",
     "check": "pnpm -r check"
+  },
+  "devDependencies": {
+    "wrangler": "^4.131.0"
   }
 }

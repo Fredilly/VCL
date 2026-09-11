@@ -11,7 +11,7 @@ function parseDataUrl(dataUrl: string) {
 export class GroqVisionProvider implements VisionProvider {
   constructor(
     private readonly apiKey: string,
-    private readonly model = process.env.GROQ_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct',
+    private readonly model = 'meta-llama/llama-4-scout-17b-16e-instruct',
   ) {}
 
   async analyzeSelection(dataUrl: string): Promise<ObjectDescription> {

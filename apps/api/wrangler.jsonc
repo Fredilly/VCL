@@ -1,0 +1,16 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "vcl-api",
+  "main": "src/server.ts",
+  "compatibility_date": "2026-09-11",
+  "workers_dev": true,
+  "vars": {
+    "VISION_PROVIDER": "gemini"
+  },
+  "routes": [
+    {
+      "pattern": "api.vcl.article6.org",
+      "custom_domain": true
+    }
+  ]
+}

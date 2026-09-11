@@ -9,7 +9,7 @@ function imagePart(dataUrl: string) {
 }
 
 export class GeminiVisionProvider implements VisionProvider {
-  constructor(private readonly apiKey: string, private readonly model = process.env.GEMINI_MODEL || 'gemini-2.5-flash') {}
+  constructor(private readonly apiKey: string, private readonly model = 'gemini-3.6-flash') {}
 
   async analyzeSelection(dataUrl: string): Promise<ObjectDescription> {
     const image = imagePart(dataUrl);
