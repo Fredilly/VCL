@@ -1,4 +1,10 @@
-import type { CommerceProvider, ProductCandidate, ProductQuery } from './commerce.js';
+import {
+  CommerceNoResultsError,
+  CommerceProviderError,
+  type CommerceProvider,
+  type ProductCandidate,
+  type ProductQuery,
+} from './commerce.js';
 
 type SerpApiShoppingResult = {
   product_id?: string;
@@ -23,8 +29,15 @@ function classify(query: ProductQuery, title: string): 'LIKELY' | 'SIMILAR' {
     : 'SIMILAR';
 }
 
+function isNoResultsMessage(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes("hasn't returned any results")
+    || normalized.includes('no results')
+    || normalized.includes('did not return any results');
+}
+
 export class SerpApiCommerceProvider implements CommerceProvider {
-  constructor(private readonly apiKey: string) {}
+  constructor(private readonly apiKey: string, private readonly timeoutMs = 2500) {}
 
   async search(query: ProductQuery): Promise<ProductCandidate[]> {
     const url = new URL('https://serpapi.com/search.json');
@@ -34,15 +47,37 @@ export class SerpApiCommerceProvider implements CommerceProvider {
     url.searchParams.set('gl', 'us');
     url.searchParams.set('hl', 'en');
 
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`SerpAPI shopping search failed with HTTP ${response.status}`);
+    let response: Response;
+    try {
+      response = await fetch(url, { signal: AbortSignal.timeout(this.timeoutMs) });
+    } catch (error) {
+      if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+        throw new CommerceProviderError(`SerpAPI timed out after ${this.timeoutMs}ms.`);
+      }
+      throw new CommerceProviderError(error instanceof Error ? error.message : 'SerpAPI request failed.');
     }
 
-    const payload = await response.json() as SerpApiShoppingResponse;
-    if (payload.error) throw new Error(`SerpAPI shopping search failed: ${payload.error}`);
+    let payload: SerpApiShoppingResponse;
+    try {
+      payload = await response.json() as SerpApiShoppingResponse;
+    } catch {
+      throw new CommerceProviderError(`SerpAPI returned invalid JSON with HTTP ${response.status}.`);
+    }
 
-    return (payload.shopping_results ?? []).slice(0, 8).map((item): ProductCandidate => ({
+    if (payload.error && isNoResultsMessage(payload.error)) {
+      throw new CommerceNoResultsError(payload.error);
+    }
+
+    if (!response.ok) {
+      throw new CommerceProviderError(`SerpAPI shopping search failed with HTTP ${response.status}.`);
+    }
+
+    if (payload.error) throw new CommerceProviderError(`SerpAPI shopping search failed: ${payload.error}`);
+
+    const results = (payload.shopping_results ?? []).filter((item) => Boolean(item.title));
+    if (results.length === 0) throw new CommerceNoResultsError();
+
+    return results.slice(0, 8).map((item): ProductCandidate => ({
       id: item.product_id ?? crypto.randomUUID(),
       title: item.title ?? '',
       brand: query.brand,

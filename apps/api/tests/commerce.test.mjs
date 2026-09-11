@@ -9,10 +9,12 @@ const compile = (source) => ts.transpileModule(source, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 }).outputText;
 
+const stripImports = (source) => source.replace(/^import[\s\S]*?from ['"][^'"]+['"];\n/gm, '');
+
 const commerceSource = await readFile(new URL('../src/commerce.ts', import.meta.url), 'utf8');
 const commerceContext = vm.createContext({ exports: {} });
-vm.runInContext(compile(commerceSource.replace("import type { ObjectDescription } from './types.js';\n", '')), commerceContext);
-const { buildProductQuery } = commerceContext.exports;
+vm.runInContext(compile(stripImports(commerceSource)), commerceContext);
+const { buildProductQuery, buildProductQueryVariants, CommerceNoResultsError, CommerceProviderError } = commerceContext.exports;
 
 test('buildProductQuery prioritizes brand/model/search evidence', () => {
   const query = buildProductQuery({
@@ -33,12 +35,37 @@ test('buildProductQuery falls back to visual attributes when search terms are ab
   assert.equal(query.query, 'brass metal art deco Lamp');
 });
 
+test('buildProductQueryVariants broadens from precise identity to visual evidence', () => {
+  const variants = buildProductQueryVariants({
+    category: 'Apparel', subcategory: 'Sunglasses', brand_candidate: 'Persol', model_candidate: 'PO0649',
+    color: 'tortoiseshell', material: 'acetate', style_attributes: ['oversized', 'square'],
+    search_terms: ['Persol PO0649 tortoiseshell'], confidence: 0.92,
+  });
+  assert.equal(variants.length, 3);
+  assert.match(variants[0].query, /Persol/);
+  assert.match(variants[1].query, /Sunglasses/);
+  assert.match(variants[2].query, /tortoiseshell/);
+});
+
+test('commerce errors expose stable resolver codes', () => {
+  assert.equal(new CommerceNoResultsError().code, 'NO_RESULTS');
+  assert.equal(new CommerceProviderError('failed').code, 'COMMERCE_PROVIDER_ERROR');
+});
+
 const ebaySource = await readFile(new URL('../src/ebay-commerce.ts', import.meta.url), 'utf8');
-const ebayContext = vm.createContext({ exports: {}, crypto: { randomUUID: () => 'generated' }, URL, fetch: async () => Response.json({
-  itemSummaries: [{ itemId: '123', title: 'Nike Air Max 90 White', image: { imageUrl: 'https://example.test/image.jpg' },
-    itemWebUrl: 'https://example.test/item', price: { value: '99.00', currency: 'USD' }, categories: [{ categoryName: 'Sneakers' }] }],
-}) });
-vm.runInContext(compile(ebaySource.replace("import type { CommerceProvider, ProductCandidate, ProductQuery } from './commerce.js';\n", '')), ebayContext);
+const ebayContext = vm.createContext({
+  exports: {},
+  CommerceNoResultsError,
+  CommerceProviderError,
+  crypto: { randomUUID: () => 'generated' },
+  URL,
+  AbortSignal,
+  fetch: async () => Response.json({
+    itemSummaries: [{ itemId: '123', title: 'Nike Air Max 90 White', image: { imageUrl: 'https://example.test/image.jpg' },
+      itemWebUrl: 'https://example.test/item', price: { value: '99.00', currency: 'USD' }, categories: [{ categoryName: 'Sneakers' }] }],
+  }),
+});
+vm.runInContext(compile(stripImports(ebaySource)), ebayContext);
 const { EbayCommerceProvider } = ebayContext.exports;
 
 test('eBay adapter normalizes candidates and never emits EXACT', async () => {

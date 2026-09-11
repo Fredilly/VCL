@@ -1,7 +1,13 @@
 import { GeminiVisionProvider } from './gemini-vision.js';
 import { GroqVisionProvider } from './groq-vision.js';
 import { normalizeObjectDescription } from './types.js';
-import { buildProductQuery, type CommerceProvider } from './commerce.js';
+import {
+  CommerceNoResultsError,
+  buildProductQueryVariants,
+  type CommerceProvider,
+  type ProductCandidate,
+  type ProductQuery,
+} from './commerce.js';
 import { EbayCommerceProvider } from './ebay-commerce.js';
 import { SerpApiCommerceProvider } from './serpapi-commerce.js';
 
@@ -14,6 +20,11 @@ export interface Env {
   SERPAPI_API_KEY?: string;
   COMMERCE_PROVIDER?: string;
 }
+
+type NamedCommerceProvider = {
+  name: string;
+  provider: CommerceProvider;
+};
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -32,17 +43,87 @@ function logSafeError(error: unknown): void {
   console.error('VCL API error', error instanceof Error ? { name: error.name, message: error.message } : { name: typeof error, message: String(error) });
 }
 
-function commerceProvider(env: Env): CommerceProvider | null {
-  if (env.COMMERCE_PROVIDER === 'ebay') {
-    return env.EBAY_ACCESS_TOKEN ? new EbayCommerceProvider(env.EBAY_ACCESS_TOKEN) : null;
-  }
-  if (env.COMMERCE_PROVIDER === 'serpapi') {
-    return env.SERPAPI_API_KEY ? new SerpApiCommerceProvider(env.SERPAPI_API_KEY) : null;
+function commerceProviders(env: Env): NamedCommerceProvider[] {
+  const serpapi = env.SERPAPI_API_KEY
+    ? { name: 'serpapi', provider: new SerpApiCommerceProvider(env.SERPAPI_API_KEY) }
+    : null;
+  const ebay = env.EBAY_ACCESS_TOKEN
+    ? { name: 'ebay', provider: new EbayCommerceProvider(env.EBAY_ACCESS_TOKEN) }
+    : null;
+
+  if (env.COMMERCE_PROVIDER === 'serpapi') return serpapi ? [serpapi] : [];
+  if (env.COMMERCE_PROVIDER === 'ebay') return ebay ? [ebay] : [];
+
+  return [serpapi, ebay].filter((entry): entry is NamedCommerceProvider => Boolean(entry));
+}
+
+function dedupeProducts(products: ProductCandidate[]): ProductCandidate[] {
+  const seen = new Set<string>();
+  const deduped: ProductCandidate[] = [];
+
+  for (const product of products) {
+    const key = product.destination || `${product.provenance}:${product.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(product);
+    if (deduped.length >= 8) break;
   }
 
-  if (env.SERPAPI_API_KEY) return new SerpApiCommerceProvider(env.SERPAPI_API_KEY);
-  if (env.EBAY_ACCESS_TOKEN) return new EbayCommerceProvider(env.EBAY_ACCESS_TOKEN);
-  return null;
+  return deduped;
+}
+
+async function resolveProducts(
+  providers: NamedCommerceProvider[],
+  queries: ProductQuery[],
+): Promise<{
+  query: ProductQuery;
+  products: ProductCandidate[];
+  state: 'RESULTS' | 'NO_RESULTS' | 'TEMPORARILY_UNAVAILABLE';
+  providers_used: string[];
+  attempts: number;
+}> {
+  let attempts = 0;
+  let sawProviderFailure = false;
+  const providersUsed = new Set<string>();
+
+  for (const query of queries) {
+    attempts += 1;
+    const settled = await Promise.allSettled(providers.map(async ({ name, provider }) => {
+      providersUsed.add(name);
+      return provider.search(query);
+    }));
+
+    const products: ProductCandidate[] = [];
+    for (const result of settled) {
+      if (result.status === 'fulfilled') {
+        products.push(...result.value);
+        continue;
+      }
+      if (!(result.reason instanceof CommerceNoResultsError)) {
+        sawProviderFailure = true;
+        logSafeError(result.reason);
+      }
+    }
+
+    const deduped = dedupeProducts(products);
+    if (deduped.length > 0) {
+      return {
+        query,
+        products: deduped,
+        state: 'RESULTS',
+        providers_used: [...providersUsed],
+        attempts,
+      };
+    }
+  }
+
+  return {
+    query: queries[queries.length - 1],
+    products: [],
+    state: sawProviderFailure ? 'TEMPORARILY_UNAVAILABLE' : 'NO_RESULTS',
+    providers_used: [...providersUsed],
+    attempts,
+  };
 }
 
 export default {
@@ -66,12 +147,16 @@ export default {
 
       if (url.pathname === '/resolve-products') {
         const description = normalizeObjectDescription(await request.json());
-        const provider = commerceProvider(env);
-        if (!provider) return jsonResponse({ error: 'No configured commerce provider' }, 503);
-        const query = buildProductQuery(description);
+        const providers = commerceProviders(env);
+        if (providers.length === 0) return jsonResponse({ error: 'No configured commerce provider' }, 503);
+
+        const queries = buildProductQueryVariants(description);
         const started = Date.now();
-        const products = await provider.search(query);
-        return jsonResponse({ query, products, latency_ms: Date.now() - started });
+        const resolved = await resolveProducts(providers, queries);
+        return jsonResponse({
+          ...resolved,
+          latency_ms: Date.now() - started,
+        });
       }
 
       return jsonResponse({ error: 'Not found' }, 404);
