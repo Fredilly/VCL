@@ -30,7 +30,8 @@ async function run({ visionStatus = 200, visionPayload = description, commerceSt
   } };
   const context = vm.createContext({ exports: {}, browser, defineBackground: fn => fn(), console,
     crypto: { randomUUID: () => 'regression-request' },
-    document: { createElement: element, getElementById: id => nodes.get(id), documentElement: element() },
+    location: { hostname: 'www.youtube.com', href: 'https://www.youtube.com/watch?v=test' },
+    document: { title: 'Test Video - YouTube', querySelector: () => null, createElement: element, getElementById: id => nodes.get(id), documentElement: element() },
     fetch: async (url) => {
       requests++;
       await new Promise(resolve => setTimeout(resolve, 2));
