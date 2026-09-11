@@ -52,19 +52,19 @@ export class CommerceProviderError extends Error {
 }
 
 const TYPE_TERMS: Record<string, string[]> = {
-  sweater: ['sweater', 'jumper', 'pullover', 'knit', 'cardigan', 'crewneck', 'hoodie'],
-  polo: ['polo'],
-  't-shirt': ['t-shirt', 'tshirt', 'tee'],
-  shirt: ['shirt', 'blouse'],
-  jacket: ['jacket', 'coat', 'blazer'],
-  dress: ['dress'],
-  trousers: ['trouser', 'pants', 'jeans', 'shorts'],
-  sneakers: ['sneaker', 'trainer', 'running shoe'],
-  shoes: ['shoe', 'loafer', 'boot', 'heel', 'sandal'],
+  sweater: ['sweater', 'sweaters', 'jumper', 'jumpers', 'pullover', 'pullovers', 'knit', 'knits', 'cardigan', 'cardigans', 'crewneck', 'crewnecks', 'hoodie', 'hoodies'],
+  polo: ['polo', 'polos'],
+  't-shirt': ['t-shirt', 't-shirts', 'tshirt', 'tshirts', 'tee', 'tees'],
+  shirt: ['shirt', 'shirts', 'blouse', 'blouses'],
+  jacket: ['jacket', 'jackets', 'coat', 'coats', 'blazer', 'blazers'],
+  dress: ['dress', 'dresses'],
+  trousers: ['trouser', 'trousers', 'pants', 'jeans', 'shorts'],
+  sneakers: ['sneaker', 'sneakers', 'trainer', 'trainers', 'running shoe', 'running shoes'],
+  shoes: ['shoe', 'shoes', 'loafer', 'loafers', 'boot', 'boots', 'heel', 'heels', 'sandal', 'sandals'],
   sunglasses: ['sunglasses', 'eyeglasses', 'glasses'],
-  bag: ['bag', 'handbag', 'backpack', 'purse'],
-  watch: ['watch'],
-  mug: ['mug', 'cup'],
+  bag: ['bag', 'bags', 'handbag', 'handbags', 'backpack', 'backpacks', 'purse', 'purses'],
+  watch: ['watch', 'watches'],
+  mug: ['mug', 'mugs', 'cup', 'cups'],
 };
 
 const COLORS = ['black', 'white', 'grey', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'navy', 'purple', 'pink', 'brown', 'beige', 'cream', 'gold', 'silver'];
@@ -81,9 +81,15 @@ function containsPhrase(haystack: string, needle: string | null | undefined): bo
 
 function typeFamilies(value: string): Set<string> {
   const text = normalized(value);
-  return new Set(Object.entries(TYPE_TERMS)
+  const found = new Set(Object.entries(TYPE_TERMS)
     .filter(([, terms]) => terms.some((term) => containsPhrase(text, term)))
     .map(([family]) => family));
+
+  // Keep product-type evidence specific. Generic parent families must not let
+  // a polo or T-shirt pass a conflicting shirt check.
+  if (found.has('polo') || found.has('t-shirt')) found.delete('shirt');
+  if (found.has('sneakers')) found.delete('shoes');
+  return found;
 }
 
 function namedValues(value: string, vocabulary: string[]): Set<string> {
@@ -125,7 +131,9 @@ function selectedTypes(description: ObjectDescription, context?: ProductContext)
 
 function primaryType(description: ObjectDescription, context?: ProductContext): string | null {
   const types = selectedTypes(description, context);
-  return types.size ? [...types][0] : null;
+  if (!types.size) return null;
+  const type = [...types][0];
+  return typeFamilies(description.subcategory).has(type) ? description.subcategory : type;
 }
 
 function uniqueNonEmpty(parts: Array<string | null | undefined>): string[] {
@@ -221,24 +229,25 @@ export function buildProductQuery(description: ObjectDescription, context?: Prod
     ...description.shape_silhouette,
   ]).slice(0, 2);
 
-  const ordered = uniqueNonEmpty([
-    description.brand_candidate,
-    description.model_candidate,
-    type,
-    description.color,
-    description.material,
-    ...strongestEvidence,
-  ]);
+  const hasStrongIdentity = Boolean(description.brand_candidate || description.model_candidate || type);
+  const ordered = hasStrongIdentity
+    ? uniqueNonEmpty([
+        description.brand_candidate,
+        description.model_candidate,
+        type,
+        description.color,
+        description.material,
+        ...strongestEvidence,
+      ])
+    : uniqueNonEmpty([
+        description.color,
+        description.material,
+        ...description.style_attributes,
+        description.subcategory || description.category,
+        ...strongestEvidence,
+      ]);
 
-  const fallback = uniqueNonEmpty([
-    type,
-    description.color,
-    description.material,
-    ...description.style_attributes.slice(0, 2),
-    ...description.search_terms.slice(0, 1),
-  ]);
-
-  const query = ordered.join(' ').trim() || fallback.join(' ').trim();
+  const query = ordered.join(' ').trim();
 
   return {
     query,
