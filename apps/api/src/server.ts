@@ -4,6 +4,7 @@ import { normalizeObjectDescription } from './types.js';
 import {
   CommerceNoResultsError,
   buildProductQueryVariants,
+  verifyProductCandidate,
   type CommerceProvider,
   type ProductCandidate,
   type ProductQuery,
@@ -75,6 +76,7 @@ function dedupeProducts(products: ProductCandidate[]): ProductCandidate[] {
 async function resolveProducts(
   providers: NamedCommerceProvider[],
   queries: ProductQuery[],
+  description: ReturnType<typeof normalizeObjectDescription>,
 ): Promise<{
   query: ProductQuery;
   products: ProductCandidate[];
@@ -118,7 +120,11 @@ async function resolveProducts(
       activeProviders = activeProviders.filter(({ name }) => !failedProviders.has(name));
     }
 
-    const deduped = dedupeProducts(products);
+    const verified = products
+      .map((product) => verifyProductCandidate(description, product))
+      .filter((product): product is ProductCandidate => Boolean(product))
+      .sort((a, b) => (b.verification_score ?? 0) - (a.verification_score ?? 0));
+    const deduped = dedupeProducts(verified);
     if (deduped.length > 0) {
       return {
         query,
@@ -175,7 +181,7 @@ export default {
 
         const queries = buildProductQueryVariants(description);
         const started = Date.now();
-        const resolved = await resolveProducts(providers, queries);
+        const resolved = await resolveProducts(providers, queries, description);
         return jsonResponse({
           ...resolved,
           latency_ms: Date.now() - started,

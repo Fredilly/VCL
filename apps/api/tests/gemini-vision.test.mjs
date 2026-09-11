@@ -6,7 +6,7 @@ import { GeminiVisionProvider } from '../dist/src/gemini-vision.js';
 // Captured Worker error; the upstream 503 envelope is reconstructed for mocking.
 const fixture = JSON.parse(await readFile(new URL('./fixtures/gemini-high-demand.json', import.meta.url)));
 const expected = { category: 'cup', subcategory: 'mug', brand_candidate: null, model_candidate: null,
-  color: 'red', material: 'ceramic', style_attributes: [], search_terms: ['red ceramic mug'], confidence: 0.9, identity_confidence: 0 };
+  color: 'red', material: 'ceramic', style_attributes: [], visible_text: [], logos_markings: [], distinctive_features: [], hardware_details: [], shape_silhouette: [], search_terms: ['red ceramic mug'], confidence: 0.9, identity_confidence: 0 };
 const image = 'data:image/png;base64,aGVsbG8=';
 
 test('uses the configured model without assuming the development model', async (t) => {
