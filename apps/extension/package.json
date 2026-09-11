@@ -8,14 +8,9 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@wxt-dev/module-react": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "wxt": "latest"
+    "wxt": "^0.21.4"
   },
   "devDependencies": {
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "typescript": "latest"
+    "typescript": "^5.9.2"
   }
 }
