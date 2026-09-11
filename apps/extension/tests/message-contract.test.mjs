@@ -8,7 +8,7 @@ const background = await readFile(new URL('../entrypoints/background.ts', import
 const content = await readFile(new URL('../entrypoints/content.ts', import.meta.url), 'utf8');
 const compile = (source) => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
 const description = { category: 'drinkware', subcategory: 'mug', brand_candidate: null, model_candidate: null,
-  color: 'red', material: 'ceramic', style_attributes: ['plain'], search_terms: ['red mug'], confidence: 0.85 };
+  color: 'red', material: 'ceramic', style_attributes: ['plain'], search_terms: ['red mug'], confidence: 0.85, identity_confidence: 0 };
 const commerce = { query: { query: 'red mug' }, products: [], latency_ms: 12 };
 
 async function run({ visionStatus = 200, visionPayload = description, commerceStatus = 200, commercePayload = commerce, closeEarly = false } = {}) {
@@ -41,6 +41,7 @@ async function run({ visionStatus = 200, visionPayload = description, commerceSt
   vm.runInContext(compile(background), context);
   vm.runInContext(compile(content.slice(content.indexOf('const OVERLAY_ID'), content.indexOf('function showOverlay'))), context);
   await vm.runInContext('showAnalysis({ok:true,dataUrl:"data:image/png;base64,test"})', context);
+  await new Promise(resolve => setTimeout(resolve, 10));
   return { panel: nodes.get('vcl-capture-result'), requests };
 }
 

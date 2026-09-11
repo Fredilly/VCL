@@ -37,7 +37,7 @@ function isNoResultsMessage(message: string): boolean {
 }
 
 export class SerpApiCommerceProvider implements CommerceProvider {
-  constructor(private readonly apiKey: string, private readonly timeoutMs = 5000) {}
+  constructor(private readonly apiKey: string) {}
 
   async search(query: ProductQuery): Promise<ProductCandidate[]> {
     const url = new URL('https://serpapi.com/search.json');
@@ -49,11 +49,8 @@ export class SerpApiCommerceProvider implements CommerceProvider {
 
     let response: Response;
     try {
-      response = await fetch(url, { signal: AbortSignal.timeout(this.timeoutMs) });
+      response = await fetch(url);
     } catch (error) {
-      if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
-        throw new CommerceProviderError(`SerpAPI timed out after ${this.timeoutMs}ms.`);
-      }
       throw new CommerceProviderError(error instanceof Error ? error.message : 'SerpAPI request failed.');
     }
 

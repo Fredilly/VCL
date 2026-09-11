@@ -10,6 +10,6 @@
     "check": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
-    "typescript": "latest"
+    "typescript": "^5.9.2"
   }
 }
