@@ -6,6 +6,7 @@ export interface Env {
   GEMINI_API_KEY?: string;
   GROQ_API_KEY?: string;
   VISION_PROVIDER?: string;
+  GEMINI_MODEL?: string;
 }
 
 const corsHeaders = {
@@ -39,7 +40,7 @@ export default {
       const useGemini = env.VISION_PROVIDER === 'gemini';
       const apiKey = useGemini ? env.GEMINI_API_KEY : env.GROQ_API_KEY;
       if (!apiKey) return jsonResponse({ error: `Missing ${useGemini ? 'GEMINI_API_KEY' : 'GROQ_API_KEY'}` }, 500);
-      const provider = useGemini ? new GeminiVisionProvider(apiKey) : new GroqVisionProvider(apiKey);
+      const provider = useGemini ? new GeminiVisionProvider(apiKey, env.GEMINI_MODEL) : new GroqVisionProvider(apiKey);
       return jsonResponse(normalizeObjectDescription(await provider.analyzeSelection(dataUrl)));
     } catch (error) {
       logSafeError(error);

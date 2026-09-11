@@ -16,7 +16,10 @@ type ObjectDescription = {
 };
 
 function parseObjectDescription(value: unknown): ObjectDescription {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Vision provider returned an invalid response');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    console.error('[VCL message v2] validation rejected: expected a non-null object', typeof value, value);
+    throw new Error('Vision provider returned an invalid response');
+  }
   const record = value as Record<string, unknown>;
   if (typeof record.category !== 'string' || typeof record.subcategory !== 'string' ||
       !(record.brand_candidate === null || typeof record.brand_candidate === 'string') ||
@@ -24,6 +27,14 @@ function parseObjectDescription(value: unknown): ObjectDescription {
       typeof record.color !== 'string' || typeof record.material !== 'string' ||
       !Array.isArray(record.style_attributes) || !Array.isArray(record.search_terms) ||
       typeof record.confidence !== 'number' || !Number.isFinite(record.confidence)) {
+    console.error('[VCL message v2] validation rejected', JSON.stringify({
+      category: typeof record.category, subcategory: typeof record.subcategory,
+      brand_candidate: record.brand_candidate === null ? 'null' : typeof record.brand_candidate,
+      model_candidate: record.model_candidate === null ? 'null' : typeof record.model_candidate,
+      color: typeof record.color, material: typeof record.material,
+      style_attributesIsArray: Array.isArray(record.style_attributes), search_termsIsArray: Array.isArray(record.search_terms),
+      confidenceType: typeof record.confidence, confidenceIsFinite: Number.isFinite(record.confidence),
+    }), JSON.stringify(record));
     throw new Error('Vision provider returned an invalid response');
   }
   return value as ObjectDescription;
@@ -80,7 +91,12 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>) {
   panel.appendChild(image);
 
   try {
-    const analysis = parseObjectDescription(await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', dataUrl: result.dataUrl }));
+    const requestId = crypto.randomUUID();
+    console.debug('[VCL message v2] request', requestId);
+    const response = await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', requestId, dataUrl: result.dataUrl });
+    console.debug('[VCL message v2] received', requestId, typeof response, JSON.stringify(response));
+    if (response && typeof response === 'object' && typeof response.error === 'string') throw new Error(response.error);
+    const analysis = parseObjectDescription(response);
     panel.firstElementChild!.textContent = 'VCL object understanding: success';
 
     const summary = document.createElement('div');
