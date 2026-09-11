@@ -110,7 +110,7 @@ export function capturePrimaryVideoFrame(maxDimension = 1280): FrameCaptureResul
 export function captureSelectionAtClientPoint(
   clientX: number,
   clientY: number,
-  cropFraction = 0.34,
+  cropFraction = 0.5,
   maxDimension = 640,
 ): FrameCaptureResult {
   const video = findPrimaryVisibleVideo();

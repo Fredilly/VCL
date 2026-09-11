@@ -8,6 +8,7 @@ export type ObjectDescription = {
   style_attributes: string[];
   search_terms: string[];
   confidence: number;
+  identity_confidence: number;
 };
 
 export function normalizeObjectDescription(value: unknown): ObjectDescription {
@@ -17,7 +18,9 @@ export function normalizeObjectDescription(value: unknown): ObjectDescription {
 
   const record = value as Record<string, unknown>;
   const confidence = Number(record.confidence ?? 0);
+  const identityConfidence = Number(record.identity_confidence ?? 0);
   if (!Number.isFinite(confidence)) throw new Error('Vision output had invalid confidence.');
+  if (!Number.isFinite(identityConfidence)) throw new Error('Vision output had invalid identity confidence.');
 
   return {
     category: typeof record.category === 'string' ? record.category : '',
@@ -29,6 +32,7 @@ export function normalizeObjectDescription(value: unknown): ObjectDescription {
     style_attributes: Array.isArray(record.style_attributes) ? record.style_attributes.map(String).slice(0, 12) : [],
     search_terms: Array.isArray(record.search_terms) ? record.search_terms.map(String).slice(0, 4) : [],
     confidence: Math.max(0, Math.min(1, confidence)),
+    identity_confidence: Math.max(0, Math.min(1, identityConfidence)),
   };
 }
 
