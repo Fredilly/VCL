@@ -12,11 +12,12 @@ const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringif
 function logSafeError(error: unknown) { console.error('VCL API error', error instanceof Error ? { name: error.name, message: error.message } : { name: typeof error, message: String(error) }); }
 
 function commerceProviders(env: Env): NamedCommerceProvider[] {
-  const serpapi = env.SERPAPI_API_KEY ? { name: 'serpapi', provider: new SerpApiCommerceProvider(env.SERPAPI_API_KEY) } : null;
-  const ebay = env.EBAY_ACCESS_TOKEN ? { name: 'ebay', provider: new EbayCommerceProvider(env.EBAY_ACCESS_TOKEN) } : null;
-  if (env.COMMERCE_PROVIDER === 'serpapi') return serpapi ? [serpapi] : [];
-  if (env.COMMERCE_PROVIDER === 'ebay') return ebay ? [ebay] : [];
-  return [serpapi, ebay].filter((entry): entry is NamedCommerceProvider => Boolean(entry));
+  const providers: NamedCommerceProvider[] = [];
+  if (env.SERPAPI_API_KEY) providers.push({ name: 'serpapi', provider: new SerpApiCommerceProvider(env.SERPAPI_API_KEY) });
+  if (env.EBAY_ACCESS_TOKEN) providers.push({ name: 'ebay', provider: new EbayCommerceProvider(env.EBAY_ACCESS_TOKEN) });
+  if (env.COMMERCE_PROVIDER === 'serpapi') return providers.filter(({ name }) => name === 'serpapi');
+  if (env.COMMERCE_PROVIDER === 'ebay') return providers.filter(({ name }) => name === 'ebay');
+  return providers;
 }
 
 function dedupeProducts(products: ProductCandidate[]) {
