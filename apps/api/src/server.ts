@@ -84,25 +84,38 @@ async function resolveProducts(
 }> {
   let attempts = 0;
   let sawProviderFailure = false;
+  let activeProviders = [...providers];
   const providersUsed = new Set<string>();
 
   for (const query of queries) {
+    if (activeProviders.length === 0) break;
+
     attempts += 1;
-    const settled = await Promise.allSettled(providers.map(async ({ name, provider }) => {
+    const providersForAttempt = [...activeProviders];
+    const settled = await Promise.allSettled(providersForAttempt.map(async ({ name, provider }) => {
       providersUsed.add(name);
       return provider.search(query);
     }));
 
     const products: ProductCandidate[] = [];
-    for (const result of settled) {
+    const failedProviders = new Set<string>();
+
+    settled.forEach((result, index) => {
+      const providerName = providersForAttempt[index].name;
       if (result.status === 'fulfilled') {
         products.push(...result.value);
-        continue;
+        return;
       }
-      if (!(result.reason instanceof CommerceNoResultsError)) {
-        sawProviderFailure = true;
-        logSafeError(result.reason);
-      }
+
+      if (result.reason instanceof CommerceNoResultsError) return;
+
+      sawProviderFailure = true;
+      failedProviders.add(providerName);
+      logSafeError(result.reason);
+    });
+
+    if (failedProviders.size > 0) {
+      activeProviders = activeProviders.filter(({ name }) => !failedProviders.has(name));
     }
 
     const deduped = dedupeProducts(products);
@@ -115,10 +128,20 @@ async function resolveProducts(
         attempts,
       };
     }
+
+    if (activeProviders.length === 0 && sawProviderFailure) {
+      return {
+        query,
+        products: [],
+        state: 'TEMPORARILY_UNAVAILABLE',
+        providers_used: [...providersUsed],
+        attempts,
+      };
+    }
   }
 
   return {
-    query: queries[queries.length - 1],
+    query: queries[Math.max(0, Math.min(attempts - 1, queries.length - 1))],
     products: [],
     state: sawProviderFailure ? 'TEMPORARILY_UNAVAILABLE' : 'NO_RESULTS',
     providers_used: [...providersUsed],
