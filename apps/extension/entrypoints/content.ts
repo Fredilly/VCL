@@ -38,7 +38,11 @@ function showOverlay() {
 }
 
 export default defineContentScript({
-  matches: ['<all_urls>'],
+  matches: [
+    'https://www.youtube.com/*',
+    'http://localhost/*',
+    'http://127.0.0.1/*',
+  ],
   main() {
     browser.runtime.onMessage.addListener((message) => {
       if (message?.type === 'VCL_TOGGLE_OVERLAY') {
