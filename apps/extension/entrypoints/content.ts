@@ -15,6 +15,20 @@ type ObjectDescription = {
   confidence: number;
 };
 
+function parseObjectDescription(value: unknown): ObjectDescription {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Vision provider returned an invalid response');
+  const record = value as Record<string, unknown>;
+  if (typeof record.category !== 'string' || typeof record.subcategory !== 'string' ||
+      !(record.brand_candidate === null || typeof record.brand_candidate === 'string') ||
+      !(record.model_candidate === null || typeof record.model_candidate === 'string') ||
+      typeof record.color !== 'string' || typeof record.material !== 'string' ||
+      !Array.isArray(record.style_attributes) || !Array.isArray(record.search_terms) ||
+      typeof record.confidence !== 'number' || !Number.isFinite(record.confidence)) {
+    throw new Error('Vision provider returned an invalid response');
+  }
+  return value as ObjectDescription;
+}
+
 function removeOverlay() {
   document.getElementById(OVERLAY_ID)?.remove();
 }
@@ -66,7 +80,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>) {
   panel.appendChild(image);
 
   try {
-    const analysis = (await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', dataUrl: result.dataUrl })) as ObjectDescription;
+    const analysis = parseObjectDescription(await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', dataUrl: result.dataUrl }));
     panel.firstElementChild!.textContent = 'VCL object understanding: success';
 
     const summary = document.createElement('div');

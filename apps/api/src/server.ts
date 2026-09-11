@@ -1,14 +1,32 @@
 import { createServer } from 'node:http';
-import { OpenAIVisionProvider } from './openai-vision.js';
+import { GroqVisionProvider } from './groq-vision.js';
+import { GeminiVisionProvider } from './gemini-vision.js';
+import { normalizeObjectDescription } from './types.js';
 
 const port = Number(process.env.PORT || 8787);
-const apiKey = process.env.OPENAI_API_KEY;
+const useGemini = process.env.VISION_PROVIDER === 'gemini';
+const apiKey = useGemini ? process.env.GEMINI_API_KEY : process.env.GROQ_API_KEY;
 if (!apiKey) {
-  console.error('Missing OPENAI_API_KEY');
+  console.error(`Missing ${useGemini ? 'GEMINI_API_KEY' : 'GROQ_API_KEY'}`);
   process.exit(1);
 }
 
-const provider = new OpenAIVisionProvider(apiKey);
+const provider = useGemini ? new GeminiVisionProvider(apiKey) : new GroqVisionProvider(apiKey);
+
+function logSafeError(error: unknown) {
+  if (!(error instanceof Error)) {
+    console.error('Vision error', { name: typeof error, message: String(error) });
+    return;
+  }
+  const cause = error.cause;
+  console.error('Vision error', {
+    name: error.name,
+    message: error.message,
+    cause: cause instanceof Error
+      ? { name: cause.name, code: (cause as NodeJS.ErrnoException).code, message: cause.message }
+      : undefined,
+  });
+}
 
 createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -34,9 +52,10 @@ createServer(async (req, res) => {
       return;
     }
 
-    const result = await provider.analyzeSelection(parsed.dataUrl);
+    const result = normalizeObjectDescription(await provider.analyzeSelection(parsed.dataUrl));
     res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(result));
   } catch (error) {
+    logSafeError(error);
     res.writeHead(500, { 'Content-Type': 'application/json' }).end(
       JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown analysis error' }),
     );
