@@ -1,6 +1,6 @@
 import { normalizeObjectDescription, type ObjectDescription, type VisionProvider } from './types.js';
 
-const PROMPT = 'Analyze only the selected object crop. Return JSON only with exactly these fields: category, subcategory, brand_candidate, model_candidate, color, material, style_attributes, search_terms, confidence.';
+const PROMPT = 'Analyze only the selected object crop. Return JSON only with exactly these fields: category, subcategory, brand_candidate, model_candidate, color, material, style_attributes, search_terms, confidence, identity_confidence. confidence is confidence that the description is commercially searchable. identity_confidence is confidence that the proposed brand/model identity is visually supported. If brand/model evidence is weak, use null and keep identity_confidence low. Do not infer a famous brand from style alone.';
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
 
 function imagePart(dataUrl: string) {
@@ -19,7 +19,6 @@ export class GeminiVisionProvider implements VisionProvider {
       body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: PROMPT }, { inlineData: image }] }], generationConfig: { responseMimeType: 'application/json', temperature: 0.2 } }),
     });
     let response = await send();
-    // Gemini capacity errors are transient. Allow two retries, then preserve the error.
     for (let retry = 0; response.status === 503 && retry < 2; retry++) {
       await response.body?.cancel();
       await new Promise<void>((resolve) => setTimeout(resolve, 1000 * 2 ** retry));
