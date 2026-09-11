@@ -44,10 +44,10 @@ function logSafeError(error: unknown): void {
 }
 
 function commerceProviders(env: Env): NamedCommerceProvider[] {
-  const serpapi = env.SERPAPI_API_KEY
+  const serpapi: NamedCommerceProvider | null = env.SERPAPI_API_KEY
     ? { name: 'serpapi', provider: new SerpApiCommerceProvider(env.SERPAPI_API_KEY) }
     : null;
-  const ebay = env.EBAY_ACCESS_TOKEN
+  const ebay: NamedCommerceProvider | null = env.EBAY_ACCESS_TOKEN
     ? { name: 'ebay', provider: new EbayCommerceProvider(env.EBAY_ACCESS_TOKEN) }
     : null;
 
