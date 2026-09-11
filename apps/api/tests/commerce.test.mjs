@@ -54,7 +54,9 @@ test('commerce errors expose stable resolver codes', () => {
 
 const ebaySource = await readFile(new URL('../src/ebay-commerce.ts', import.meta.url), 'utf8');
 const ebayContext = vm.createContext({
-  exports: { CommerceNoResultsError, CommerceProviderError },
+  exports: {},
+  CommerceNoResultsError,
+  CommerceProviderError,
   crypto: { randomUUID: () => 'generated' },
   URL,
   AbortSignal,
@@ -63,8 +65,7 @@ const ebayContext = vm.createContext({
       itemWebUrl: 'https://example.test/item', price: { value: '99.00', currency: 'USD' }, categories: [{ categoryName: 'Sneakers' }] }],
   }),
 });
-const compiledEbay = compile(stripImports(ebaySource));
-vm.runInContext(compiledEbay.replace('commerce_js_1.CommerceNoResultsError', 'exports.CommerceNoResultsError').replace('commerce_js_1.CommerceProviderError', 'exports.CommerceProviderError'), ebayContext);
+vm.runInContext(compile(stripImports(ebaySource)), ebayContext);
 const { EbayCommerceProvider } = ebayContext.exports;
 
 test('eBay adapter normalizes candidates and never emits EXACT', async () => {
