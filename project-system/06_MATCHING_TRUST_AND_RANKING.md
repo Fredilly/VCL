@@ -9,27 +9,56 @@ The system must distinguish:
 from
 - "Gucci Jordaan leather loafer, exact SKU."
 
+The commercial end goal is to identify the same product seen in the video where evidence permits, because users may specifically want what they saw on screen.
+
 ## Evidence hierarchy
 
 Use all available evidence:
 
 1. selected object pixels,
 2. neighboring frame(s) where permitted,
-3. logos/marks,
-4. colors/material/style,
-5. visual embeddings,
-6. textual model description,
-7. video title/description/context,
-8. merchant catalog similarity,
-9. verified creator/publisher metadata,
-10. historical interaction/conversion signals.
+3. logos/marks/text,
+4. distinctive product details,
+5. colors/material/style,
+6. visual embeddings,
+7. textual model description,
+8. video title/description/context,
+9. merchant catalog similarity,
+10. verified creator/publisher metadata,
+11. historical interaction/conversion signals.
 
 Verified first-party metadata may increase identity confidence but must be labeled by provenance.
+
+## Identity evidence rule
+
+Exact identity must be earned by evidence.
+
+A candidate should not become `EXACT` merely because:
+- the vision model guessed a brand or model,
+- the title contains matching keywords,
+- a shopping/search provider ranked it first,
+- it is visually similar,
+- it has better commercial terms.
+
+Prefer multiple independent signals that agree, such as:
+- visible logo or marking,
+- distinctive construction/design detail,
+- matching model family,
+- matching colorway/material,
+- candidate-image agreement,
+- contextual evidence from the video,
+- verified first-party metadata.
+
+Where evidence is incomplete, use `LIKELY` or `SIMILAR`.
 
 ## Result classes
 
 ### EXACT
-Use only when evidence is strong enough to support exact identity.
+Use only when evidence strongly supports the same product identity.
+
+`EXACT` should be optimized for precision, not coverage.
+
+False-exact claims are a critical trust failure.
 
 ### LIKELY
 Best candidate, meaningful uncertainty remains.
@@ -41,6 +70,20 @@ Not represented as the original item.
 A commercially promoted candidate.
 
 `SPONSORED` is orthogonal to relevance class. A sponsored item can be similar, but it cannot become exact by payment.
+
+## Candidate verification
+
+Product retrieval is only candidate generation.
+
+After retrieval:
+1. normalize candidates,
+2. compare candidate evidence against the selected object,
+3. score visual/text/context agreement,
+4. reject weak candidates,
+5. assign `EXACT`, `LIKELY`, or `SIMILAR`,
+6. only then apply commercial ranking.
+
+Search rank is not identity confidence.
 
 ## Relevance firewall
 
@@ -76,7 +119,30 @@ Example:
 - next frame reveals logo,
 - previous frame reveals full silhouette.
 
+Useful identity details may include:
+- logo,
+- watch face,
+- shoe sole,
+- bag clasp/hardware,
+- garment label,
+- jewelry shape,
+- distinctive stitching or trim.
+
 This is a potential differentiator over screenshot-only visual search.
+
+## Resolver reliability
+
+Commerce/provider failure must not be confused with identity failure.
+
+The resolver should:
+- time out slow providers,
+- distinguish no-results from provider errors,
+- broaden queries when appropriate,
+- use alternate providers when available,
+- cache allowed normalized results,
+- return a truthful degraded state rather than raw provider errors.
+
+The user experience should remain useful even when one provider fails.
 
 ## Ranking factors
 
@@ -84,6 +150,9 @@ Pre-commercial:
 - exact/visual similarity,
 - textual attribute similarity,
 - brand/model evidence,
+- distinctive-detail agreement,
+- multi-frame evidence,
+- contextual evidence,
 - catalog confidence.
 
 Post-relevance:
@@ -103,6 +172,11 @@ Every result card should be able to answer:
 - Is this claimed to be the original?
 - Is it sponsored?
 - Where will I go if I click?
+
+For `EXACT` and `LIKELY`, the system should eventually be able to expose a concise reason such as:
+- visible logo + matching model geometry,
+- matching distinctive hardware + catalog image,
+- creator metadata + visual agreement.
 
 ## Correction loop
 
