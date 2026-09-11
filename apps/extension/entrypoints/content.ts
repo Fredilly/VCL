@@ -1,4 +1,4 @@
-import { capturePrimaryVideoFrame, type FrameCaptureResult } from '../lib/frame-capture';
+import { captureSelectionAtClientPoint, type FrameCaptureResult } from '../lib/frame-capture';
 
 const OVERLAY_ID = 'vcl-overlay-root';
 const RESULT_ID = 'vcl-capture-result';
@@ -32,18 +32,22 @@ function showCaptureResult(result: FrameCaptureResult) {
   });
 
   const title = document.createElement('div');
-  title.textContent = result.ok ? 'VCL frame capture: success' : 'VCL frame capture: unsupported';
+  title.textContent = result.ok
+    ? result.crop
+      ? 'VCL object crop: success'
+      : 'VCL frame capture: success'
+    : 'VCL object crop: unsupported';
   Object.assign(title.style, { fontWeight: '700', marginBottom: '10px' });
   panel.appendChild(title);
 
   if (result.ok) {
     const image = document.createElement('img');
     image.src = result.dataUrl;
-    image.alt = 'Captured video frame';
+    image.alt = result.crop ? 'Selected object crop' : 'Captured video frame';
     Object.assign(image.style, {
       display: 'block',
       width: '100%',
-      maxHeight: '220px',
+      maxHeight: '260px',
       objectFit: 'contain',
       borderRadius: '10px',
       background: '#000',
@@ -52,8 +56,10 @@ function showCaptureResult(result: FrameCaptureResult) {
     panel.appendChild(image);
 
     const meta = document.createElement('div');
-    meta.textContent = `${result.sourceWidth}×${result.sourceHeight} → ${result.width}×${result.height} · ${result.currentTime.toFixed(2)}s · ${result.paused ? 'paused' : 'playing'}`;
-    Object.assign(meta.style, { opacity: '0.8' });
+    meta.textContent = result.crop
+      ? `crop ${result.crop.width}×${result.crop.height} @ (${result.crop.x}, ${result.crop.y}) · click (${result.crop.clickX}, ${result.crop.clickY}) · ${result.currentTime.toFixed(2)}s`
+      : `${result.sourceWidth}×${result.sourceHeight} → ${result.width}×${result.height} · ${result.currentTime.toFixed(2)}s`;
+    Object.assign(meta.style, { opacity: '0.8', lineHeight: '1.4' });
     panel.appendChild(meta);
   } else {
     const message = document.createElement('div');
@@ -87,12 +93,12 @@ function showOverlay() {
     position: 'fixed',
     inset: '0',
     zIndex: '2147483647',
-    background: 'rgba(0,0,0,0.18)',
+    background: 'rgba(0,0,0,0.12)',
     cursor: 'crosshair',
   });
 
   const label = document.createElement('div');
-  label.textContent = 'VCL · click to capture current video frame · Esc to close';
+  label.textContent = 'VCL · click the object you want · Esc to close';
   Object.assign(label.style, {
     position: 'fixed',
     top: '16px',
@@ -112,7 +118,7 @@ function showOverlay() {
     (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const result = capturePrimaryVideoFrame();
+      const result = captureSelectionAtClientPoint(event.clientX, event.clientY);
       removeOverlay();
       showCaptureResult(result);
     },
