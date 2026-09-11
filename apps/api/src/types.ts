@@ -6,10 +6,21 @@ export type ObjectDescription = {
   color: string;
   material: string;
   style_attributes: string[];
+  visible_text: string[];
+  logos_markings: string[];
+  distinctive_features: string[];
+  hardware_details: string[];
+  shape_silhouette: string[];
   search_terms: string[];
   confidence: number;
   identity_confidence: number;
 };
+
+function stringArray(value: unknown, limit: number): string[] {
+  return Array.isArray(value)
+    ? value.map(String).map((item) => item.trim()).filter(Boolean).slice(0, limit)
+    : [];
+}
 
 export function normalizeObjectDescription(value: unknown): ObjectDescription {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -29,8 +40,13 @@ export function normalizeObjectDescription(value: unknown): ObjectDescription {
     model_candidate: record.model_candidate == null ? null : String(record.model_candidate),
     color: typeof record.color === 'string' ? record.color : '',
     material: typeof record.material === 'string' ? record.material : '',
-    style_attributes: Array.isArray(record.style_attributes) ? record.style_attributes.map(String).slice(0, 12) : [],
-    search_terms: Array.isArray(record.search_terms) ? record.search_terms.map(String).slice(0, 4) : [],
+    style_attributes: stringArray(record.style_attributes, 12),
+    visible_text: stringArray(record.visible_text, 8),
+    logos_markings: stringArray(record.logos_markings, 8),
+    distinctive_features: stringArray(record.distinctive_features, 12),
+    hardware_details: stringArray(record.hardware_details, 8),
+    shape_silhouette: stringArray(record.shape_silhouette, 8),
+    search_terms: stringArray(record.search_terms, 4),
     confidence: Math.max(0, Math.min(1, confidence)),
     identity_confidence: Math.max(0, Math.min(1, identityConfidence)),
   };

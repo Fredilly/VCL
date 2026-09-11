@@ -49,21 +49,34 @@ function uniqueNonEmpty(parts: Array<string | null | undefined>): string[] {
   return [...new Set(parts.filter((value): value is string => Boolean(value && value.trim())).map((value) => value.trim()))];
 }
 
+function identityEvidence(description: ObjectDescription): string[] {
+  return uniqueNonEmpty([
+    ...description.visible_text,
+    ...description.logos_markings,
+    ...description.distinctive_features,
+    ...description.hardware_details,
+    ...description.shape_silhouette,
+  ]);
+}
+
 export function buildProductQuery(description: ObjectDescription): ProductQuery {
+  const evidence = identityEvidence(description);
   const parts = uniqueNonEmpty([
     description.brand_candidate,
     description.model_candidate,
     ...description.search_terms,
+    ...evidence,
   ]);
 
   const fallback = uniqueNonEmpty([
+    ...evidence,
     description.color,
     description.material,
     ...description.style_attributes,
     description.subcategory || description.category,
   ]).join(' ');
 
-  const query = parts.slice(0, 3).join(' ').trim() || fallback.trim();
+  const query = parts.slice(0, 4).join(' ').trim() || fallback.trim();
 
   return {
     query,
@@ -71,22 +84,31 @@ export function buildProductQuery(description: ObjectDescription): ProductQuery 
     subcategory: description.subcategory,
     brand: description.brand_candidate,
     model: description.model_candidate,
-    attributes: uniqueNonEmpty([description.color, description.material, ...description.style_attributes]),
+    attributes: uniqueNonEmpty([
+      ...evidence,
+      description.color,
+      description.material,
+      ...description.style_attributes,
+    ]),
   };
 }
 
 export function buildProductQueryVariants(description: ObjectDescription): ProductQuery[] {
   const base = buildProductQuery(description);
   const variants = [base.query];
+  const evidence = identityEvidence(description);
 
   const identity = uniqueNonEmpty([
     description.brand_candidate,
     description.model_candidate,
+    ...description.visible_text.slice(0, 2),
+    ...description.logos_markings.slice(0, 2),
     description.subcategory || description.category,
   ]).join(' ');
   if (identity) variants.push(identity);
 
   const visual = uniqueNonEmpty([
+    ...evidence.slice(0, 4),
     description.color,
     description.material,
     ...description.style_attributes.slice(0, 2),
