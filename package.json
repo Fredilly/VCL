@@ -4,6 +4,7 @@
   "packageManager": "pnpm@10.15.1",
   "scripts": {
     "dev": "pnpm --filter @vcl/extension dev",
+    "dev:api": "pnpm --filter @vcl/api dev",
     "build": "pnpm -r build",
     "check": "pnpm -r check"
   }
