@@ -55,6 +55,17 @@ function parseCommerceResponse(value: unknown): CommerceResponse {
   return value as CommerceResponse;
 }
 
+function surfaceContext() {
+  const youtubeTitle = document.querySelector('h1.ytd-watch-metadata yt-formatted-string')?.textContent?.trim()
+    || document.querySelector('h1.title yt-formatted-string')?.textContent?.trim()
+    || document.title.replace(/\s*-\s*YouTube\s*$/i, '').trim();
+  return {
+    platform: location.hostname.includes('youtube.com') ? 'youtube' : 'generic-html5',
+    title: youtubeTitle || null,
+    url: location.href,
+  };
+}
+
 function removeOverlay() { document.getElementById(OVERLAY_ID)?.remove(); }
 function removeResult() { document.getElementById(RESULT_ID)?.remove(); }
 
@@ -179,7 +190,12 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>) {
     Object.assign(identityConfidence.style, { opacity: '0.75', marginTop: '3px' });
     panel.appendChild(identityConfidence);
 
-    const commerceRaw = await browser.runtime.sendMessage({ type: 'VCL_RESOLVE_PRODUCTS', requestId: crypto.randomUUID(), description: analysis });
+    const commerceRaw = await browser.runtime.sendMessage({
+      type: 'VCL_RESOLVE_PRODUCTS',
+      requestId: crypto.randomUUID(),
+      description: analysis,
+      context: surfaceContext(),
+    });
     if (commerceRaw && typeof commerceRaw === 'object' && typeof commerceRaw.error === 'string') throw new Error(commerceRaw.error);
     renderProducts(panel, parseCommerceResponse(commerceRaw));
   } catch (error) {
