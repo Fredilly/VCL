@@ -37,7 +37,6 @@ export interface CommerceProvider {
 
 export class CommerceNoResultsError extends Error {
   readonly code = 'NO_RESULTS';
-
   constructor(message = 'No commerce results found.') {
     super(message);
     this.name = 'CommerceNoResultsError';
@@ -46,7 +45,6 @@ export class CommerceNoResultsError extends Error {
 
 export class CommerceProviderError extends Error {
   readonly code = 'COMMERCE_PROVIDER_ERROR';
-
   constructor(message: string) {
     super(message);
     this.name = 'CommerceProviderError';
@@ -69,18 +67,28 @@ const TYPE_TERMS: Record<string, string[]> = {
   mug: ['mug', 'cup'],
 };
 
+const COLORS = ['black', 'white', 'grey', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'navy', 'purple', 'pink', 'brown', 'beige', 'cream', 'gold', 'silver'];
+const MATERIALS = ['cotton', 'wool', 'cashmere', 'leather', 'suede', 'silk', 'linen', 'polyester', 'nylon', 'denim', 'ceramic', 'metal', 'glass', 'plastic'];
+
 function normalized(value: string | null | undefined): string {
   return (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
-function containsPhrase(haystack: string, needle: string): boolean {
+function containsPhrase(haystack: string, needle: string | null | undefined): boolean {
   const value = normalized(needle);
-  return Boolean(value) && normalized(haystack).includes(value);
+  return Boolean(value) && ` ${normalized(haystack)} `.includes(` ${value} `);
 }
 
 function typeFamilies(value: string): Set<string> {
   const text = normalized(value);
-  return new Set(Object.entries(TYPE_TERMS).filter(([, terms]) => terms.some((term) => text.includes(normalized(term)))).map(([family]) => family));
+  return new Set(Object.entries(TYPE_TERMS)
+    .filter(([, terms]) => terms.some((term) => containsPhrase(text, term)))
+    .map(([family]) => family));
+}
+
+function namedValues(value: string, vocabulary: string[]): Set<string> {
+  const text = normalized(value);
+  return new Set(vocabulary.filter((term) => containsPhrase(text, term)));
 }
 
 function evidenceMatch(title: string, values: string[]): boolean {
@@ -90,58 +98,34 @@ function evidenceMatch(title: string, values: string[]): boolean {
   });
 }
 
-function trustedContextTypes(description: ObjectDescription, context?: ProductContext): Set<string> {
-  if (!context?.title || !description.brand_candidate) return new Set();
-  if (!containsPhrase(context.title, description.brand_candidate)) return new Set();
-  return typeFamilies(context.title);
-}
-
-function contextQuery(description: ObjectDescription, context?: ProductContext): string | null {
-  const types = trustedContextTypes(description, context);
-  if (!description.brand_candidate || types.size === 0) return null;
-  return `${description.brand_candidate} ${[...types][0]}`.trim();
-}
-
-export function verifyProductCandidate(description: ObjectDescription, candidate: ProductCandidate, context?: ProductContext): ProductCandidate | null {
-  const title = candidate.title || '';
-  const selectedTypeText = [
-    description.category,
+function visualTypeText(description: ObjectDescription): string {
+  return [
     description.subcategory,
+    description.category,
     ...description.style_attributes,
     ...description.distinctive_features,
     ...description.shape_silhouette,
     ...description.search_terms,
   ].join(' ');
-  const visualTypes = typeFamilies(selectedTypeText);
-  const contextTypes = trustedContextTypes(description, context);
-  const selectedTypes = contextTypes.size ? contextTypes : visualTypes;
-  const candidateTypes = typeFamilies(title);
-  const reasons: string[] = [];
-  let score = 0;
+}
 
-  if (selectedTypes.size && candidateTypes.size && ![...selectedTypes].some((type) => candidateTypes.has(type))) return null;
+function contextTypes(description: ObjectDescription, context?: ProductContext): Set<string> {
+  if (!context?.title) return new Set();
+  const types = typeFamilies(context.title);
+  if (!types.size) return types;
+  if (description.brand_candidate && containsPhrase(context.title, description.brand_candidate)) return types;
+  const visualTypes = typeFamilies(visualTypeText(description));
+  return visualTypes.size === 0 && types.size === 1 ? types : new Set();
+}
 
-  const selectedBrand = description.brand_candidate;
-  const brandMatches = Boolean(selectedBrand && containsPhrase(title, selectedBrand));
-  if (brandMatches) { score += 30; reasons.push('brand matches title'); }
-  else if (selectedBrand && candidate.brand && normalized(candidate.brand) === normalized(selectedBrand)) { score += 12; reasons.push('provider brand corroborates selection'); }
+function selectedTypes(description: ObjectDescription, context?: ProductContext): Set<string> {
+  const contextual = contextTypes(description, context);
+  return contextual.size ? contextual : typeFamilies(visualTypeText(description));
+}
 
-  const modelMatches = Boolean(description.model_candidate && containsPhrase(title, description.model_candidate));
-  if (modelMatches) { score += 35; reasons.push('model/product family matches title'); }
-
-  const typeMatches = selectedTypes.size > 0 && [...selectedTypes].some((type) => candidateTypes.has(type));
-  if (typeMatches) { score += 25; reasons.push('product type matches'); }
-  if (contextTypes.size) { score += 10; reasons.push('surface context agrees with selected brand'); }
-
-  const attributes = [description.color, description.material].filter(Boolean);
-  if (evidenceMatch(title, attributes)) { score += 5; reasons.push('color or material agrees'); }
-  if (evidenceMatch(title, [...description.visible_text, ...description.logos_markings])) { score += 10; reasons.push('visible text or logo agrees'); }
-  if (evidenceMatch(title, [...description.distinctive_features, ...description.shape_silhouette])) { score += 8; reasons.push('distinctive detail or silhouette agrees'); }
-
-  const identityStrong = modelMatches || (brandMatches && typeMatches);
-  const resultClass = identityStrong && score >= 55 ? 'LIKELY' : score >= 25 ? 'SIMILAR' : null;
-  if (!resultClass) return null;
-  return { ...candidate, result_class: resultClass, verification_score: score, verification_reasons: reasons };
+function primaryType(description: ObjectDescription, context?: ProductContext): string | null {
+  const types = selectedTypes(description, context);
+  return types.size ? [...types][0] : null;
 }
 
 function uniqueNonEmpty(parts: Array<string | null | undefined>): string[] {
@@ -158,24 +142,103 @@ function identityEvidence(description: ObjectDescription): string[] {
   ]);
 }
 
-export function buildProductQuery(description: ObjectDescription): ProductQuery {
+export function verifyProductCandidate(description: ObjectDescription, candidate: ProductCandidate, context?: ProductContext): ProductCandidate | null {
+  const title = candidate.title || '';
+  const expectedTypes = selectedTypes(description, context);
+  const candidateTypes = typeFamilies(title);
+  const reasons: string[] = [];
+  let score = 0;
+
+  if (expectedTypes.size && candidateTypes.size && ![...expectedTypes].some((type) => candidateTypes.has(type))) return null;
+
+  const expectedColor = normalized(description.color);
+  const candidateColors = namedValues(title, COLORS);
+  if (expectedColor && candidateColors.size) {
+    const colorMatches = [...candidateColors].some((color) => color === expectedColor || (expectedColor === 'grey' && color === 'gray') || (expectedColor === 'gray' && color === 'grey'));
+    if (!colorMatches) return null;
+    score += 15;
+    reasons.push('color matches');
+  }
+
+  const expectedMaterial = normalized(description.material);
+  const candidateMaterials = namedValues(title, MATERIALS);
+  if (expectedMaterial && candidateMaterials.size) {
+    if (!candidateMaterials.has(expectedMaterial)) score -= 15;
+    else {
+      score += 8;
+      reasons.push('material matches');
+    }
+  }
+
+  const selectedBrand = description.brand_candidate;
+  const brandMatches = Boolean(selectedBrand && containsPhrase(title, selectedBrand));
+  if (brandMatches) {
+    score += 30;
+    reasons.push('brand matches title');
+  } else if (selectedBrand && candidate.brand && normalized(candidate.brand) === normalized(selectedBrand)) {
+    score += 12;
+    reasons.push('provider brand corroborates selection');
+  }
+
+  const modelMatches = Boolean(description.model_candidate && containsPhrase(title, description.model_candidate));
+  if (modelMatches) {
+    score += 35;
+    reasons.push('model/product family matches title');
+  }
+
+  const typeMatches = expectedTypes.size > 0 && [...expectedTypes].some((type) => candidateTypes.has(type));
+  if (typeMatches) {
+    score += 25;
+    reasons.push('product type matches');
+  }
+  if (contextTypes(description, context).size) {
+    score += 8;
+    reasons.push('surface context supports product type');
+  }
+
+  if (evidenceMatch(title, [...description.visible_text, ...description.logos_markings])) {
+    score += 10;
+    reasons.push('visible text or logo agrees');
+  }
+  if (evidenceMatch(title, [...description.distinctive_features, ...description.shape_silhouette])) {
+    score += 8;
+    reasons.push('distinctive detail or silhouette agrees');
+  }
+
+  const identityStrong = modelMatches || (brandMatches && typeMatches);
+  const resultClass = identityStrong && score >= 55 ? 'LIKELY' : score >= 25 ? 'SIMILAR' : null;
+  if (!resultClass) return null;
+  return { ...candidate, result_class: resultClass, verification_score: score, verification_reasons: reasons };
+}
+
+export function buildProductQuery(description: ObjectDescription, context?: ProductContext): ProductQuery {
+  const type = primaryType(description, context);
   const evidence = identityEvidence(description);
-  const parts = uniqueNonEmpty([
+  const strongestEvidence = uniqueNonEmpty([
+    ...description.visible_text,
+    ...description.logos_markings,
+    ...description.distinctive_features,
+    ...description.shape_silhouette,
+  ]).slice(0, 2);
+
+  const ordered = uniqueNonEmpty([
     description.brand_candidate,
     description.model_candidate,
-    ...description.search_terms,
-    ...evidence,
+    type,
+    description.color,
+    description.material,
+    ...strongestEvidence,
   ]);
 
   const fallback = uniqueNonEmpty([
-    ...evidence,
+    type,
     description.color,
     description.material,
-    ...description.style_attributes,
-    description.subcategory || description.category,
-  ]).join(' ');
+    ...description.style_attributes.slice(0, 2),
+    ...description.search_terms.slice(0, 1),
+  ]);
 
-  const query = parts.slice(0, 4).join(' ').trim() || fallback.trim();
+  const query = ordered.join(' ').trim() || fallback.join(' ').trim();
 
   return {
     query,
@@ -184,34 +247,33 @@ export function buildProductQuery(description: ObjectDescription): ProductQuery 
     brand: description.brand_candidate,
     model: description.model_candidate,
     attributes: uniqueNonEmpty([
-      ...evidence,
+      type,
       description.color,
       description.material,
+      ...evidence,
       ...description.style_attributes,
     ]),
   };
 }
 
 export function buildProductQueryVariants(description: ObjectDescription, context?: ProductContext): ProductQuery[] {
-  const base = buildProductQuery(description);
-  const variants = [contextQuery(description, context), base.query].filter((value): value is string => Boolean(value));
-  const evidence = identityEvidence(description);
+  const base = buildProductQuery(description, context);
+  const type = primaryType(description, context);
+  const variants = [base.query];
 
   const identity = uniqueNonEmpty([
     description.brand_candidate,
     description.model_candidate,
-    ...description.visible_text.slice(0, 2),
-    ...description.logos_markings.slice(0, 2),
-    description.subcategory || description.category,
+    type,
+    description.color,
   ]).join(' ');
   if (identity) variants.push(identity);
 
   const visual = uniqueNonEmpty([
-    ...evidence.slice(0, 4),
+    type,
     description.color,
     description.material,
     ...description.style_attributes.slice(0, 2),
-    description.subcategory || description.category,
   ]).join(' ');
   if (visual) variants.push(visual);
 
