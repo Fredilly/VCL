@@ -11,14 +11,16 @@ export default defineBackground(() => {
 
     const requestId = message.requestId;
     const endpoint = isVision ? 'analyze-selection' : 'resolve-products';
-    const body = isVision ? { dataUrl: message.dataUrl } : message.description;
-    console.debug('[VCL message v3] start', { requestId, endpoint, tabId: sender.tab?.id, frameId: sender.frameId });
+    const body = isVision
+      ? { dataUrl: message.dataUrl }
+      : { description: message.description, context: message.context ?? null };
+    console.debug('[VCL message v4] start', { requestId, endpoint, tabId: sender.tab?.id, frameId: sender.frameId });
 
     void fetch(`https://api.vcl.article6.org/${endpoint}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     }).then(async (response) => {
       const payload = await response.json();
-      console.debug('[VCL message v3] fetch JSON', requestId, endpoint, response.status, JSON.stringify(payload));
+      console.debug('[VCL message v4] fetch JSON', requestId, endpoint, response.status, JSON.stringify(payload));
       if (!response.ok) throw new Error(payload?.error || `VCL API failed with HTTP ${response.status}`);
       sendResponse(payload);
     }).catch((error: unknown) => {
