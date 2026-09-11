@@ -9,6 +9,12 @@ export type ProductQuery = {
   attributes: string[];
 };
 
+export type ProductContext = {
+  platform?: string | null;
+  title?: string | null;
+  url?: string | null;
+};
+
 export type ProductCandidate = {
   id: string;
   title: string;
@@ -84,7 +90,19 @@ function evidenceMatch(title: string, values: string[]): boolean {
   });
 }
 
-export function verifyProductCandidate(description: ObjectDescription, candidate: ProductCandidate): ProductCandidate | null {
+function trustedContextTypes(description: ObjectDescription, context?: ProductContext): Set<string> {
+  if (!context?.title || !description.brand_candidate) return new Set();
+  if (!containsPhrase(context.title, description.brand_candidate)) return new Set();
+  return typeFamilies(context.title);
+}
+
+function contextQuery(description: ObjectDescription, context?: ProductContext): string | null {
+  const types = trustedContextTypes(description, context);
+  if (!description.brand_candidate || types.size === 0) return null;
+  return `${description.brand_candidate} ${[...types][0]}`.trim();
+}
+
+export function verifyProductCandidate(description: ObjectDescription, candidate: ProductCandidate, context?: ProductContext): ProductCandidate | null {
   const title = candidate.title || '';
   const selectedTypeText = [
     description.category,
@@ -94,11 +112,10 @@ export function verifyProductCandidate(description: ObjectDescription, candidate
     ...description.shape_silhouette,
     ...description.search_terms,
   ].join(' ');
-  // Provider category metadata may simply echo our query category, so product type
-  // verification is grounded in the candidate's own title instead.
-  const candidateTypeText = title;
-  const selectedTypes = typeFamilies(selectedTypeText);
-  const candidateTypes = typeFamilies(candidateTypeText);
+  const visualTypes = typeFamilies(selectedTypeText);
+  const contextTypes = trustedContextTypes(description, context);
+  const selectedTypes = contextTypes.size ? contextTypes : visualTypes;
+  const candidateTypes = typeFamilies(title);
   const reasons: string[] = [];
   let score = 0;
 
@@ -112,15 +129,16 @@ export function verifyProductCandidate(description: ObjectDescription, candidate
   const modelMatches = Boolean(description.model_candidate && containsPhrase(title, description.model_candidate));
   if (modelMatches) { score += 35; reasons.push('model/product family matches title'); }
 
-  if (selectedTypes.size && candidateTypes.size && [...selectedTypes].some((type) => candidateTypes.has(type))) { score += 25; reasons.push('product type matches'); }
-  else if (selectedTypes.size && candidateTypes.size) score -= 30;
+  const typeMatches = selectedTypes.size > 0 && [...selectedTypes].some((type) => candidateTypes.has(type));
+  if (typeMatches) { score += 25; reasons.push('product type matches'); }
+  if (contextTypes.size) { score += 10; reasons.push('surface context agrees with selected brand'); }
 
   const attributes = [description.color, description.material].filter(Boolean);
   if (evidenceMatch(title, attributes)) { score += 5; reasons.push('color or material agrees'); }
   if (evidenceMatch(title, [...description.visible_text, ...description.logos_markings])) { score += 10; reasons.push('visible text or logo agrees'); }
   if (evidenceMatch(title, [...description.distinctive_features, ...description.shape_silhouette])) { score += 8; reasons.push('distinctive detail or silhouette agrees'); }
 
-  const identityStrong = modelMatches || (brandMatches && selectedTypes.size > 0 && [...selectedTypes].some((type) => candidateTypes.has(type)));
+  const identityStrong = modelMatches || (brandMatches && typeMatches);
   const resultClass = identityStrong && score >= 55 ? 'LIKELY' : score >= 25 ? 'SIMILAR' : null;
   if (!resultClass) return null;
   return { ...candidate, result_class: resultClass, verification_score: score, verification_reasons: reasons };
@@ -174,9 +192,9 @@ export function buildProductQuery(description: ObjectDescription): ProductQuery 
   };
 }
 
-export function buildProductQueryVariants(description: ObjectDescription): ProductQuery[] {
+export function buildProductQueryVariants(description: ObjectDescription, context?: ProductContext): ProductQuery[] {
   const base = buildProductQuery(description);
-  const variants = [base.query];
+  const variants = [contextQuery(description, context), base.query].filter((value): value is string => Boolean(value));
   const evidence = identityEvidence(description);
 
   const identity = uniqueNonEmpty([
