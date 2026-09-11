@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>VCL HTML5 Video Test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 40px; background: #111; color: #fff; }
+    main { max-width: 960px; margin: 0 auto; }
+    video { width: 100%; max-height: 70vh; background: #000; margin-top: 20px; }
+    input { margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>VCL HTML5 Video Test</h1>
+    <p>Select any local MP4/WebM/MOV file. The page creates a normal HTML5 video element from a local blob URL so VCL can test generic frame capture without third-party player or DRM variables.</p>
+    <input id="file" type="file" accept="video/*" />
+    <video id="video" controls playsinline></video>
+  </main>
+
+  <script>
+    const input = document.getElementById('file');
+    const video = document.getElementById('video');
+    let objectUrl;
+
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = URL.createObjectURL(file);
+      video.src = objectUrl;
+      video.load();
+    });
+
+    window.addEventListener('beforeunload', () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    });
+  </script>
+</body>
+</html>
