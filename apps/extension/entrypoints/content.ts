@@ -13,6 +13,7 @@ type ObjectDescription = {
   style_attributes: string[];
   search_terms: string[];
   confidence: number;
+  identity_confidence: number;
 };
 
 type ProductCandidate = {
@@ -29,6 +30,7 @@ type CommerceResponse = {
   query: { query: string };
   products: ProductCandidate[];
   latency_ms: number;
+  state?: 'RESULTS' | 'NO_RESULTS' | 'TEMPORARILY_UNAVAILABLE';
 };
 
 function parseObjectDescription(value: unknown): ObjectDescription {
@@ -39,7 +41,8 @@ function parseObjectDescription(value: unknown): ObjectDescription {
       !(record.model_candidate === null || typeof record.model_candidate === 'string') ||
       typeof record.color !== 'string' || typeof record.material !== 'string' ||
       !Array.isArray(record.style_attributes) || !Array.isArray(record.search_terms) ||
-      typeof record.confidence !== 'number' || !Number.isFinite(record.confidence)) {
+      typeof record.confidence !== 'number' || !Number.isFinite(record.confidence) ||
+      typeof record.identity_confidence !== 'number' || !Number.isFinite(record.identity_confidence)) {
     throw new Error('Vision provider returned an invalid response');
   }
   return value as ObjectDescription;
@@ -72,10 +75,16 @@ function basePanel(titleText: string) {
   return panel;
 }
 
+function button(text: string) {
+  const element = document.createElement('button');
+  element.textContent = text;
+  Object.assign(element.style, { padding: '7px 10px', border: '0', borderRadius: '8px', cursor: 'pointer' });
+  return element;
+}
+
 function addClose(panel: HTMLElement) {
-  const close = document.createElement('button');
-  close.textContent = 'Close';
-  Object.assign(close.style, { marginTop: '12px', padding: '7px 10px', border: '0', borderRadius: '8px', cursor: 'pointer' });
+  const close = button('Close');
+  Object.assign(close.style, { marginTop: '12px' });
   close.addEventListener('click', removeResult);
   panel.appendChild(close);
 }
@@ -96,7 +105,9 @@ function renderProducts(panel: HTMLElement, commerce: CommerceResponse) {
 
   if (!commerce.products.length) {
     const empty = document.createElement('div');
-    empty.textContent = 'No useful product candidates returned.';
+    empty.textContent = commerce.state === 'TEMPORARILY_UNAVAILABLE'
+      ? 'Shopping sources are temporarily unavailable. Try again.'
+      : 'No useful product candidates returned.';
     Object.assign(empty.style, { opacity: '0.75' });
     panel.appendChild(empty);
     return;
@@ -163,6 +174,11 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>) {
     Object.assign(confidence.style, { opacity: '0.75' });
     panel.appendChild(confidence);
 
+    const identityConfidence = document.createElement('div');
+    identityConfidence.textContent = `Identity confidence: ${Math.round(analysis.identity_confidence * 100)}%`;
+    Object.assign(identityConfidence.style, { opacity: '0.75', marginTop: '3px' });
+    panel.appendChild(identityConfidence);
+
     const commerceRaw = await browser.runtime.sendMessage({ type: 'VCL_RESOLVE_PRODUCTS', requestId: crypto.randomUUID(), description: analysis });
     if (commerceRaw && typeof commerceRaw === 'object' && typeof commerceRaw.error === 'string') throw new Error(commerceRaw.error);
     renderProducts(panel, parseCommerceResponse(commerceRaw));
@@ -173,6 +189,52 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>) {
     panel.appendChild(message);
   }
 
+  addClose(panel);
+}
+
+function showSelectionPreview(clientX: number, clientY: number) {
+  let cropFraction = 0.5;
+  let capture = captureSelectionAtClientPoint(clientX, clientY, cropFraction);
+  if (!capture.ok) { showFailure(capture); return; }
+
+  const panel = basePanel('VCL selection · adjust before analyzing');
+  const image = document.createElement('img');
+  image.alt = 'Selected object crop preview';
+  Object.assign(image.style, { display: 'block', width: '100%', maxHeight: '220px', objectFit: 'contain', borderRadius: '10px', background: '#000', marginBottom: '10px' });
+  panel.appendChild(image);
+
+  const cropLabel = document.createElement('div');
+  Object.assign(cropLabel.style, { opacity: '0.7', marginBottom: '10px' });
+  panel.appendChild(cropLabel);
+
+  const controls = document.createElement('div');
+  Object.assign(controls.style, { display: 'flex', gap: '8px', flexWrap: 'wrap' });
+  const tighter = button('− Tighter');
+  const wider = button('+ Wider');
+  const analyze = button('Analyze');
+  Object.assign(analyze.style, { fontWeight: '700' });
+  controls.append(tighter, wider, analyze);
+  panel.appendChild(controls);
+
+  const refresh = () => {
+    const next = captureSelectionAtClientPoint(clientX, clientY, cropFraction);
+    if (!next.ok) { showFailure(next); return; }
+    capture = next;
+    image.src = capture.dataUrl;
+    cropLabel.textContent = `Selection size: ${Math.round(cropFraction * 100)}% · use − / + until the whole object is visible`;
+  };
+
+  tighter.addEventListener('click', () => {
+    cropFraction = Math.max(0.22, Math.round((cropFraction - 0.1) * 100) / 100);
+    refresh();
+  });
+  wider.addEventListener('click', () => {
+    cropFraction = Math.min(0.9, Math.round((cropFraction + 0.1) * 100) / 100);
+    refresh();
+  });
+  analyze.addEventListener('click', () => { if (capture.ok) void showAnalysis(capture); });
+
+  refresh();
   addClose(panel);
 }
 
@@ -187,9 +249,10 @@ function showOverlay() {
   root.appendChild(label);
   root.addEventListener('click', (event) => {
     event.preventDefault(); event.stopPropagation();
-    const capture = captureSelectionAtClientPoint(event.clientX, event.clientY);
+    const clientX = event.clientX;
+    const clientY = event.clientY;
     removeOverlay();
-    if (capture.ok) void showAnalysis(capture); else showFailure(capture);
+    showSelectionPreview(clientX, clientY);
   }, { once: true, capture: true });
   document.documentElement.appendChild(root);
 }
