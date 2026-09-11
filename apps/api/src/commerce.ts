@@ -86,8 +86,17 @@ function evidenceMatch(title: string, values: string[]): boolean {
 
 export function verifyProductCandidate(description: ObjectDescription, candidate: ProductCandidate): ProductCandidate | null {
   const title = candidate.title || '';
-  const selectedTypeText = `${description.category} ${description.subcategory} ${description.shape_silhouette.join(' ')}`;
-  const candidateTypeText = `${title} ${candidate.category ?? ''}`;
+  const selectedTypeText = [
+    description.category,
+    description.subcategory,
+    ...description.style_attributes,
+    ...description.distinctive_features,
+    ...description.shape_silhouette,
+    ...description.search_terms,
+  ].join(' ');
+  // Provider category metadata may simply echo our query category, so product type
+  // verification is grounded in the candidate's own title instead.
+  const candidateTypeText = title;
   const selectedTypes = typeFamilies(selectedTypeText);
   const candidateTypes = typeFamilies(candidateTypeText);
   const reasons: string[] = [];
