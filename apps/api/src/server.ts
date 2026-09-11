@@ -1,12 +1,15 @@
 import { GeminiVisionProvider } from './gemini-vision.js';
 import { GroqVisionProvider } from './groq-vision.js';
 import { normalizeObjectDescription } from './types.js';
+import { buildProductQuery } from './commerce.js';
+import { EbayCommerceProvider } from './ebay-commerce.js';
 
 export interface Env {
   GEMINI_API_KEY?: string;
   GROQ_API_KEY?: string;
   VISION_PROVIDER?: string;
   GEMINI_MODEL?: string;
+  EBAY_ACCESS_TOKEN?: string;
 }
 
 const corsHeaders = {
@@ -23,28 +26,42 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function logSafeError(error: unknown): void {
-  console.error('Vision error', error instanceof Error ? { name: error.name, message: error.message } : { name: typeof error, message: String(error) });
+  console.error('VCL API error', error instanceof Error ? { name: error.name, message: error.message } : { name: typeof error, message: String(error) });
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
     const url = new URL(request.url);
-    if (request.method !== 'POST' || url.pathname !== '/analyze-selection') return jsonResponse({ error: 'Not found' }, 404);
+    if (request.method !== 'POST') return jsonResponse({ error: 'Not found' }, 404);
 
     try {
-      const parsed: unknown = await request.json();
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return jsonResponse({ error: 'dataUrl image is required' }, 400);
-      const dataUrl = (parsed as { dataUrl?: unknown }).dataUrl;
-      if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return jsonResponse({ error: 'dataUrl image is required' }, 400);
-      const useGemini = env.VISION_PROVIDER === 'gemini';
-      const apiKey = useGemini ? env.GEMINI_API_KEY : env.GROQ_API_KEY;
-      if (!apiKey) return jsonResponse({ error: `Missing ${useGemini ? 'GEMINI_API_KEY' : 'GROQ_API_KEY'}` }, 500);
-      const provider = useGemini ? new GeminiVisionProvider(apiKey, env.GEMINI_MODEL) : new GroqVisionProvider(apiKey);
-      return jsonResponse(normalizeObjectDescription(await provider.analyzeSelection(dataUrl)));
+      if (url.pathname === '/analyze-selection') {
+        const parsed: unknown = await request.json();
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return jsonResponse({ error: 'dataUrl image is required' }, 400);
+        const dataUrl = (parsed as { dataUrl?: unknown }).dataUrl;
+        if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return jsonResponse({ error: 'dataUrl image is required' }, 400);
+        const useGemini = env.VISION_PROVIDER === 'gemini';
+        const apiKey = useGemini ? env.GEMINI_API_KEY : env.GROQ_API_KEY;
+        if (!apiKey) return jsonResponse({ error: `Missing ${useGemini ? 'GEMINI_API_KEY' : 'GROQ_API_KEY'}` }, 500);
+        const provider = useGemini ? new GeminiVisionProvider(apiKey, env.GEMINI_MODEL) : new GroqVisionProvider(apiKey);
+        return jsonResponse(normalizeObjectDescription(await provider.analyzeSelection(dataUrl)));
+      }
+
+      if (url.pathname === '/resolve-products') {
+        const description = normalizeObjectDescription(await request.json());
+        if (!env.EBAY_ACCESS_TOKEN) return jsonResponse({ error: 'Missing EBAY_ACCESS_TOKEN' }, 503);
+        const query = buildProductQuery(description);
+        const provider = new EbayCommerceProvider(env.EBAY_ACCESS_TOKEN);
+        const started = Date.now();
+        const products = await provider.search(query);
+        return jsonResponse({ query, products, latency_ms: Date.now() - started });
+      }
+
+      return jsonResponse({ error: 'Not found' }, 404);
     } catch (error) {
       logSafeError(error);
-      return jsonResponse({ error: error instanceof Error ? error.message : 'Unknown analysis error' }, 500);
+      return jsonResponse({ error: error instanceof Error ? error.message : 'Unknown API error' }, 500);
     }
   },
 };
