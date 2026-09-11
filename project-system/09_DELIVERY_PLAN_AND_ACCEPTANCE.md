@@ -16,6 +16,31 @@ Acceptance:
 
 No production polish required.
 
+## Phase 1B — Product-resolution hardening
+
+Before treating the commerce loop as launch-ready, complete Spike 4b–4f.
+
+Acceptance:
+- commerce resolver has bounded provider timeouts,
+- no-result and provider-error states are distinct,
+- query broadening/fallback works,
+- one provider failure does not become a raw user-facing error where an alternate path exists,
+- product retrieval latency is measured,
+- exact/likely/similar classification is evidence-based,
+- known-product benchmark exists for exact-match evaluation.
+
+Initial performance targets:
+- P50 product-resolution latency <= 3 seconds where practical,
+- P95 <= 6 seconds where practical,
+- >99% graceful response rate,
+- commercially useful result in >= 70% of curated cases.
+
+`Graceful response` means:
+- useful candidates returned, or
+- a truthful low-confidence/no-result/temporarily-unavailable state.
+
+It does not mean every provider succeeds.
+
 ## Phase 2 — Magic prototype
 
 Integrate full flow.
@@ -23,12 +48,12 @@ Integrate full flow.
 Acceptance test:
 
 1. Open a supported YouTube video with visible shoes/watch/bag/apparel.
-2. Pause.
-3. Invoke extension.
-4. Click item.
-5. Results appear.
-6. At least one result is commercially useful OR system truthfully reports low confidence.
-7. No result misrepresents a sponsored/similar item as exact.
+2. Invoke extension during playback or while paused.
+3. Click item.
+4. Results appear.
+5. At least one result is commercially useful OR system truthfully reports low confidence/no useful result.
+6. No result misrepresents a sponsored/similar item as exact.
+7. Slow or failed commerce providers do not block indefinitely.
 
 Target:
 10 manually selected benchmark videos.
@@ -44,10 +69,19 @@ Create a reproducible benchmark:
 
 Record:
 - object description quality,
-- exact/likely classification quality,
+- exact precision,
+- likely precision,
+- false-exact rate,
 - useful result rate,
-- latency,
+- no-result rate,
+- P50/P95 latency,
+- provider failure rate,
 - cost.
+
+Exact identity benchmark:
+- use known ground-truth products where possible,
+- measure exact-match precision separately from similar-product usefulness,
+- never improve exact coverage by tolerating false-exact claims.
 
 Do not tune only on anecdotal demos.
 
@@ -60,6 +94,7 @@ Requirements:
 - clear permissions,
 - error telemetry,
 - unsupported-content state,
+- graceful commerce-provider degradation,
 - no Amazon Associates dependency,
 - no DRM circumvention,
 - uninstall/disable works cleanly.
@@ -72,6 +107,7 @@ Target:
 Continue only if:
 - users repeat the action,
 - useful-result rate is strong,
+- exact/likely identification is improving without false-exact trust failures,
 - product resolution is meaningfully better than manual screenshot/search friction,
 - costs are low,
 - platform fragility is manageable,
