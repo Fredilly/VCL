@@ -1,0 +1,12 @@
+{
+  "itemSummaries": [
+    {
+      "itemId": "123",
+      "title": "Nike Air Max 90 White",
+      "image": { "imageUrl": "https://example.test/image.jpg" },
+      "itemWebUrl": "https://example.test/item",
+      "price": { "value": "99.00", "currency": "USD" },
+      "categories": [{ "categoryName": "Sneakers" }]
+    }
+  ]
+}
