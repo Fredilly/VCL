@@ -37,7 +37,7 @@ function isNoResultsMessage(message: string): boolean {
 }
 
 export class SerpApiCommerceProvider implements CommerceProvider {
-  constructor(private readonly apiKey: string, private readonly timeoutMs = 2500) {}
+  constructor(private readonly apiKey: string, private readonly timeoutMs = 5000) {}
 
   async search(query: ProductQuery): Promise<ProductCandidate[]> {
     const url = new URL('https://serpapi.com/search.json');
