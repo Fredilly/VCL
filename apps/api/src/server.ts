@@ -2,6 +2,7 @@ import { GeminiVisionProvider } from './gemini-vision.js';
 import { GroqVisionProvider } from './groq-vision.js';
 import { normalizeObjectDescription } from './types.js';
 import { CommerceNoResultsError, buildProductQueryVariants, verifyProductCandidate, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
+import { classifyCandidateImageColors, candidateImageColorCompatible } from './candidate-color.js';
 import { EbayCommerceProvider } from './ebay-commerce.js';
 import { SerpApiCommerceProvider } from './serpapi-commerce.js';
 
@@ -32,7 +33,20 @@ function normalizeContext(value: unknown): ProductContext | undefined {
   return { platform: typeof v.platform === 'string' ? v.platform.slice(0, 40) : null, title: typeof v.title === 'string' ? v.title.slice(0, 300) : null };
 }
 
-async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, context?: ProductContext) {
+async function applyImageColorGate(description: ReturnType<typeof normalizeObjectDescription>, products: ProductCandidate[], env: Env) {
+  if (!products.length || !description.color || !env.GEMINI_API_KEY) return products;
+  const results = await classifyCandidateImageColors(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', products);
+  return products.filter((product, index) => {
+    const result = results.get(index);
+    const compatible = candidateImageColorCompatible(description.color, result);
+    if (compatible && result && result.confidence >= 0.75 && result.color) {
+      product.verification_reasons = [...(product.verification_reasons ?? []), `candidate image color: ${result.color}`];
+    }
+    return compatible;
+  });
+}
+
+async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext) {
   let attempts = 0; let sawProviderFailure = false; let activeProviders = [...providers]; const providersUsed = new Set<string>();
   for (const query of queries) {
     if (!activeProviders.length) break;
@@ -48,7 +62,8 @@ async function resolveProducts(providers: NamedCommerceProvider[], queries: Prod
     });
     if (failedProviders.size) activeProviders = activeProviders.filter(({ name }) => !failedProviders.has(name));
     const verified = products.map((product) => verifyProductCandidate(description, product, context)).filter((product): product is ProductCandidate => Boolean(product)).sort((a, b) => (b.verification_score ?? 0) - (a.verification_score ?? 0));
-    const deduped = dedupeProducts(verified);
+    const colorVerified = await applyImageColorGate(description, verified, env);
+    const deduped = dedupeProducts(colorVerified);
     if (deduped.length) return { query, products: deduped, state: 'RESULTS' as const, providers_used: [...providersUsed], attempts };
     if (!activeProviders.length && sawProviderFailure) return { query, products: [], state: 'TEMPORARILY_UNAVAILABLE' as const, providers_used: [...providersUsed], attempts };
   }
@@ -76,7 +91,7 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const record = wrapped ? parsed as { description: unknown; context?: unknown } : { description: parsed, context: undefined };
       const description = normalizeObjectDescription(record.description); const context = normalizeContext(record.context);
       const providers = commerceProviders(env); if (!providers.length) return jsonResponse({ error: 'No configured commerce provider' }, 503);
-      const queries = buildProductQueryVariants(description, context); const started = Date.now(); const resolved = await resolveProducts(providers, queries, description, context);
+      const queries = buildProductQueryVariants(description, context); const started = Date.now(); const resolved = await resolveProducts(providers, queries, description, env, context);
       return jsonResponse({ ...resolved, latency_ms: Date.now() - started });
     }
     return jsonResponse({ error: 'Not found' }, 404);
