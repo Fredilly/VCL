@@ -3,7 +3,6 @@ import { GroqVisionProvider } from './groq-vision.js';
 import { normalizeObjectDescription } from './types.js';
 import {
   CommerceNoResultsError,
-  CommerceProviderError,
   buildProductQueryVariants,
   type CommerceProvider,
   type ProductCandidate,
@@ -26,8 +25,6 @@ type NamedCommerceProvider = {
   name: string;
   provider: CommerceProvider;
 };
-
-const RESOLVER_BUDGET_MS = 8000;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -75,16 +72,6 @@ function dedupeProducts(products: ProductCandidate[]): ProductCandidate[] {
   return deduped;
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new CommerceProviderError(message)), timeoutMs);
-    promise.then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (error) => { clearTimeout(timer); reject(error); },
-    );
-  });
-}
-
 async function resolveProducts(
   providers: NamedCommerceProvider[],
   queries: ProductQuery[],
@@ -99,26 +86,15 @@ async function resolveProducts(
   let sawProviderFailure = false;
   let activeProviders = [...providers];
   const providersUsed = new Set<string>();
-  const started = Date.now();
 
   for (const query of queries) {
     if (activeProviders.length === 0) break;
-
-    const remainingBudget = RESOLVER_BUDGET_MS - (Date.now() - started);
-    if (remainingBudget <= 0) {
-      sawProviderFailure = true;
-      break;
-    }
 
     attempts += 1;
     const providersForAttempt = [...activeProviders];
     const settled = await Promise.allSettled(providersForAttempt.map(async ({ name, provider }) => {
       providersUsed.add(name);
-      return withTimeout(
-        provider.search(query),
-        remainingBudget,
-        `Commerce resolver budget exhausted after ${RESOLVER_BUDGET_MS}ms.`,
-      );
+      return provider.search(query);
     }));
 
     const products: ProductCandidate[] = [];
