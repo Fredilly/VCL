@@ -85,8 +85,6 @@ function typeFamilies(value: string): Set<string> {
     .filter(([, terms]) => terms.some((term) => containsPhrase(text, term)))
     .map(([family]) => family));
 
-  // Keep product-type evidence specific. Generic parent families must not let
-  // a polo or T-shirt pass a conflicting shirt check.
   if (found.has('polo') || found.has('t-shirt')) found.delete('shirt');
   if (found.has('sneakers')) found.delete('shoes');
   return found;
@@ -117,16 +115,20 @@ function visualTypeText(description: ObjectDescription): string {
 
 function contextTypes(description: ObjectDescription, context?: ProductContext): Set<string> {
   if (!context?.title) return new Set();
+  const visualTypes = typeFamilies(visualTypeText(description));
+  if (visualTypes.size) return new Set();
+
   const types = typeFamilies(context.title);
   if (!types.size) return types;
-  if (description.brand_candidate && containsPhrase(context.title, description.brand_candidate)) return types;
-  const visualTypes = typeFamilies(visualTypeText(description));
+  if (description.brand_candidate && containsPhrase(context.title, description.brand_candidate) && types.size === 1) return types;
   return visualTypes.size === 0 && types.size === 1 ? types : new Set();
 }
 
 function selectedTypes(description: ObjectDescription, context?: ProductContext): Set<string> {
+  const visualTypes = typeFamilies(visualTypeText(description));
+  if (visualTypes.size) return visualTypes;
   const contextual = contextTypes(description, context);
-  return contextual.size ? contextual : typeFamilies(visualTypeText(description));
+  return contextual.size ? contextual : visualTypes;
 }
 
 function primaryType(description: ObjectDescription, context?: ProductContext): string | null {
