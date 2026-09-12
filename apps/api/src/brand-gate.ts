@@ -1,5 +1,6 @@
 import type { ObjectDescription } from './types.js';
 import type { ProductCandidate } from './commerce.js';
+import { applyAttributeInvariantGate } from './attribute-gate.js';
 
 const STRONG_BRAND_IDENTITY_THRESHOLD = 0.8;
 
@@ -27,7 +28,8 @@ export function candidateMatchesBrand(title: string, brand: string | null | unde
 }
 
 export function applyBrandGate(description: ObjectDescription, products: ProductCandidate[]): ProductCandidate[] {
+  const invariantProducts = applyAttributeInvariantGate(description, products);
   const brand = description.brand_candidate;
-  if (!brand || description.identity_confidence < STRONG_BRAND_IDENTITY_THRESHOLD) return products;
-  return products.filter((product) => candidateMatchesBrand(product.title, brand));
+  if (!brand || description.identity_confidence < STRONG_BRAND_IDENTITY_THRESHOLD) return invariantProducts;
+  return invariantProducts.filter((product) => candidateMatchesBrand(product.title, brand));
 }
