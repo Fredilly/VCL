@@ -22,15 +22,24 @@ const description = {
 const surface = { platform: 'youtube', title: 'Top 10 Boss Jumpers Men [2018]: Hugo Boss Black Mens Padro Half Zip Jumper, Navy Blue Zip Sweater' };
 const candidate = (title) => ({ id: title, title, brand: null, model: null, category: null, image_reference: null, provenance: 'test', destination: null, price: null, currency: null, result_class: 'SIMILAR' });
 
-test('trusted matching video title overrides conflicting generic apparel subtype for verification', () => {
+test('clear visual product type stays authoritative over matching-brand video title', () => {
   assert.equal(verifyProductCandidate(description, candidate("HUGO BOSS Men's Boss Polo Shirt"), surface), null);
-  assert.equal(verifyProductCandidate(description, candidate('Hugo Boss black crewneck sweater'), surface)?.result_class, 'LIKELY');
+  assert.equal(verifyProductCandidate(description, candidate('Hugo Boss black crewneck sweater'), surface), null);
+  assert.equal(verifyProductCandidate(description, candidate('Hugo Boss black long sleeve t-shirt'), surface)?.result_class, 'LIKELY');
 });
 
-test('trusted matching video title creates a context-led commerce query', () => {
+test('commerce query keeps clear visual product type instead of video title type', () => {
   const variants = buildProductQueryVariants(description, surface);
   assert.match(variants[0].query, /Hugo Boss/i);
-  assert.match(variants[0].query, /sweater|jumper/i);
+  assert.match(variants[0].query, /t-?shirt/i);
+  assert.doesNotMatch(variants[0].query, /sweater|jumper/i);
+});
+
+test('video title can guide type only when visual type is absent', () => {
+  const generic = { ...description, subcategory: 'Tops', style_attributes: [], shape_silhouette: [], search_terms: [] };
+  const singleTypeSurface = { platform: 'youtube', title: 'Hugo Boss sweater review' };
+  const variants = buildProductQueryVariants(generic, singleTypeSurface);
+  assert.match(variants[0].query, /sweater/i);
 });
 
 test('untrusted unrelated video title cannot override visual type', () => {
