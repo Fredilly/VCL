@@ -195,6 +195,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>) {
       requestId: crypto.randomUUID(),
       description: analysis,
       context: surfaceContext(),
+      source_image: result.dataUrl,
     });
     if (commerceRaw && typeof commerceRaw === 'object' && typeof commerceRaw.error === 'string') throw new Error(commerceRaw.error);
     renderProducts(panel, parseCommerceResponse(commerceRaw));

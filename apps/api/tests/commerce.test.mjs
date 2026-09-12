@@ -94,10 +94,16 @@ test('commerce errors expose stable resolver codes', () => {
 });
 
 const ebaySource = await readFile(new URL('../src/ebay-commerce.ts', import.meta.url), 'utf8');
+
+function makeMockAuth() {
+  return { getAccessToken: async () => 'mock-token', getBrowseBaseUrl: () => 'https://api.sandbox.ebay.com' };
+}
+
 const ebayContext = vm.createContext({
   exports: {},
   CommerceNoResultsError,
   CommerceProviderError,
+  EbayAuth: makeMockAuth(),
   crypto: { randomUUID: () => 'generated' },
   URL,
   AbortSignal,
@@ -110,7 +116,7 @@ vm.runInContext(compile(stripImports(ebaySource)), ebayContext);
 const { EbayCommerceProvider } = ebayContext.exports;
 
 test('eBay adapter normalizes candidates and never emits EXACT', async () => {
-  const provider = new EbayCommerceProvider('token');
+  const provider = new EbayCommerceProvider(makeMockAuth());
   const [candidate] = await provider.search({ query: 'Nike Air Max 90', category: 'Apparel', subcategory: 'Sneakers', brand: 'Nike', model: 'Air Max 90', attributes: [] });
   assert.equal(candidate.title, 'Nike Air Max 90 White');
   assert.equal(candidate.result_class, 'LIKELY');
