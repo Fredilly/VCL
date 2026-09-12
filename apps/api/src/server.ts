@@ -3,7 +3,7 @@ import { GroqVisionProvider } from './groq-vision.js';
 import { normalizeObjectDescription } from './types.js';
 import { CommerceNoResultsError, buildProductQueryVariants, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
 import { verifyCandidate, rankVerified } from './candidate-verification.js';
-import { candidateKey, compareCandidateImages, parseSourceImage } from './candidate-images.js';
+import { candidateKey, compareCandidateImages, parseSourceImage, imageRequestBudget } from './candidate-images.js';
 import type { ImageComparison } from './verification-evidence.js';
 import { EbayAuth } from './ebay-auth.js';
 import { EbayCommerceProvider } from './ebay-commerce.js';
@@ -41,6 +41,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
   const accepted: ProductCandidate[] = [];
   const seen = new Set<string>();
   const imageEvidence = new Map<string, ImageComparison>();
+  const imageBudget = imageRequestBudget();
   const verification = { retrieved: 0, compared: 0, image_failures: 0, image_failure_reasons: {} as Record<string, number>, rejected: 0, contradictions: {} as Record<string, number> };
   const respond = (query: ProductQuery) => ({ query, products: dedupeProducts(rankVerified(accepted)),
     state: accepted.length ? 'RESULTS' as const : sawProviderFailure ? 'TEMPORARILY_UNAVAILABLE' as const : 'NO_RESULTS' as const,
@@ -64,7 +65,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     });
     verification.retrieved += fresh.length;
     if (sourceImage && env.GEMINI_API_KEY && fresh.length) {
-      const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context);
+      const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
       verification.compared += images.compared;
       verification.image_failures += images.failures;
       for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;

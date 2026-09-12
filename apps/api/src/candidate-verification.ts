@@ -109,7 +109,8 @@ export function verifyCandidate(
   if (visual >= 0.6 && matched.has('brand') && matched.has('subtype') && context?.title && expected.brand?.value && phrase(context.title, expected.brand.value)) {
     score += 2; reasons.push('context corroborates visual identity');
   }
-  if ((!matched.has('subtype') && visual < 0.65) || score < 20) return { product: null, reasons: ['insufficient positive relevance evidence'] };
+  const usefulMetadata = matched.has('subtype') && (matched.has('brand') || matched.has('color'));
+  if ((!usefulMetadata && visual < 0.65) || score < 20) return { product: null, reasons: ['insufficient positive relevance evidence'] };
   const likely = !brandDisagrees && !identityConflict && visual >= 0.8 && (comparison?.confidence ?? 0) >= HIGH && matched.has('subtype')
     && (matched.has('brand') || (!description.brand_candidate && detailCount >= 2))
     && (matched.has('model') || detailCount >= 2) && score >= 60;

@@ -41,6 +41,14 @@ test('provider rank, copied category/brand/model, price and merchant cannot crea
   assert.equal(verifyCandidate(description, fake).product, null);
 });
 
+test('type and audience alone are too weak when image comparison is unavailable', () => {
+  const { description, candidate } = example(apparelCases[0]);
+  candidate.title = 'Men t-shirt'; candidate.metadata = {};
+  assert.equal(verifyCandidate(description, candidate).product, null);
+  candidate.title = 'Men black t-shirt';
+  assert.equal(verifyCandidate(description, candidate).product.result_class, 'SIMILAR');
+});
+
 test('strong multimodal agreement is LIKELY; missing brand and metadata-only matches are SIMILAR', () => {
   const { description, candidate, comparison } = example(apparelCases[0]);
   assert.equal(verifyCandidate(description, candidate, comparison).product.result_class, 'LIKELY');

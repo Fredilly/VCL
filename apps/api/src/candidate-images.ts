@@ -3,6 +3,13 @@ import type { ObjectDescription } from './types.js';
 import { attributes, canonical, type Evidence, type ImageComparison } from './verification-evidence.js';
 
 type Image = { mimeType: string; data: string };
+// Shared across query broadening. Leave eight subrequests for retrieval/OAuth on Workers Free.
+export type ImageRequestBudget = { remaining: number };
+export const imageRequestBudget = (): ImageRequestBudget => ({ remaining: 42 });
+function reserve(budget: ImageRequestBudget): boolean {
+  if (budget.remaining <= 0) return false;
+  budget.remaining--; return true;
+}
 export type ImageVerification = { comparisons: Map<string, ImageComparison>; failures: number; compared: number; failure_reasons?: Record<string, number> };
 const MAX_BYTES = 2_000_000;
 const MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
@@ -25,8 +32,9 @@ export function safeImageUrl(value: string): boolean {
   } catch { return false; }
 }
 
-async function fetchImage(url: string, failure: (reason: string) => void): Promise<Image | null> {
+async function fetchImage(url: string, failure: (reason: string) => void, budget: ImageRequestBudget): Promise<Image | null> {
   if (!safeImageUrl(url)) { failure('image_url'); return null; }
+  if (!reserve(budget)) { failure('image_budget'); return null; }
   try {
     // Handle redirects explicitly: different fetch runtimes/CDNs differ on redirect:error.
     // Every hop must still be a public HTTPS image URL; never forward API credentials.
@@ -37,6 +45,7 @@ async function fetchImage(url: string, failure: (reason: string) => void): Promi
       if (!location) { failure('image_redirect'); return null; }
       url = new URL(location, url).href;
       if (!safeImageUrl(url)) { failure('image_redirect'); return null; }
+      if (!reserve(budget)) { failure('image_budget'); return null; }
       response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(6000) });
     }
     const mimeType = response.headers.get('content-type')?.split(';')[0].trim() ?? '';
@@ -141,22 +150,25 @@ export function candidateKey(product: ProductCandidate): string {
 
 export async function compareCandidateImages(
   apiKey: string, model: string, source: Image, description: ObjectDescription,
-  products: ProductCandidate[], context?: ProductContext,
+  products: ProductCandidate[], context?: ProductContext, budget = imageRequestBudget(),
 ): Promise<ImageVerification> {
   const comparisons = new Map<string, ImageComparison>();
   let failures = 0;
   const failure_reasons: Record<string, number> = {};
   const failure = (reason: string, count = 1) => { failure_reasons[reason] = (failure_reasons[reason] ?? 0) + count; };
-  // Two concurrent batches, four candidates each. Source+candidate bytes stay below inline limits.
-  const batches = Array.from({ length: Math.ceil(products.length / 4) }, (_, i) => products.slice(i * 4, i * 4 + 4));
+  // Six thumbnails + one source stay under the inline payload limit, even at MAX_BYTES.
+  // One batch at a time also keeps thumbnail fetches within six concurrent connections.
+  const batches = Array.from({ length: Math.ceil(products.length / 6) }, (_, i) => products.slice(i * 6, i * 6 + 6));
   const run = async (batch: ProductCandidate[]) => {
+    // Reserve the model call before downloading images so they can actually be compared.
+    if (!reserve(budget)) { failures += batch.length; failure('image_budget', batch.length); return; }
     const loaded = await Promise.all(batch.map(async (product) => {
       if (!product.image_reference) failure('image_missing');
-      return { product, image: product.image_reference ? await fetchImage(product.image_reference, failure) : null };
+      return { product, image: product.image_reference ? await fetchImage(product.image_reference, failure, budget) : null };
     }));
     const images = loaded.filter((item): item is { product: ProductCandidate; image: Image } => Boolean(item.image));
     failures += batch.length - images.length;
-    if (!images.length) return;
+    if (!images.length) { budget.remaining++; return; }
     const parts: Array<{ text: string } | { inlineData: Image }> = [
       { text: 'SELECTED OBJECT CROP' }, { inlineData: source },
       { text: JSON.stringify({ source_description: description, surface_context: context ?? null }) },
@@ -167,7 +179,7 @@ export async function compareCandidateImages(
     try {
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(25000),
-        body: JSON.stringify({ systemInstruction: { parts: [{ text: INSTRUCTIONS }] }, contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', responseSchema, temperature: 0, maxOutputTokens: 7000 } }),
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: INSTRUCTIONS }] }, contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', responseSchema, temperature: 0, maxOutputTokens: 12000 } }),
       });
       if (!response.ok) { failure(`model_http_${response.status}`, images.length); await response.body?.cancel(); failures += images.length; return; }
       const payload = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
@@ -181,6 +193,6 @@ export async function compareCandidateImages(
       failures += images.length;
     }
   };
-  for (let i = 0; i < batches.length; i += 2) await Promise.all(batches.slice(i, i + 2).map(run));
+  for (const batch of batches) await run(batch);
   return { comparisons, failures, compared: comparisons.size, failure_reasons };
 }

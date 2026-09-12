@@ -70,3 +70,26 @@ test('thumbnail redirects are followed only to validated public hosts', async ()
   const result = await compareCandidateImages('key', 'model', image, description, [candidate]);
   assert.equal(calls, 1); assert.equal(result.failure_reasons.image_redirect, 1);
 });
+
+test('image subrequest budget is shared across broadening and leaves room for retrieval', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  let requests = 0, modelCalls = 0;
+  const { compareCandidateImages, imageRequestBudget } = loadModule(filename, { fetch: async (url, options) => {
+    requests++;
+    if (String(url).includes('generativelanguage')) {
+      modelCalls++;
+      const count = JSON.parse(options.body).contents[0].parts.filter((p) => p.inlineData).length - 1;
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: comparison.source,
+        candidates: Array.from({ length: count }, (_, index) => ({ index, attributes: comparison.candidate, ...comparison })) }) }] } }] });
+    }
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+  } });
+  const budget = imageRequestBudget();
+  const products = Array.from({ length: 24 }, (_, i) => ({ ...candidate, id: String(i) }));
+  const first = await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
+  const second = await compareCandidateImages('key', 'model', image, description, products.slice(0, 12), undefined, budget);
+  const third = await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
+  assert.equal(first.compared, 24); assert.equal(second.compared, 12);
+  assert.equal(third.compared, 0); assert.equal(third.failure_reasons.image_budget, 24);
+  assert.equal(requests, 42); assert.equal(modelCalls, 6); assert.equal(budget.remaining, 0);
+});
