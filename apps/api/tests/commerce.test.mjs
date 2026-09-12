@@ -20,6 +20,7 @@ test('buildProductQuery prioritizes brand/model/search evidence', () => {
   const query = buildProductQuery({
     category: 'Apparel', subcategory: 'Sneakers', brand_candidate: 'Nike', model_candidate: 'Air Max 90',
     color: 'white', material: 'leather', style_attributes: ['low top'], search_terms: ['Nike Air Max 90 white'], confidence: 0.9,
+    visible_text: [], logos_markings: [], distinctive_features: [], hardware_details: [], shape_silhouette: [],
   });
   assert.match(query.query, /Nike/);
   assert.match(query.query, /Air Max 90/);
@@ -31,6 +32,7 @@ test('buildProductQuery falls back to visual attributes when search terms are ab
   const query = buildProductQuery({
     category: 'Home', subcategory: 'Lamp', brand_candidate: null, model_candidate: null,
     color: 'brass', material: 'metal', style_attributes: ['art deco'], search_terms: [], confidence: 0.7,
+    visible_text: [], logos_markings: [], distinctive_features: [], hardware_details: [], shape_silhouette: [],
   });
   assert.equal(query.query, 'brass metal art deco Lamp');
 });
@@ -40,6 +42,7 @@ test('buildProductQueryVariants broadens from precise identity to visual evidenc
     category: 'Apparel', subcategory: 'Sunglasses', brand_candidate: 'Persol', model_candidate: 'PO0649',
     color: 'tortoiseshell', material: 'acetate', style_attributes: ['oversized', 'square'],
     search_terms: ['Persol PO0649 tortoiseshell'], confidence: 0.92,
+    visible_text: [], logos_markings: [], distinctive_features: [], hardware_details: [], shape_silhouette: [],
   });
   assert.equal(variants.length, 3);
   assert.match(variants[0].query, /Persol/);
@@ -53,10 +56,16 @@ test('commerce errors expose stable resolver codes', () => {
 });
 
 const ebaySource = await readFile(new URL('../src/ebay-commerce.ts', import.meta.url), 'utf8');
+
+function makeMockAuth() {
+  return { getAccessToken: async () => 'mock-token', getBrowseBaseUrl: () => 'https://api.sandbox.ebay.com' };
+}
+
 const ebayContext = vm.createContext({
   exports: {},
   CommerceNoResultsError,
   CommerceProviderError,
+  EbayAuth: makeMockAuth(),
   crypto: { randomUUID: () => 'generated' },
   URL,
   AbortSignal,
@@ -69,7 +78,7 @@ vm.runInContext(compile(stripImports(ebaySource)), ebayContext);
 const { EbayCommerceProvider } = ebayContext.exports;
 
 test('eBay adapter normalizes candidates and never emits EXACT', async () => {
-  const provider = new EbayCommerceProvider('token');
+  const provider = new EbayCommerceProvider(makeMockAuth());
   const [candidate] = await provider.search({ query: 'Nike Air Max 90', category: 'Apparel', subcategory: 'Sneakers', brand: 'Nike', model: 'Air Max 90', attributes: [] });
   assert.equal(candidate.title, 'Nike Air Max 90 White');
   assert.equal(candidate.result_class, 'LIKELY');

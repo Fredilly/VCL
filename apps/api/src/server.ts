@@ -4,11 +4,16 @@ import { normalizeObjectDescription } from './types.js';
 import {
   CommerceNoResultsError,
   buildProductQueryVariants,
+  verifyProductCandidate,
   type CommerceProvider,
   type ProductCandidate,
+  type ProductContext,
   type ProductQuery,
 } from './commerce.js';
+import { applyAttributeInvariantGate } from './attribute-gate.js';
+import { applyBrandGate } from './brand-gate.js';
 import { EbayCommerceProvider } from './ebay-commerce.js';
+import { EbayAuth } from './ebay-auth.js';
 import { SerpApiCommerceProvider } from './serpapi-commerce.js';
 
 export interface Env {
@@ -16,6 +21,10 @@ export interface Env {
   GROQ_API_KEY?: string;
   VISION_PROVIDER?: string;
   GEMINI_MODEL?: string;
+  EBAY_CLIENT_ID?: string;
+  EBAY_CLIENT_SECRET?: string;
+  EBAY_DEV_ID?: string;
+  EBAY_SANDBOX?: string;
   EBAY_ACCESS_TOKEN?: string;
   SERPAPI_API_KEY?: string;
   COMMERCE_PROVIDER?: string;
@@ -25,6 +34,25 @@ type NamedCommerceProvider = {
   name: string;
   provider: CommerceProvider;
 };
+
+type Image = { mimeType: string; data: string };
+
+type ImageComparisonResult = {
+  candidate: Record<string, unknown>;
+  similarity?: number;
+};
+
+type ImageVerifier = (
+  apiKey: string | undefined,
+  model: string | undefined,
+  source: Image,
+  description: ReturnType<typeof normalizeObjectDescription>,
+  products: ProductCandidate[],
+) => Promise<{
+  comparisons: Map<string, ImageComparisonResult>;
+  compared: number;
+  failures: number;
+}>;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -43,13 +71,29 @@ function logSafeError(error: unknown): void {
   console.error('VCL API error', error instanceof Error ? { name: error.name, message: error.message } : { name: typeof error, message: String(error) });
 }
 
+function normalizeContext(value: unknown): ProductContext | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const v = value as Record<string, unknown>;
+  return {
+    platform: typeof v.platform === 'string' ? v.platform.slice(0, 40) : null,
+    title: typeof v.title === 'string' ? v.title.slice(0, 300) : null,
+  };
+}
+
 function commerceProviders(env: Env): NamedCommerceProvider[] {
   const serpapi: NamedCommerceProvider | null = env.SERPAPI_API_KEY
     ? { name: 'serpapi', provider: new SerpApiCommerceProvider(env.SERPAPI_API_KEY) }
     : null;
-  const ebay: NamedCommerceProvider | null = env.EBAY_ACCESS_TOKEN
-    ? { name: 'ebay', provider: new EbayCommerceProvider(env.EBAY_ACCESS_TOKEN) }
-    : null;
+
+  let ebay: NamedCommerceProvider | null = null;
+  if (env.EBAY_CLIENT_ID && env.EBAY_CLIENT_SECRET) {
+    const auth = new EbayAuth({
+      clientId: env.EBAY_CLIENT_ID,
+      clientSecret: env.EBAY_CLIENT_SECRET,
+      sandbox: env.EBAY_SANDBOX !== 'false',
+    });
+    ebay = { name: 'ebay', provider: new EbayCommerceProvider(auth) };
+  }
 
   if (env.COMMERCE_PROVIDER === 'serpapi') return serpapi ? [serpapi] : [];
   if (env.COMMERCE_PROVIDER === 'ebay') return ebay ? [ebay] : [];
@@ -72,20 +116,33 @@ function dedupeProducts(products: ProductCandidate[]): ProductCandidate[] {
   return deduped;
 }
 
-async function resolveProducts(
+export async function resolveProducts(
   providers: NamedCommerceProvider[],
   queries: ProductQuery[],
+  description?: ReturnType<typeof normalizeObjectDescription>,
+  env?: Env,
+  context?: ProductContext,
+  source?: Image,
+  verifier?: ImageVerifier,
 ): Promise<{
   query: ProductQuery;
   products: ProductCandidate[];
   state: 'RESULTS' | 'NO_RESULTS' | 'TEMPORARILY_UNAVAILABLE';
   providers_used: string[];
   attempts: number;
+  verification?: {
+    rejected: number;
+    compared: number;
+    failures: number;
+    image_failures: number;
+  };
 }> {
   let attempts = 0;
   let sawProviderFailure = false;
   let activeProviders = [...providers];
   const providersUsed = new Set<string>();
+  let totalRejected = 0;
+  const allRawProducts: ProductCandidate[] = [];
 
   for (const query of queries) {
     if (activeProviders.length === 0) break;
@@ -97,13 +154,12 @@ async function resolveProducts(
       return provider.search(query);
     }));
 
-    const products: ProductCandidate[] = [];
     const failedProviders = new Set<string>();
 
     settled.forEach((result, index) => {
       const providerName = providersForAttempt[index].name;
       if (result.status === 'fulfilled') {
-        products.push(...result.value);
+        allRawProducts.push(...result.value);
         return;
       }
 
@@ -117,26 +173,111 @@ async function resolveProducts(
     if (failedProviders.size > 0) {
       activeProviders = activeProviders.filter(({ name }) => !failedProviders.has(name));
     }
+  }
 
-    const deduped = dedupeProducts(products);
+  if (!description) {
+    const deduped = dedupeProducts(allRawProducts);
     if (deduped.length > 0) {
       return {
-        query,
+        query: queries[Math.max(0, Math.min(attempts - 1, queries.length - 1))],
         products: deduped,
         state: 'RESULTS',
         providers_used: [...providersUsed],
         attempts,
       };
     }
+  } else if (allRawProducts.length > 0) {
+    const verified = allRawProducts
+      .map((product) => {
+        const result = verifyProductCandidate(description, product, context);
+        if (!result) totalRejected++;
+        return result;
+      })
+      .filter((product): product is ProductCandidate => Boolean(product))
+      .sort((a, b) => (b.verification_score ?? 0) - (a.verification_score ?? 0));
 
-    if (activeProviders.length === 0 && sawProviderFailure) {
+    const invariantVerified = applyAttributeInvariantGate(description, verified, context);
+    const brandVerified = applyBrandGate(description, invariantVerified);
+
+    if (verifier && source && env) {
+      const seen = new Set<string>();
+      const unique = brandVerified.filter((product) => {
+        const key = JSON.stringify([product.provenance, product.id, product.title, product.image_reference, product.metadata]);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      let compared = 0;
+      let imageFailures = 0;
+
+      try {
+        const verification = await verifier(env.GEMINI_API_KEY, env.GEMINI_MODEL, source, description, unique);
+        compared = verification.compared;
+        imageFailures = verification.failures;
+
+        const colorNormalized = (c: string) => c.toLowerCase().replace(/grey/g, 'gray').replace(/[^a-z]+/g, '').trim();
+        const descColor = description.color ? colorNormalized(description.color) : null;
+
+        const ranked: ProductCandidate[] = [];
+        for (const product of unique) {
+          const key = JSON.stringify([product.provenance, product.id, product.title, product.image_reference, product.metadata]);
+          const comparison = verification.comparisons.get(key);
+          if (!comparison) {
+            ranked.push({ ...product, result_class: 'SIMILAR' as const, verification_status: 'metadata_only' as const });
+            continue;
+          }
+
+          const candidateColorObs = (comparison.candidate as Record<string, unknown>)?.color as { value?: string | null } | undefined;
+          if (candidateColorObs?.value && descColor) {
+            if (colorNormalized(String(candidateColorObs.value)) !== descColor) {
+              continue;
+            }
+          }
+
+          const updated: ProductCandidate = { ...product, verification_status: 'multimodal' as const };
+          if (comparison.similarity != null) {
+            updated.verification_image_similarity = comparison.similarity;
+          }
+          ranked.push(updated);
+        }
+        ranked.sort((a, b) => (b.verification_image_similarity ?? 0) - (a.verification_image_similarity ?? 0));
+
+        const deduped = dedupeProducts(ranked);
+        if (deduped.length) {
+          return {
+            query: queries[Math.max(0, Math.min(attempts - 1, queries.length - 1))],
+            products: deduped,
+            state: 'RESULTS' as const,
+            providers_used: [...providersUsed],
+            attempts,
+            verification: { rejected: totalRejected, compared, failures: imageFailures, image_failures: imageFailures },
+          };
+        }
+      } catch {
+        imageFailures++;
+      }
+
       return {
-        query,
+        query: queries[Math.max(0, Math.min(attempts - 1, queries.length - 1))],
         products: [],
-        state: 'TEMPORARILY_UNAVAILABLE',
+        state: 'NO_RESULTS',
         providers_used: [...providersUsed],
         attempts,
+        verification: { rejected: totalRejected, compared, failures: imageFailures, image_failures: imageFailures },
       };
+    } else {
+      const deduped = dedupeProducts(brandVerified);
+      if (deduped.length) {
+        return {
+          query: queries[Math.max(0, Math.min(attempts - 1, queries.length - 1))],
+          products: deduped,
+          state: 'RESULTS' as const,
+          providers_used: [...providersUsed],
+          attempts,
+          verification: { rejected: totalRejected, compared: 0, failures: 0, image_failures: 0 },
+        };
+      }
     }
   }
 
@@ -146,6 +287,7 @@ async function resolveProducts(
     state: sawProviderFailure ? 'TEMPORARILY_UNAVAILABLE' : 'NO_RESULTS',
     providers_used: [...providersUsed],
     attempts,
+    verification: description ? { rejected: totalRejected, compared: 0, failures: 0, image_failures: 0 } : undefined,
   };
 }
 
@@ -169,13 +311,17 @@ export default {
       }
 
       if (url.pathname === '/resolve-products') {
-        const description = normalizeObjectDescription(await request.json());
+        const parsed: unknown = await request.json();
+        const wrapped = Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'description' in parsed);
+        const record = wrapped ? parsed as { description: unknown; context?: unknown } : { description: parsed, context: undefined };
+        const description = normalizeObjectDescription(record.description);
+        const context = normalizeContext(record.context);
         const providers = commerceProviders(env);
         if (providers.length === 0) return jsonResponse({ error: 'No configured commerce provider' }, 503);
 
-        const queries = buildProductQueryVariants(description);
+        const queries = buildProductQueryVariants(description, context);
         const started = Date.now();
-        const resolved = await resolveProducts(providers, queries);
+        const resolved = await resolveProducts(providers, queries, description, env, context);
         return jsonResponse({
           ...resolved,
           latency_ms: Date.now() - started,
