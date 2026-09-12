@@ -5,31 +5,90 @@ import {
   type ProductCandidate,
   type ProductQuery,
 } from './commerce.js';
+import type { EbayAuth } from './ebay-auth.js';
 
-type EbaySearchResponse = {
-  itemSummaries?: Array<{
-    itemId?: string;
-    title?: string;
-    image?: { imageUrl?: string };
-    itemWebUrl?: string;
-    price?: { value?: string; currency?: string };
-    categories?: Array<{ categoryName?: string }>;
-  }>;
+type EbayItemSummary = {
+  itemId?: string;
+  title?: string;
+  image?: { imageUrl?: string };
+  itemWebUrl?: string;
+  price?: { value?: string; currency?: string };
+  categories?: Array<{ categoryName?: string }>;
+  brand?: { brandName?: string };
+  condition?: { conditionId?: string; condition?: string };
+  seller?: { username?: string; feedbackPercentage?: string; feedbackScore?: number };
+  shippingOptions?: Array<{ shippingCost?: { value?: string; currency?: string } }>;
 };
 
+type EbaySearchResponse = {
+  itemSummaries?: EbayItemSummary[];
+  total?: number;
+  warnings?: Array<{ messageId?: string; message?: string }>;
+};
+
+function normalizeItem(item: EbayItemSummary, query: ProductQuery): ProductCandidate {
+  const title = item.title ?? '';
+  const isLikely = Boolean(query.brand && query.model && title.toLowerCase().includes(query.brand.toLowerCase()) && title.toLowerCase().includes(query.model.toLowerCase()));
+
+  return {
+    id: item.itemId ?? crypto.randomUUID(),
+    title,
+    brand: query.brand ?? item.brand?.brandName ?? null,
+    model: query.model ?? null,
+    category: item.categories?.[0]?.categoryName ?? (query.subcategory || query.category || null),
+    image_reference: item.image?.imageUrl ?? null,
+    provenance: 'ebay:browse',
+    destination: item.itemWebUrl ?? null,
+    price: item.price?.value ?? null,
+    currency: item.price?.currency ?? null,
+    result_class: isLikely ? 'LIKELY' : 'SIMILAR',
+  };
+}
+
 export class EbayCommerceProvider implements CommerceProvider {
-  constructor(private readonly accessToken: string, private readonly timeoutMs = 2500) {}
+  private readonly timeoutMs: number;
+
+  constructor(
+    private readonly auth: EbayAuth,
+    timeoutMs = 2500,
+  ) {
+    this.timeoutMs = timeoutMs;
+  }
 
   async search(query: ProductQuery): Promise<ProductCandidate[]> {
-    const url = new URL('https://api.ebay.com/buy/browse/v1/item_summary/search');
+    const token = await this.auth.getAccessToken();
+    const baseUrl = this.auth.getBrowseBaseUrl();
+    const url = new URL('/buy/browse/v1/item_summary/search', baseUrl);
     url.searchParams.set('q', query.query);
     url.searchParams.set('limit', '8');
 
+    return this.fetchItems(url, token, query);
+  }
+
+  async searchByImage(imageUrl: string, query: ProductQuery): Promise<ProductCandidate[]> {
+    const token = await this.auth.getAccessToken();
+    const baseUrl = this.auth.getBrowseBaseUrl();
+    const url = new URL('/buy/browse/v1/item_summary/search', baseUrl);
+    url.searchParams.set('q', query.query);
+    url.searchParams.set('limit', '8');
+
+    const filterParts: string[] = [];
+    if (imageUrl) {
+      filterParts.push(`image:{imageUrl}`);
+    }
+    if (filterParts.length) {
+      url.searchParams.set('filter', filterParts.join(','));
+    }
+
+    return this.fetchItems(url, token, query);
+  }
+
+  private async fetchItems(url: URL, token: string, query: ProductQuery): Promise<ProductCandidate[]> {
     let response: Response;
     try {
       response = await fetch(url, {
         headers: {
-          Authorization: `Bearer ${this.accessToken}`,
+          Authorization: `Bearer ${token}`,
           'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
         },
         signal: AbortSignal.timeout(this.timeoutMs),
@@ -45,22 +104,16 @@ export class EbayCommerceProvider implements CommerceProvider {
       throw new CommerceProviderError(`eBay search failed with HTTP ${response.status}.`);
     }
 
-    const payload = await response.json() as EbaySearchResponse;
+    let payload: EbaySearchResponse;
+    try {
+      payload = await response.json() as EbaySearchResponse;
+    } catch {
+      throw new CommerceProviderError(`eBay returned invalid JSON with HTTP ${response.status}.`);
+    }
+
     const items = (payload.itemSummaries ?? []).filter((item) => Boolean(item.title));
     if (items.length === 0) throw new CommerceNoResultsError('eBay returned no results.');
 
-    return items.map((item): ProductCandidate => ({
-      id: item.itemId ?? crypto.randomUUID(),
-      title: item.title ?? '',
-      brand: query.brand,
-      model: query.model,
-      category: item.categories?.[0]?.categoryName ?? (query.subcategory || query.category || null),
-      image_reference: item.image?.imageUrl ?? null,
-      provenance: 'ebay:browse',
-      destination: item.itemWebUrl ?? null,
-      price: item.price?.value ?? null,
-      currency: item.price?.currency ?? null,
-      result_class: query.brand && query.model ? 'LIKELY' : 'SIMILAR',
-    }));
+    return items.slice(0, 8).map((item) => normalizeItem(item, query));
   }
 }

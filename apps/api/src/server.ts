@@ -9,6 +9,7 @@ import {
   type ProductQuery,
 } from './commerce.js';
 import { EbayCommerceProvider } from './ebay-commerce.js';
+import { EbayAuth } from './ebay-auth.js';
 import { SerpApiCommerceProvider } from './serpapi-commerce.js';
 
 export interface Env {
@@ -16,6 +17,10 @@ export interface Env {
   GROQ_API_KEY?: string;
   VISION_PROVIDER?: string;
   GEMINI_MODEL?: string;
+  EBAY_CLIENT_ID?: string;
+  EBAY_CLIENT_SECRET?: string;
+  EBAY_DEV_ID?: string;
+  EBAY_SANDBOX?: string;
   EBAY_ACCESS_TOKEN?: string;
   SERPAPI_API_KEY?: string;
   COMMERCE_PROVIDER?: string;
@@ -47,9 +52,16 @@ function commerceProviders(env: Env): NamedCommerceProvider[] {
   const serpapi: NamedCommerceProvider | null = env.SERPAPI_API_KEY
     ? { name: 'serpapi', provider: new SerpApiCommerceProvider(env.SERPAPI_API_KEY) }
     : null;
-  const ebay: NamedCommerceProvider | null = env.EBAY_ACCESS_TOKEN
-    ? { name: 'ebay', provider: new EbayCommerceProvider(env.EBAY_ACCESS_TOKEN) }
-    : null;
+
+  let ebay: NamedCommerceProvider | null = null;
+  if (env.EBAY_CLIENT_ID && env.EBAY_CLIENT_SECRET) {
+    const auth = new EbayAuth({
+      clientId: env.EBAY_CLIENT_ID,
+      clientSecret: env.EBAY_CLIENT_SECRET,
+      sandbox: env.EBAY_SANDBOX !== 'false',
+    });
+    ebay = { name: 'ebay', provider: new EbayCommerceProvider(auth) };
+  }
 
   if (env.COMMERCE_PROVIDER === 'serpapi') return serpapi ? [serpapi] : [];
   if (env.COMMERCE_PROVIDER === 'ebay') return ebay ? [ebay] : [];

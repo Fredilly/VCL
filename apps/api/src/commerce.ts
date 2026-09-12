@@ -9,6 +9,12 @@ export type ProductQuery = {
   attributes: string[];
 };
 
+export type ProductContext = {
+  platform?: string | null;
+  title?: string | null;
+  url?: string | null;
+};
+
 export type ProductCandidate = {
   id: string;
   title: string;
@@ -21,6 +27,13 @@ export type ProductCandidate = {
   price: string | null;
   currency: string | null;
   result_class: 'LIKELY' | 'SIMILAR';
+  metadata?: { brand?: string; model?: string; category?: string; description?: string; gender?: string; color?: string; sleeve?: string; material?: string };
+  verification_status?: 'multimodal' | 'metadata_only';
+  verification_image_similarity?: number;
+  verification_image_confidence?: number;
+  identity_key?: string;
+  verification_score?: number;
+  verification_reasons?: string[];
 };
 
 export interface CommerceProvider {
