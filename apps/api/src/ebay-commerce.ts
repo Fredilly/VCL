@@ -42,6 +42,7 @@ function normalizeItem(item: EbayItemSummary, query: ProductQuery): ProductCandi
     price: item.price?.value ?? null,
     currency: item.price?.currency ?? null,
     result_class: isLikely ? 'LIKELY' : 'SIMILAR',
+    provider: 'ebay',
   };
 }
 

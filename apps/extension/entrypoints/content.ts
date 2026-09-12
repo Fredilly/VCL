@@ -24,6 +24,7 @@ type ProductCandidate = {
   price: string | null;
   currency: string | null;
   result_class: 'LIKELY' | 'SIMILAR';
+  provider?: string;
 };
 
 type CommerceResponse = {
@@ -31,6 +32,7 @@ type CommerceResponse = {
   products: ProductCandidate[];
   latency_ms: number;
   state?: 'RESULTS' | 'NO_RESULTS' | 'TEMPORARILY_UNAVAILABLE';
+  providers_used?: string[];
 };
 
 function parseObjectDescription(value: unknown): ObjectDescription {
@@ -103,6 +105,19 @@ function renderProducts(panel: HTMLElement, commerce: CommerceResponse) {
   Object.assign(heading.style, { fontWeight: '700', margin: '12px 0 8px' });
   panel.appendChild(heading);
 
+  if (__VCL_DEBUG_PROVENANCE__ && commerce.providers_used?.length) {
+    const counts = new Map<string, number>();
+    for (const product of commerce.products) {
+      if (product.provider) counts.set(product.provider, (counts.get(product.provider) ?? 0) + 1);
+    }
+    if (counts.size) {
+      const summary = document.createElement('div');
+      summary.textContent = `Providers: ${[...counts.entries()].map(([name, n]) => `${name} ${n}`).join(' · ')}`;
+      Object.assign(summary.style, { opacity: '0.6', fontSize: '11px', marginBottom: '6px' });
+      panel.appendChild(summary);
+    }
+  }
+
   if (!commerce.products.length) {
     const empty = document.createElement('div');
     empty.textContent = commerce.state === 'TEMPORARILY_UNAVAILABLE'
@@ -136,7 +151,9 @@ function renderProducts(panel: HTMLElement, commerce: CommerceResponse) {
     title.textContent = product.title;
     Object.assign(title.style, { fontWeight: '600', lineHeight: '1.3' });
     const meta = document.createElement('div');
-    meta.textContent = [product.result_class, product.price && product.currency ? `${product.price} ${product.currency}` : null].filter(Boolean).join(' · ');
+    const parts = [product.result_class, product.price && product.currency ? `${product.price} ${product.currency}` : null];
+    if (__VCL_DEBUG_PROVENANCE__ && product.provider) parts.push(`source: ${product.provider}`);
+    meta.textContent = parts.filter(Boolean).join(' · ');
     Object.assign(meta.style, { opacity: '0.7', marginTop: '4px' });
     text.append(title, meta);
     row.appendChild(text);
