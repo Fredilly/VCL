@@ -3,6 +3,7 @@ import { GroqVisionProvider } from './groq-vision.js';
 import { normalizeObjectDescription } from './types.js';
 import { CommerceNoResultsError, buildProductQueryVariants, verifyProductCandidate, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
 import { classifyCandidateImageColors, candidateImageColorCompatible } from './candidate-color.js';
+import { applyAttributeInvariantGate } from './attribute-gate.js';
 import { applyBrandGate } from './brand-gate.js';
 import { EbayCommerceProvider } from './ebay-commerce.js';
 import { SerpApiCommerceProvider } from './serpapi-commerce.js';
@@ -63,7 +64,8 @@ async function resolveProducts(providers: NamedCommerceProvider[], queries: Prod
     });
     if (failedProviders.size) activeProviders = activeProviders.filter(({ name }) => !failedProviders.has(name));
     const verified = products.map((product) => verifyProductCandidate(description, product, context)).filter((product): product is ProductCandidate => Boolean(product)).sort((a, b) => (b.verification_score ?? 0) - (a.verification_score ?? 0));
-    const brandVerified = applyBrandGate(description, verified);
+    const invariantVerified = applyAttributeInvariantGate(description, verified, context);
+    const brandVerified = applyBrandGate(description, invariantVerified);
     const colorVerified = await applyImageColorGate(description, brandVerified, env);
     const deduped = dedupeProducts(colorVerified);
     if (deduped.length) return { query, products: deduped, state: 'RESULTS' as const, providers_used: [...providersUsed], attempts };
