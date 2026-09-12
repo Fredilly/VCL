@@ -393,18 +393,129 @@ test('eBay adapter: falls back to query category when eBay has no categories', a
   assert.equal(result.category, 'Sneakers');
 });
 
-test('eBay adapter: searchByImage sends request (falls back to keyword)', async () => {
+test('eBay adapter: searchByImage sends POST to search_by_image endpoint', async () => {
   let capturedUrl = '';
+  let capturedMethod = '';
+  let capturedBody = '';
+  let capturedHeaders = {};
   const ctx = makeEbayContext(makeMockAuth(), {
-    fetch: async (url) => { capturedUrl = String(url); return Response.json({ itemSummaries: [{ itemId: '1', title: 'Item from image' }] }); },
+    fetch: async (url, opts) => {
+      capturedUrl = String(url);
+      capturedMethod = opts?.method ?? 'GET';
+      capturedBody = opts?.body ?? '';
+      capturedHeaders = opts?.headers ?? {};
+      return Response.json({ itemSummaries: [{ itemId: '1', title: 'Item from image' }] });
+    },
   });
   loadModule(ebaySource, ctx);
   const { EbayCommerceProvider } = ctx.exports;
 
   const provider = new EbayCommerceProvider(makeMockAuth());
-  const results = await provider.searchByImage('https://example.test/photo.jpg', query);
+  const results = await provider.searchByImage('aXZnLWJhc2U2NA==', query);
   assert.equal(results.length, 1);
-  assert.ok(capturedUrl.includes('item_summary/search'), 'should call browse search endpoint');
+  assert.ok(capturedUrl.includes('search_by_image'), 'should call search_by_image endpoint');
+  assert.equal(capturedMethod, 'POST');
+  const body = JSON.parse(capturedBody);
+  assert.equal(body.image, 'aXZnLWJhc2U2NA==');
+  assert.equal(capturedHeaders['Content-Type'], 'application/json');
+});
+
+test('eBay adapter: searchByImage normalizes candidates from image search', async () => {
+  const ctx = makeEbayContext(makeMockAuth(), {
+    fetch: async () => Response.json({
+      itemSummaries: [{
+        itemId: 'img-1', title: 'Nike Air Max 90 from image',
+        image: { imageUrl: 'https://ebay.test/img-search.jpg' },
+        itemWebUrl: 'https://ebay.test/item-img',
+        price: { value: '150.00', currency: 'USD' },
+        categories: [{ categoryName: 'Sneakers' }],
+      }],
+    }),
+  });
+  loadModule(ebaySource, ctx);
+  const { EbayCommerceProvider } = ctx.exports;
+
+  const provider = new EbayCommerceProvider(makeMockAuth());
+  const [result] = await provider.searchByImage('aXZn', query);
+  assert.equal(result.id, 'img-1');
+  assert.equal(result.title, 'Nike Air Max 90 from image');
+  assert.equal(result.image_reference, 'https://ebay.test/img-search.jpg');
+  assert.equal(result.price, '150.00');
+  assert.equal(result.currency, 'USD');
+  assert.equal(result.provenance, 'ebay:browse');
+  assert.equal(result.result_class, 'LIKELY');
+});
+
+test('eBay adapter: searchByImage falls back to keyword on Sandbox error', async () => {
+  let callCount = 0;
+  let capturedUrls = [];
+  const ctx = makeEbayContext(makeMockAuth(), {
+    fetch: async (url) => {
+      callCount++;
+      capturedUrls.push(String(url));
+      if (callCount === 1) {
+        return new Response('Not Found', { status: 404, statusText: 'Not Found' });
+      }
+      return Response.json({
+        itemSummaries: [{ itemId: 'fallback', title: 'Fallback item', price: { value: '50.00', currency: 'USD' } }],
+      });
+    },
+  });
+  loadModule(ebaySource, ctx);
+  const { EbayCommerceProvider } = ctx.exports;
+
+  const provider = new EbayCommerceProvider(makeMockAuth());
+  const results = await provider.searchByImage('aXZn', query);
+  assert.equal(callCount, 2, 'should make two requests: image search + keyword fallback');
+  assert.ok(capturedUrls[0].includes('search_by_image'), 'first call should be image search');
+  assert.ok(capturedUrls[1].includes('/item_summary/search?'), 'second call should be keyword search');
+  assert.equal(results.length, 1);
+  assert.equal(results[0].id, 'fallback');
+});
+
+test('eBay adapter: searchByImage falls back to keyword on empty image results', async () => {
+  let callCount = 0;
+  const ctx = makeEbayContext(makeMockAuth(), {
+    fetch: async () => {
+      callCount++;
+      if (callCount === 1) {
+        return Response.json({ itemSummaries: [] });
+      }
+      return Response.json({
+        itemSummaries: [{ itemId: 'fb', title: 'Keyword result', price: { value: '25.00', currency: 'USD' } }],
+      });
+    },
+  });
+  loadModule(ebaySource, ctx);
+  const { EbayCommerceProvider } = ctx.exports;
+
+  const provider = new EbayCommerceProvider(makeMockAuth());
+  const results = await provider.searchByImage('aXZn', query);
+  assert.equal(callCount, 2);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].id, 'fb');
+});
+
+test('eBay adapter: searchByImage does not swallow non-commerce errors from keyword fallback', async () => {
+  let callCount = 0;
+  const ctx = makeEbayContext(makeMockAuth(), {
+    fetch: async () => {
+      callCount++;
+      if (callCount === 1) {
+        throw new TypeError('bad input');
+      }
+      return Response.json({ itemSummaries: [] });
+    },
+  });
+  loadModule(ebaySource, ctx);
+  const { EbayCommerceProvider } = ctx.exports;
+
+  const provider = new EbayCommerceProvider(makeMockAuth());
+  await assert.rejects(() => provider.searchByImage('aXZn', query), (err) => {
+    assert.equal(err.code, 'NO_RESULTS');
+    return true;
+  });
+  assert.equal(callCount, 2, 'should attempt keyword fallback after image search error');
 });
 
 test('eBay adapter: caps results at 8', async () => {

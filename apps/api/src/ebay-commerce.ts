@@ -62,35 +62,46 @@ export class EbayCommerceProvider implements CommerceProvider {
     url.searchParams.set('q', query.query);
     url.searchParams.set('limit', '8');
 
-    return this.fetchItems(url, token, query);
+    return this.fetchItems(url, token, query, { method: 'GET' });
   }
 
-  async searchByImage(imageUrl: string, query: ProductQuery): Promise<ProductCandidate[]> {
+  async searchByImage(imageBase64: string, query: ProductQuery): Promise<ProductCandidate[]> {
     const token = await this.auth.getAccessToken();
     const baseUrl = this.auth.getBrowseBaseUrl();
-    const url = new URL('/buy/browse/v1/item_summary/search', baseUrl);
-    url.searchParams.set('q', query.query);
-    url.searchParams.set('limit', '8');
 
-    const filterParts: string[] = [];
-    if (imageUrl) {
-      filterParts.push(`image:{imageUrl}`);
-    }
-    if (filterParts.length) {
-      url.searchParams.set('filter', filterParts.join(','));
-    }
+    try {
+      const url = new URL('/buy/browse/v1/item_summary/search_by_image', baseUrl);
+      url.searchParams.set('limit', '8');
 
-    return this.fetchItems(url, token, query);
+      return await this.fetchItems(url, token, query, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imageBase64 }),
+      });
+    } catch (error) {
+      if (error instanceof CommerceProviderError || error instanceof CommerceNoResultsError) {
+        return this.search(query);
+      }
+      throw error;
+    }
   }
 
-  private async fetchItems(url: URL, token: string, query: ProductQuery): Promise<ProductCandidate[]> {
+  private async fetchItems(
+    url: URL,
+    token: string,
+    query: ProductQuery,
+    options: { method?: string; headers?: Record<string, string>; body?: string } = {},
+  ): Promise<ProductCandidate[]> {
     let response: Response;
     try {
       response = await fetch(url, {
+        method: options.method ?? 'GET',
         headers: {
           Authorization: `Bearer ${token}`,
           'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
+          ...options.headers,
         },
+        body: options.body,
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (error) {
