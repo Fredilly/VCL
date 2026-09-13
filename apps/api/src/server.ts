@@ -192,7 +192,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       }
     }
 
-    // Mark SerpAPI as skipped when primary results are sufficient, before any early exit.
+    // Mark SerpAPI/Brave as skipped when upstream results are sufficient.
     if (!skipSerpApi && accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD) {
       serpapiTelemetry.skipped = true;
       serpapiTelemetry.skip_reason = 'upstream_sufficient';
@@ -202,55 +202,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     // Early exit if we already have enough LIKELY candidates from primary providers.
     if (accepted.filter((product) => product.result_class === 'LIKELY').length >= LIKELY_CANDIDATE_THRESHOLD) return respond(query);
 
-    // --- Tier 2: Run SerpAPI fallback if primary accepted candidates are insufficient ---
-    const shouldSkipSerpApi = skipSerpApi || accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD;
-
-    if (!shouldSkipSerpApi && serpapiProvider && eligibleProviders.some((a) => a.name === 'serpapi')) {
-      serpapiTelemetry.invoked = true;
-      let result;
-      try {
-        providersUsed.add('serpapi');
-        result = await serpapiProvider.provider.search(query);
-        serpapiTelemetry.success = true;
-      } catch (error) {
-        if (error instanceof CommerceNoResultsError) { serpapiTelemetry.no_result = true; }
-        else {
-          sawProviderFailure = true;
-          serpapiTelemetry.timeout_or_failure = true;
-          const msg = error instanceof Error ? error.message : '';
-          if (msg.includes('quota exhausted') || msg.includes('HTTP 429')) {
-            serpapiTelemetry.quota_exhausted = true;
-            skipSerpApi = true;
-          }
-          logSafeError(error);
-          activeProviders = activeProviders.filter(({ name }) => name !== 'serpapi');
-        }
-      }
-      if (result) {
-        const fresh = result.slice(0, 24).filter((product) => {
-          const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
-        });
-        verification.retrieved += fresh.length;
-        if (sourceImage && env.GEMINI_API_KEY && fresh.length) {
-          const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
-          verification.compared += images.compared;
-          verification.image_failures += images.failures;
-          for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
-          for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
-        }
-        for (const product of fresh) {
-          const decision = verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context);
-          if (decision.product) accepted.push(decision.product);
-          else {
-            verification.rejected++;
-            const reason = decision.reasons[0].split(':')[0];
-            verification.contradictions[reason] = (verification.contradictions[reason] ?? 0) + 1;
-          }
-        }
-      }
-    }
-
-    // --- Tier 3: Run Brave fallback only when SerpAPI is exhausted/failed/insufficient ---
+    // --- Tier 2: Run Brave fallback first (primary live fallback) ---
     const shouldSkipBrave = skipBrave || accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD;
 
     if (!shouldSkipBrave && braveProvider && eligibleProviders.some((a) => a.name === 'brave')) {
@@ -288,6 +240,67 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
             verification.rejected++;
             const reason = decision.reasons[0].split(':')[0];
             verification.contradictions[reason] = (verification.contradictions[reason] ?? 0) + 1;
+          }
+        }
+      }
+    }
+
+    // --- Tier 3: Run SerpAPI fallback only when Brave is exhausted/failed/insufficient ---
+    const shouldSkipSerpApi = skipSerpApi || accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD;
+
+    if (shouldSkipSerpApi && !serpapiTelemetry.skip_reason) {
+      serpapiTelemetry.skipped = true;
+      serpapiTelemetry.skip_reason = braveTelemetry.invoked && braveTelemetry.success ? 'brave_sufficient' : 'upstream_sufficient';
+    }
+
+    if (!shouldSkipSerpApi && serpapiProvider && eligibleProviders.some((a) => a.name === 'serpapi')) {
+      // Only invoke SerpAPI if Brave was skipped, exhausted, failed, or returned insufficient results.
+      const braveInsufficient = braveTelemetry.skipped || braveTelemetry.no_result || braveTelemetry.timeout_or_failure || !braveProvider || accepted.length < SUFFICIENT_CANDIDATE_THRESHOLD;
+      if (!braveInsufficient && braveTelemetry.invoked && braveTelemetry.success) {
+        // Brave ran successfully and produced results — do not invoke SerpAPI.
+        serpapiTelemetry.skipped = true;
+        serpapiTelemetry.skip_reason = 'brave_sufficient';
+      } else {
+        serpapiTelemetry.invoked = true;
+        let result;
+        try {
+          providersUsed.add('serpapi');
+          result = await serpapiProvider.provider.search(query);
+          serpapiTelemetry.success = true;
+        } catch (error) {
+          if (error instanceof CommerceNoResultsError) { serpapiTelemetry.no_result = true; }
+          else {
+            sawProviderFailure = true;
+            serpapiTelemetry.timeout_or_failure = true;
+            const msg = error instanceof Error ? error.message : '';
+            if (msg.includes('quota exhausted') || msg.includes('HTTP 429')) {
+              serpapiTelemetry.quota_exhausted = true;
+              skipSerpApi = true;
+            }
+            logSafeError(error);
+            activeProviders = activeProviders.filter(({ name }) => name !== 'serpapi');
+          }
+        }
+        if (result) {
+          const fresh = result.slice(0, 24).filter((product) => {
+            const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
+          });
+          verification.retrieved += fresh.length;
+          if (sourceImage && env.GEMINI_API_KEY && fresh.length) {
+            const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
+            verification.compared += images.compared;
+            verification.image_failures += images.failures;
+            for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
+            for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
+          }
+          for (const product of fresh) {
+            const decision = verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context);
+            if (decision.product) accepted.push(decision.product);
+            else {
+              verification.rejected++;
+              const reason = decision.reasons[0].split(':')[0];
+              verification.contradictions[reason] = (verification.contradictions[reason] ?? 0) + 1;
+            }
           }
         }
       }

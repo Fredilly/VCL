@@ -318,22 +318,22 @@ test('general/unknown category: Etsy is not invoked', async () => {
 
 // ── Sufficient primaries -> no SerpAPI or Brave tests ──
 
-test('sufficient primary results: Brave is skipped when SerpAPI is sufficient', async () => {
-  let braveCalled = false;
+test('Brave sufficient: SerpAPI is not invoked', async () => {
+  let serpapiCalled = false;
   const providers = [
     { name: 'ebay', provider: { async search() { return []; } }, tier: 'primary' },
-    { name: 'serpapi', provider: { async search() {
+    { name: 'brave', provider: { async search() {
       return [
-        { ...candidate, id: 's1', destination: 'https://serpapi.example/1' },
-        { ...candidate, id: 's2', destination: 'https://serpapi.example/2' },
-        { ...candidate, id: 's3', destination: 'https://serpapi.example/3' },
+        { ...candidate, id: 'b1', destination: 'https://brave.example/1' },
+        { ...candidate, id: 'b2', destination: 'https://brave.example/2' },
+        { ...candidate, id: 'b3', destination: 'https://brave.example/3' },
       ];
     } }, tier: 'fallback' },
-    { name: 'brave', provider: { async search() { braveCalled = true; return []; } }, tier: 'fallback' },
+    { name: 'serpapi', provider: { async search() { serpapiCalled = true; return []; } }, tier: 'fallback' },
   ];
   const result = await resolveProducts(providers, queries, description, env, undefined, source, verifier);
-  assert.equal(braveCalled, false, 'Brave should not be called when SerpAPI returns sufficient results');
-  assert.equal(result.brave.invoked, false);
+  assert.equal(serpapiCalled, false, 'SerpAPI should not be called when Brave returns sufficient results');
+  assert.equal(result.serpapi.skip_reason, 'brave_sufficient');
 });
 
 // ── Insufficient primaries -> SerpAPI test ──
@@ -408,22 +408,18 @@ test('SerpAPI no results: Brave is invoked as final fallback', async () => {
 
 // ── SerpAPI sufficient -> Brave not invoked test ──
 
-test('SerpAPI sufficient: Brave is not invoked', async () => {
-  let braveCalled = false;
+test('Brave failed: SerpAPI is invoked as final fallback', async () => {
+  let serpapiCalled = false;
   const providers = [
     { name: 'ebay', provider: { async search() { return []; } }, tier: 'primary' },
-    { name: 'serpapi', provider: { async search() {
-      return [
-        { ...candidate, id: 's1', destination: 'https://serpapi.example/1' },
-        { ...candidate, id: 's2', destination: 'https://serpapi.example/2' },
-        { ...candidate, id: 's3', destination: 'https://serpapi.example/3' },
-      ];
-    } }, tier: 'fallback' },
-    { name: 'brave', provider: { async search() { braveCalled = true; return []; } }, tier: 'fallback' },
+    { name: 'brave', provider: { async search() { throw new Error('Brave API error'); } }, tier: 'fallback' },
+    { name: 'serpapi', provider: { async search() { serpapiCalled = true; return [{ ...candidate, id: 's1', destination: 'https://serpapi.example/1' }]; } }, tier: 'fallback' },
   ];
-  const result = await resolveProducts(providers, queries, description, env, undefined, source, verifier);
-  assert.equal(braveCalled, false, 'Brave should not be called when SerpAPI returns sufficient results');
-  assert.equal(result.brave.invoked, false);
+  const result = await resolveProducts(providers, queries, description, env);
+  assert.equal(serpapiCalled, true, 'SerpAPI should be called when Brave fails');
+  assert.equal(result.brave.invoked, true);
+  assert.equal(result.brave.timeout_or_failure, true);
+  assert.equal(result.serpapi.invoked, true);
 });
 
 // ── SerpAPI insufficient accepted candidates -> Brave invoked ──
@@ -459,22 +455,29 @@ test('SerpAPI returns 2 accepted candidates: Brave is invoked', async () => {
   assert.equal(result.brave.invoked, true);
 });
 
-test('SerpAPI reaches 3 accepted candidates: Brave is not invoked', async () => {
+test('Brave insufficient, SerpAPI reaches 3 accepted: both invoked', async () => {
   let braveCalled = false;
+  let serpapiCalled = false;
   const providers = [
     { name: 'ebay', provider: { async search() { return []; } }, tier: 'primary' },
+    { name: 'brave', provider: { async search() {
+      braveCalled = true;
+      return [{ ...candidate, id: 'b1', destination: 'https://brave.example/1' }];
+    } }, tier: 'fallback' },
     { name: 'serpapi', provider: { async search() {
+      serpapiCalled = true;
       return [
         { ...candidate, id: 's1', destination: 'https://serpapi.example/1' },
         { ...candidate, id: 's2', destination: 'https://serpapi.example/2' },
         { ...candidate, id: 's3', destination: 'https://serpapi.example/3' },
       ];
     } }, tier: 'fallback' },
-    { name: 'brave', provider: { async search() { braveCalled = true; return []; } }, tier: 'fallback' },
   ];
   const result = await resolveProducts(providers, queries, description, env, undefined, source, verifier);
-  assert.equal(braveCalled, false, 'Brave should not be called when SerpAPI returns 3 accepted candidates');
-  assert.equal(result.brave.invoked, false);
+  assert.equal(braveCalled, true, 'Brave should be called first');
+  assert.equal(serpapiCalled, true, 'SerpAPI should be called when Brave returns insufficient');
+  assert.equal(result.brave.invoked, true);
+  assert.equal(result.serpapi.invoked, true);
 });
 
 // ── SerpAPI and Brave never run in parallel test ──
