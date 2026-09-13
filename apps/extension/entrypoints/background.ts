@@ -12,7 +12,7 @@ export default defineBackground(() => {
     const requestId = message.requestId;
     const endpoint = isVision ? 'analyze-selection' : 'resolve-products';
     const body = isVision
-      ? { dataUrl: message.dataUrl }
+      ? { dataUrl: message.dataUrl, timestamp: message.timestamp, nearby_frames: message.nearby_frames, primary_description: message.primary_description }
       : { description: message.description, context: message.context ?? null, source_image: message.source_image };
 
     void fetch(`https://api.vcl.article6.org/${endpoint}`, {

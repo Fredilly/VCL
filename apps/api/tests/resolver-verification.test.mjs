@@ -181,6 +181,25 @@ test('rejected raw candidates do not suppress SerpAPI', async () => {
   assert.ok(result.verification.rejected >= 1, 'raw candidates should be rejected but not count toward sufficiency');
 });
 
+test('three rejected candidates from either tier cannot suppress later fallbacks', async () => {
+  for (const rejectedTier of ['ebay', 'brave']) {
+    const called = [];
+    const providers = ['ebay', 'brave', 'serpapi'].map((name) => ({
+      name, tier: name === 'ebay' ? 'primary' : 'fallback',
+      provider: { async search() {
+        called.push(name);
+        if (name !== rejectedTier) return [];
+        return [1, 2, 3].map(id => ({ ...candidate, id: `${name}-${id}`,
+          title: 'Nike men black dress', destination: `https://shop.example/${name}/${id}` }));
+      } },
+    }));
+    const result = await resolveProducts(providers, [queries[0]], description, env);
+    assert.deepEqual(called, ['ebay', 'brave', 'serpapi']);
+    assert.equal(result.verification.rejected, 3);
+    assert.equal(result.products.length, 0);
+  }
+});
+
 test('SerpAPI invoked when primary returns fewer than threshold accepted', async () => {
   let serpapiCalled = false;
   const providers = [
@@ -558,6 +577,39 @@ test('provider failures remain isolated: Brave failure does not affect SerpAPI',
 });
 
 // ── Fallback guard: sufficient primaries skip Brave/SerpAPI ──
+
+test('raw sufficient but verified insufficient: fallbacks still run', async () => {
+  const providersUsed = [];
+  const rejectVerifier = async (_key, _model, _source, _description, products) => ({
+    comparisons: new Map(products.map((p) => [candidateKey(p), { ...comparison, candidate: { ...comparison.candidate, color: { value: 'contradicted', confidence: 0.99 } }, similarity: 0.01, confidence: 0.01 }])),
+    compared: products.length, failures: 0,
+  });
+  const providers = [
+    { name: 'ebay', provider: { async search() {
+      providersUsed.push('ebay');
+      return [
+        { ...candidate, id: 'e1', destination: 'https://shop.example/1' },
+        { ...candidate, id: 'e2', destination: 'https://shop.example/2' },
+        { ...candidate, id: 'e3', destination: 'https://shop.example/3' },
+      ];
+    } }, tier: 'primary' },
+    { name: 'brave', provider: { async search() {
+      providersUsed.push('brave');
+      return [{ ...candidate, id: 'b1', destination: 'https://brave.example/1', provider: 'brave', provenance: 'brave:web' }];
+    } }, tier: 'fallback' },
+    { name: 'serpapi', provider: { async search() {
+      providersUsed.push('serpapi');
+      return [{ ...candidate, id: 's1', destination: 'https://serpapi.example/1' }];
+    } }, tier: 'fallback' },
+  ];
+  const fashionQ = [query('Nike black tee logo'), query('Nike tee'), query('black tee')];
+  const result = await resolveProducts(providers, fashionQ, description, env, undefined, source, rejectVerifier);
+  assert.ok(providersUsed.includes('ebay'), 'eBay should be invoked');
+  assert.ok(providersUsed.includes('brave'), 'Brave MUST run when all 3 raw candidates fail verification');
+  assert.ok(providersUsed.includes('serpapi'), 'SerpAPI MUST run when accepted < 3 after Brave');
+  assert.equal(result.brave.skipped, false);
+  assert.equal(result.serpapi.skipped, false);
+});
 
 test('sufficient eBay+Etsy: Brave and SerpAPI are not invoked', async () => {
   const providersUsed = [];

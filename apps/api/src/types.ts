@@ -14,6 +14,7 @@ export type ObjectDescription = {
   search_terms: string[];
   confidence: number;
   identity_confidence: number;
+  evidence_confidence?: Record<string, number>;
 };
 
 function stringArray(value: unknown, limit: number): string[] {
@@ -34,6 +35,8 @@ export function normalizeObjectDescription(value: unknown): ObjectDescription {
   if (!Number.isFinite(identityConfidence)) throw new Error('Vision output had invalid identity confidence.');
 
   return {
+    ...(record.evidence_confidence && typeof record.evidence_confidence === 'object' && !Array.isArray(record.evidence_confidence)
+      ? { evidence_confidence: Object.fromEntries(Object.entries(record.evidence_confidence).filter(([, value]) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1)) as Record<string, number> } : {}),
     category: typeof record.category === 'string' ? record.category : '',
     subcategory: typeof record.subcategory === 'string' ? record.subcategory : '',
     brand_candidate: record.brand_candidate == null ? null : String(record.brand_candidate),
@@ -54,4 +57,11 @@ export function normalizeObjectDescription(value: unknown): ObjectDescription {
 
 export interface VisionProvider {
   analyzeSelection(dataUrl: string): Promise<ObjectDescription>;
+  analyzeNearbyFrame?(primary: string, nearby: string, description: ObjectDescription): Promise<NearbyObservation>;
 }
+
+export type NearbyObservation = {
+  description: ObjectDescription;
+  same_object_confidence: number;
+  identity_support: boolean;
+};

@@ -30,6 +30,10 @@ export type FrameCaptureResult =
       message: string;
     };
 
+// In-memory source binding only; neither media URLs nor pixels are persisted.
+const selectionSources = new WeakMap<object, { video: HTMLVideoElement; src: string }>();
+export function selectionSource(selection: object) { return selectionSources.get(selection); }
+
 function visibleArea(video: HTMLVideoElement): number {
   const rect = video.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return 0;
@@ -53,6 +57,7 @@ export function findPrimaryVisibleVideo(): HTMLVideoElement | null {
 }
 
 function ensureReady(video: HTMLVideoElement): FrameCaptureResult | null {
+  if (video.mediaKeys) return { ok: false, code: 'CAPTURE_BLOCKED', message: 'Protected video is unsupported.' };
   if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.videoWidth === 0 || video.videoHeight === 0) {
     return { ok: false, code: 'VIDEO_NOT_READY', message: 'The video is present but its current frame is not ready yet.' };
   }
@@ -153,7 +158,7 @@ export function captureSelectionAtClientPoint(
 
   try {
     context.drawImage(video, x, y, cropWidth, cropHeight, 0, 0, width, height);
-    return {
+    const result: FrameCaptureResult = {
       ok: true,
       dataUrl: canvas.toDataURL('image/jpeg', 0.9),
       width,
@@ -164,6 +169,8 @@ export function captureSelectionAtClientPoint(
       paused: video.paused,
       crop: { x, y, width: cropWidth, height: cropHeight, clickX: Math.round(clickX), clickY: Math.round(clickY) },
     };
+    selectionSources.set(result, { video, src: video.currentSrc });
+    return result;
   } catch (error) {
     return captureError(error);
   } finally {

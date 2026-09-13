@@ -8,7 +8,6 @@ import {
 import type { EtsyCredentials } from './etsy-credentials.js';
 
 const DEFAULT_TIMEOUT_MS = 2500;
-const FRESHNESS_MAX_AGE_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 type EtsyPrice = {
   amount?: string;
@@ -87,14 +86,7 @@ function normalizeListing(listing: EtsyListingResult, query: ProductQuery, fetch
     title.toLowerCase().includes(query.model.toLowerCase()),
   );
 
-  const ts = freshnessTimestamp(listing);
-  if (typeof ts !== 'number' || !Number.isFinite(ts) || ts <= 0) {
-    return null;
-  }
-  const ageMs = fetchedAt - ts * 1000;
-  if (ageMs > FRESHNESS_MAX_AGE_MS) {
-    return null;
-  }
+  const listingTs = freshnessTimestamp(listing);
 
   return {
     id: listing.listing_id != null ? String(listing.listing_id) : crypto.randomUUID(),
@@ -106,7 +98,7 @@ function normalizeListing(listing: EtsyListingResult, query: ProductQuery, fetch
       description: listing.description?.slice(0, 800),
       category: listing.tags?.slice(0, 5).join(', '),
       material: listing.materials?.[0],
-      freshness: `${fetchedAt}:${ts}`,
+      freshness: `${fetchedAt}${listingTs != null ? ':' + listingTs : ''}`,
     },
     image_reference: null,
     provenance: 'etsy:listings',

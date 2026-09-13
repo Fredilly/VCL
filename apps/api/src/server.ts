@@ -178,9 +178,6 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     const eligibleProviders = filterByCategory(activeProviders, query);
     const primaryProviders = eligibleProviders.filter((p) => p.tier === 'primary');
 
-    let fresh: ProductCandidate[] = [];
-    let fallbackFresh = 0;
-
     // --- Tier 1: Run primary providers ---
     const activePrimary = primaryProviders.filter((p) => eligibleProviders.some((a) => a.name === p.name));
     if (activePrimary.length) {
@@ -194,7 +191,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       });
       if (failedProviders.size) activeProviders = activeProviders.filter(({ name }) => !failedProviders.has(name));
 
-      fresh = products.slice(0, 24).filter((product) => {
+      const fresh = products.slice(0, 24).filter((product) => {
         const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
       });
       verification.retrieved += fresh.length;
@@ -216,19 +213,18 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       }
     }
 
-    // Mark SerpAPI/Brave as skipped when upstream results are sufficient.
+    // --- Sufficiency checks (after verification) ---
+    const shouldSkipBrave = skipBrave || accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD;
+
+    if (shouldSkipBrave && !braveTelemetry.skip_reason) {
+      braveTelemetry.skipped = true;
+      braveTelemetry.skip_reason = accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD ? 'upstream_sufficient' : 'already_skipped';
+    }
+
     if (!skipSerpApi && accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD) {
       serpapiTelemetry.skipped = true;
       serpapiTelemetry.skip_reason = 'upstream_sufficient';
       skipSerpApi = true;
-    }
-
-    // --- Tier 2: Run Brave fallback first (primary live fallback) ---
-    const shouldSkipBrave = skipBrave || fresh.length >= SUFFICIENT_CANDIDATE_THRESHOLD;
-
-    if (shouldSkipBrave && !braveTelemetry.skip_reason) {
-      braveTelemetry.skipped = true;
-      braveTelemetry.skip_reason = fresh.length >= SUFFICIENT_CANDIDATE_THRESHOLD ? 'upstream_sufficient' : 'already_skipped';
     }
 
     // Early exit if we already have enough LIKELY candidates from primary providers.
@@ -254,7 +250,6 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
         const braveFresh = result.slice(0, 24).filter((product) => {
           const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
         });
-        fallbackFresh += braveFresh.length;
         verification.retrieved += braveFresh.length;
         if (sourceImage && env.GEMINI_API_KEY && braveFresh.length) {
           const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, braveFresh, context, imageBudget);
@@ -276,7 +271,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     }
 
     // --- Tier 3: Run SerpAPI fallback only when Brave is exhausted/failed/insufficient ---
-    const shouldSkipSerpApi = skipSerpApi || fresh.length >= SUFFICIENT_CANDIDATE_THRESHOLD || fallbackFresh >= SUFFICIENT_CANDIDATE_THRESHOLD;
+    const shouldSkipSerpApi = skipSerpApi || accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD;
 
     if (shouldSkipSerpApi && !serpapiTelemetry.skip_reason) {
       serpapiTelemetry.skipped = true;
@@ -285,7 +280,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
 
     if (!shouldSkipSerpApi && serpapiProvider && eligibleProviders.some((a) => a.name === 'serpapi')) {
       // Only invoke SerpAPI if Brave was skipped, exhausted, failed, or returned insufficient results.
-      const braveInsufficient = braveTelemetry.skipped || braveTelemetry.no_result || braveTelemetry.timeout_or_failure || !braveProvider || fresh.length < SUFFICIENT_CANDIDATE_THRESHOLD;
+      const braveInsufficient = braveTelemetry.skipped || braveTelemetry.no_result || braveTelemetry.timeout_or_failure || !braveProvider || accepted.length < SUFFICIENT_CANDIDATE_THRESHOLD;
       if (!braveInsufficient && braveTelemetry.invoked && braveTelemetry.success) {
         // Brave ran successfully and produced results — do not invoke SerpAPI.
         serpapiTelemetry.skipped = true;

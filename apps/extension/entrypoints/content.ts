@@ -1,7 +1,9 @@
 import { captureSelectionAtClientPoint, type FrameCaptureResult } from '../lib/frame-capture';
+import { captureNearbyFrames, nearbyCaptureLimitation } from '../lib/nearby-frame-capture';
 
 const OVERLAY_ID = 'vcl-overlay-root';
 const RESULT_ID = 'vcl-capture-result';
+let activeCapture: AbortController | undefined;
 
 type ObjectDescription = {
   category: string;
@@ -14,6 +16,7 @@ type ObjectDescription = {
   search_terms: string[];
   confidence: number;
   identity_confidence: number;
+  multi_frame?: { frames_used: number; changed_hypothesis: boolean; changed_fields: string[] };
 };
 
 type ProductCandidate = {
@@ -69,7 +72,7 @@ function surfaceContext() {
 }
 
 function removeOverlay() { document.getElementById(OVERLAY_ID)?.remove(); }
-function removeResult() { document.getElementById(RESULT_ID)?.remove(); }
+function removeResult() { activeCapture?.abort(); document.getElementById(RESULT_ID)?.remove(); }
 
 function basePanel(titleText: string) {
   removeResult();
@@ -178,8 +181,10 @@ function renderProducts(panel: HTMLElement, commerce: CommerceResponse) {
   }
 }
 
-async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>) {
+async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, supplied?: ObjectDescription, captureDebug?: unknown) {
   const panel = basePanel('VCL analyzing selection…');
+  const controller = new AbortController();
+  activeCapture = controller;
   const image = document.createElement('img');
   image.src = result.dataUrl;
   image.alt = 'Selected object crop';
@@ -188,8 +193,9 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>) {
 
   try {
     const requestId = crypto.randomUUID();
-    const response = await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', requestId, dataUrl: result.dataUrl });
-    if (response && typeof response === 'object' && typeof response.error === 'string') throw new Error(response.error);
+    const response: unknown = supplied ?? await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', requestId, dataUrl: result.dataUrl, timestamp: result.currentTime });
+    if (controller.signal.aborted) return;
+    if (response && typeof response === 'object' && 'error' in response && typeof response.error === 'string') throw new Error(response.error);
     const analysis = parseObjectDescription(response);
     panel.firstElementChild!.textContent = 'VCL object understanding: success';
 
@@ -213,6 +219,59 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>) {
     Object.assign(identityConfidence.style, { opacity: '0.75', marginTop: '3px' });
     panel.appendChild(identityConfidence);
 
+    if (__VCL_DEBUG_PROVENANCE__) {
+      const details = document.createElement('details');
+      const label = document.createElement('summary'); label.textContent = 'Frame evidence provenance';
+      const text = document.createElement('pre');
+      text.style.whiteSpace = 'pre-wrap'; text.style.fontSize = '11px';
+      text.textContent = JSON.stringify({ evidence: analysis.multi_frame ?? { frames_used: 1, changed_hypothesis: false }, capture: captureDebug }, null, 2);
+      details.append(label, text); panel.appendChild(details);
+    }
+
+    if (!supplied && (analysis.identity_confidence < 0.8 || analysis.confidence < 0.8 || !analysis.brand_candidate || !analysis.model_candidate || !analysis.color)) {
+      const improve = button('Improve with nearby frames');
+      const note = document.createElement('div');
+      note.textContent = 'If evidence is incomplete, use up to two nearby crops (±0.5 seconds).';
+      panel.append(note, improve);
+      improve.addEventListener('click', async () => {
+        improve.disabled = true;
+        const limitation = nearbyCaptureLimitation(result);
+        if (limitation) {
+          note.textContent = 'Nearby frames are unavailable for this video. Keeping the selected-frame result.';
+          if (__VCL_DEBUG_PROVENANCE__) note.textContent += ` (${limitation})`;
+          return;
+        }
+        note.textContent = 'Checking nearby frames…';
+        let captured;
+        try {
+          captured = await captureNearbyFrames(result, controller.signal);
+          if (controller.signal.aborted) return;
+          if (!captured.frames.length) {
+            note.textContent = 'No useful nearby crops were captured. Keeping the selected-frame result.';
+            if (__VCL_DEBUG_PROVENANCE__) note.textContent += ` ${JSON.stringify(captured)}`;
+            return;
+          }
+          const { multi_frame: _debug, ...primaryDescription } = analysis;
+          const response = await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', requestId: crypto.randomUUID(),
+            dataUrl: result.dataUrl, timestamp: result.currentTime, primary_description: primaryDescription, nearby_frames: captured.frames });
+          if (controller.signal.aborted) return;
+          if (response?.error) throw new Error('Nearby analysis unavailable');
+          const merged = parseObjectDescription(response);
+          const debug = { attempts: captured.attempts, limitation: captured.limitation };
+          if (merged.multi_frame?.changed_hypothesis) await showAnalysis(result, merged, debug);
+          else {
+            note.textContent = 'Nearby evidence did not change the selected-object hypothesis.';
+            if (__VCL_DEBUG_PROVENANCE__) {
+              const text = document.createElement('pre'); text.style.whiteSpace = 'pre-wrap';
+              text.textContent = JSON.stringify({ evidence: merged.multi_frame, capture: debug }, null, 2); panel.appendChild(text);
+            }
+          }
+        } catch {
+          if (!controller.signal.aborted) note.textContent = 'Nearby analysis is unavailable. Keeping the selected-frame result.';
+        } finally { if (captured) captured.frames.length = 0; }
+      }, { once: true });
+    }
+
     const commerceRaw = await browser.runtime.sendMessage({
       type: 'VCL_RESOLVE_PRODUCTS',
       requestId: crypto.randomUUID(),
@@ -220,6 +279,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>) {
       context: surfaceContext(),
       source_image: result.dataUrl,
     });
+    if (controller.signal.aborted) return;
     if (commerceRaw && typeof commerceRaw === 'object' && typeof commerceRaw.error === 'string') throw new Error(commerceRaw.error);
     renderProducts(panel, parseCommerceResponse(commerceRaw));
   } catch (error) {
