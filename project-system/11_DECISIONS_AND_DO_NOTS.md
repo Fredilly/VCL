@@ -46,8 +46,14 @@ Amazon Associates currently restricts Special Links/Program Content in browser e
 Reason:
 avoid building on a commercial path that may violate program rules.
 
-### D-007 — eBay may be an initial commerce adapter
+### D-007 — eBay is the first broad commerce adapter
 Use documented APIs and current terms.
+
+Current state:
+- adapter implemented,
+- OAuth implemented,
+- keyword and image-search paths implemented,
+- production eBay access/result provenance must be verified before treating it as the primary live provider.
 
 Guardrail:
 do not make it exclusive.
@@ -68,6 +74,107 @@ Build reusable:
 - commerce outcomes,
 - merchant/catalog mappings.
 
+### D-011 — Commerce routing is category-aware
+Do not invoke every commerce provider for every visual intent.
+
+Reason:
+preserve quotas, reduce latency and use each provider where its catalog is strongest.
+
+Initial routing:
+- fashion/shoes/watches/bags/jewelry: eBay + Etsy, then SerpAPI, then Brave,
+- electronics/appliances/consumer tech: Best Buy + eBay, then SerpAPI, then Brave,
+- unknown category: eBay, then SerpAPI, then Brave.
+
+### D-012 — SerpAPI becomes fallback capacity
+SerpAPI should not remain the default provider once catalog adapters are live.
+
+Reason:
+its quota is scarce relative to catalog APIs and is more valuable as broad fallback discovery.
+
+### D-013 — Brave Search is last-resort discovery
+Brave Search is not a product catalog and must not be treated as one.
+
+Use:
+open-web product/merchant discovery only when catalog providers are insufficient.
+
+### D-014 — Best Buy is a category adapter
+Add Best Buy for electronics/appliances/consumer technology after eBay production verification.
+
+Guardrail:
+do not call it for irrelevant categories and re-check current terms/quota before shipping.
+
+### D-015 — Etsy is an optional category adapter
+Add Etsy for relevant fashion/accessory/jewelry/vintage/handmade coverage.
+
+Guardrail:
+do not let Etsy approval or access friction block the MVP.
+
+### D-016 — Provider quotas are protected by routing
+Fallback providers should only run when upstream results are insufficient.
+
+Track:
+- request count,
+- success,
+- no-result,
+- timeout/failure,
+- latency,
+- candidate count,
+- accepted count,
+- fallback invocation.
+
+Do not hard-code planning assumptions about quotas without re-checking current provider documentation.
+
+## Commerce redundancy implementation queue
+
+Implement as six bounded PRs:
+
+1. **eBay production verification**
+   - production credentials/access,
+   - `EBAY_SANDBOX=false`,
+   - production OAuth,
+   - real keyword search,
+   - real image search,
+   - live provenance check,
+   - deploy and measure.
+
+2. **Category-aware commerce router**
+   - route by category/provider capability,
+   - run relevant primaries,
+   - invoke fallback only when needed,
+   - preserve graceful failure states.
+
+3. **Best Buy adapter**
+   - normalize to `ProductCandidate`,
+   - category gate,
+   - timeout/no-result/error tests,
+   - live test and deploy.
+
+4. **Etsy adapter**
+   - normalize to `ProductCandidate`,
+   - category gate,
+   - conservative identity handling,
+   - live access/quota verification,
+   - keep optional if access is burdensome.
+
+5. **Brave Search fallback**
+   - open-web fallback only,
+   - quota budget,
+   - convert discovered product pages into candidates,
+   - normal verification pipeline still applies.
+
+6. **Quota protection, telemetry and documentation**
+   - provider metrics,
+   - fallback invocation metrics,
+   - quota-aware skipping where possible,
+   - verify project-system docs against shipped behavior.
+
+Each PR must pass:
+- `pnpm check`,
+- `pnpm build`,
+- relevant tests,
+- Worker deploy when backend behavior changes,
+- live/manual verification before merge where credentials are required.
+
 ---
 
 ## Do not
@@ -75,7 +182,10 @@ Build reusable:
 - Do not build "works on every video" marketing.
 - Do not bypass DRM.
 - Do not scrape Amazon.
-- Do not rely solely on Amazon, eBay, YouTube, Google, or one AI vendor.
+- Do not rely solely on Amazon, eBay, YouTube, Google, SerpAPI, or one AI vendor.
+- Do not query every commerce provider on every request.
+- Do not burn fallback quota when primary results are already sufficient.
+- Do not treat search-engine rank as product identity evidence.
 - Do not auto-open merchants.
 - Do not replace exact identification with a sponsored product.
 - Do not hide sponsorship labels.
@@ -98,6 +208,8 @@ Build reusable:
 Re-check provider/platform terms before:
 - public launch,
 - enabling affiliate monetization,
+- adding a new commerce provider,
+- changing a provider from fallback to primary,
 - adding Amazon,
 - adding native YouTube Shopping interaction,
 - adding protected-media support,
@@ -117,4 +229,15 @@ https://support.google.com/youtube/answer/13376398
 eBay Buy/Browse API:
 https://developer.ebay.com/api-docs/buy/browse/overview.html
 
-These references can change. Treat the date above as part of the decision record.
+## Provider references to verify during implementation
+
+Best Buy developer APIs:
+https://developer.bestbuy.com/
+
+Etsy developer APIs:
+https://developers.etsy.com/
+
+Brave Search API:
+https://brave.com/search/api/
+
+These references and provider quotas can change. Treat the verification date as part of the decision record.
