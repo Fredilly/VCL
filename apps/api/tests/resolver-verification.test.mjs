@@ -581,7 +581,7 @@ test('provider failures remain isolated: Brave failure does not affect SerpAPI',
 test('raw sufficient but verified insufficient: fallbacks still run', async () => {
   const providersUsed = [];
   const rejectVerifier = async (_key, _model, _source, _description, products) => ({
-    comparisons: new Map(products.map((p) => [candidateKey(p), { ...comparison, candidate: { ...comparison.candidate, color: { value: 'contradicted', confidence: 0.99 } }, similarity: 0.01, confidence: 0.01 }])),
+    comparisons: new Map(products.map((p) => [candidateKey(p), { ...comparison, candidate: { ...comparison.candidate, color: { value: 'contradicted', confidence: 0.99 } }, similarity: 0.01, confidence: 0.99 }])),
     compared: products.length, failures: 0,
   });
   const providers = [

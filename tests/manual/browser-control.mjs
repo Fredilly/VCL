@@ -22,7 +22,11 @@ try {
     await send('Page.bringToFront');
     await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   }
-  if (action === 'close') console.log(await send('Browser.close'));
+  if (action === 'close') {
+    const closed = new Promise(resolve => ws.addEventListener('close', resolve, { once: true }));
+    await Promise.race([send('Browser.close'), closed]);
+    console.log('Test browser closed');
+  }
   else if (action === 'wake') {
     await send('ServiceWorker.enable');
     console.log(await send('ServiceWorker.startWorker', { scopeURL: `chrome-extension://${args[0]}/` }));

@@ -26,6 +26,7 @@ Added during resumption:
 
 - Repaired duplicate declarations and dangling resolver variables; completed fallback sufficiency checks using verified accepted candidates, including skip telemetry before early return.
 - Regression coverage proving three rejected candidates from either the primary or Brave tier cannot suppress later fallbacks.
+- Preserved an additional image-verification fallback regression that appeared in the shared tree during completion, including its high-confidence rejection fixture correction.
 - Scene-cut and blob-source fixtures; explicit browser port selection, service-worker wake-up and VCL target selection; compact derived-evidence output.
 - Wrangler build artifacts excluded from Git and this acceptance/evidence record.
 
@@ -37,7 +38,7 @@ On 2026-09-14 (Asia/Shanghai):
 
 - `pnpm check` — passed.
 - `pnpm build` — passed.
-- `node --test apps/api/tests/*.test.mjs apps/extension/tests/*.test.mjs` — 310 passed, zero failed/skipped.
+- `node --test apps/api/tests/*.test.mjs apps/extension/tests/*.test.mjs` — 311 passed, zero failed/skipped.
 - `npx wrangler deploy --dry-run` — passed.
 - `cd apps/api && npx wrangler deploy` — deployed `vcl-api` to `api.vcl.article6.org` and `vcl-api.fredilly.workers.dev`.
 - Final Worker version: `6c9982f1-84a4-4606-8aa4-834df12759bb`.
