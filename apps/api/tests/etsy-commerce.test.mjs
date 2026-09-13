@@ -353,6 +353,51 @@ test('listing age: listings with no timestamp are accepted', async () => {
   assert.equal(results.length, 1);
 });
 
+test('freshness: freshness metadata includes fetchedAt and optional listingTimestamp', async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const ctx = makeEtsyContext({
+    fetch: async () => Response.json({
+      count: 1,
+      results: [{
+        listing_id: 106,
+        title: 'Metadata Check',
+        url: 'https://www.etsy.com/listing/106',
+        price: { amount: '1000', divisor: 100, currency_code: 'USD' },
+        updated_timestamp: now,
+      }],
+    }),
+  });
+  loadModule(etsySource, ctx);
+  const { EtsyCommerceProvider } = ctx.exports;
+
+  const provider = new EtsyCommerceProvider(validCreds);
+  const [result] = await provider.search(query);
+  const parts = result.metadata.freshness.split(':');
+  assert.ok(Number(parts[0]) > 0, 'fetchedAt should be a positive number');
+  assert.ok(parts.length === 2 && Number(parts[1]) > 0, 'listingTimestamp should be present when available');
+});
+
+test('freshness: missing timestamp produces fetchedAt-only metadata', async () => {
+  const ctx = makeEtsyContext({
+    fetch: async () => Response.json({
+      count: 1,
+      results: [{
+        listing_id: 107,
+        title: 'No Ts',
+        url: 'https://www.etsy.com/listing/107',
+        price: { amount: '1000', divisor: 100, currency_code: 'USD' },
+      }],
+    }),
+  });
+  loadModule(etsySource, ctx);
+  const { EtsyCommerceProvider } = ctx.exports;
+
+  const provider = new EtsyCommerceProvider(validCreds);
+  const [result] = await provider.search(query);
+  assert.ok(!result.metadata.freshness.includes(':'), 'should be fetchedAt only when no listing timestamp');
+  assert.ok(Number(result.metadata.freshness) > 0, 'fetchedAt should be a positive number');
+});
+
 // ── Failure state tests ──
 
 test('missing credentials: returns empty when no keystring', async () => {
