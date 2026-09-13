@@ -308,53 +308,19 @@ test('adapter: result_class is SIMILAR when brand/model not in title', async () 
   assert.equal(result.result_class, 'SIMILAR');
 });
 
-// ── Freshness tests ──
+// ── Freshness tests (old listings are accepted — no age filter) ──
 
-test('freshness: rejects listings older than 6 hours', async () => {
-  const sixHoursAgo = Math.floor(Date.now() / 1000) - (6 * 60 * 60 + 1);
-  const ctx = makeEtsyContext({
-    fetch: async () => Response.json({
-      count: 2,
-      results: [
-        {
-          listing_id: 100,
-          title: 'Old Listing',
-          url: 'https://www.etsy.com/listing/100',
-          price: { amount: '1000', divisor: 100, currency_code: 'USD' },
-          updated_timestamp: sixHoursAgo,
-        },
-        {
-          listing_id: 101,
-          title: 'Also Old Listing',
-          url: 'https://www.etsy.com/listing/101',
-          price: { amount: '2000', divisor: 100, currency_code: 'USD' },
-          updated_timestamp: sixHoursAgo - 3600,
-        },
-      ],
-    }),
-  });
-  loadModule(etsySource, ctx);
-  const { EtsyCommerceProvider } = ctx.exports;
-
-  const provider = new EtsyCommerceProvider(validCreds);
-  await assert.rejects(() => provider.search(query), (err) => {
-    assert.equal(err.code, 'NO_RESULTS');
-    assert.match(err.message, /fresh/i);
-    return true;
-  });
-});
-
-test('freshness: accepts listings within 6 hours', async () => {
-  const oneHourAgo = Math.floor(Date.now() / 1000) - 3600;
+test('listing age: old listings are not rejected', async () => {
+  const veryOld = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
   const ctx = makeEtsyContext({
     fetch: async () => Response.json({
       count: 1,
       results: [{
-        listing_id: 200,
-        title: 'Fresh Listing',
-        url: 'https://www.etsy.com/listing/200',
-        price: { amount: '5000', divisor: 100, currency_code: 'USD' },
-        updated_timestamp: oneHourAgo,
+        listing_id: 100,
+        title: 'Old Listing',
+        url: 'https://www.etsy.com/listing/100',
+        price: { amount: '1000', divisor: 100, currency_code: 'USD' },
+        updated_timestamp: veryOld,
       }],
     }),
   });
@@ -364,10 +330,10 @@ test('freshness: accepts listings within 6 hours', async () => {
   const provider = new EtsyCommerceProvider(validCreds);
   const results = await provider.search(query);
   assert.equal(results.length, 1);
-  assert.equal(results[0].title, 'Fresh Listing');
+  assert.equal(results[0].title, 'Old Listing');
 });
 
-test('freshness: missing timestamp treated as fresh', async () => {
+test('listing age: listings with no timestamp are accepted', async () => {
   const ctx = makeEtsyContext({
     fetch: async () => Response.json({
       count: 1,

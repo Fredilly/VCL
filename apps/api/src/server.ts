@@ -74,7 +74,7 @@ function commerceProviders(env: Env): NamedCommerceProvider[] {
   if (env.COMMERCE_PROVIDER === 'ebay') return ebay ? [ebay] : [];
   if (env.COMMERCE_PROVIDER === 'etsy') return etsy ? [etsy] : [];
 
-  return [serpapi, ebay, etsy].filter((entry): entry is NamedCommerceProvider => Boolean(entry));
+  return [serpapi, ebay].filter((entry): entry is NamedCommerceProvider => Boolean(entry));
 }
 
 export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages) {

@@ -7,7 +7,6 @@ import {
 } from './commerce.js';
 import type { EtsyCredentials } from './etsy-credentials.js';
 
-const FRESHNESS_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 2500;
 
 type EtsyPrice = {
@@ -71,13 +70,6 @@ function parsePrice(price?: EtsyPrice): { price: string | null; currency: string
   const divisor = price.divisor ?? 100;
   const value = (amount / divisor).toFixed(2);
   return { price: value, currency: price.currency_code ?? null };
-}
-
-function isFresh(listing: EtsyListingResult, now: number): boolean {
-  const updated = listing.updated_timestamp ?? listing.last_modified_timestamp ?? listing.created_timestamp;
-  if (!updated) return true;
-  const ageMs = now - updated * 1000;
-  return ageMs >= 0 && ageMs <= FRESHNESS_MAX_AGE_MS;
 }
 
 function normalizeListing(listing: EtsyListingResult, query: ProductQuery): ProductCandidate | null {
@@ -196,13 +188,7 @@ export class EtsyCommerceProvider implements CommerceProvider {
       throw new CommerceNoResultsError('Etsy returned no results.');
     }
 
-    const now = Date.now();
-    const freshListings = results.filter((listing) => isFresh(listing, now));
-    if (freshListings.length === 0) {
-      throw new CommerceNoResultsError('Etsy returned no fresh results (all results older than 6 hours).');
-    }
-
-    const candidates = freshListings
+    const candidates = results
       .map((listing) => normalizeListing(listing, query))
       .filter((c): c is ProductCandidate => c !== null);
 
