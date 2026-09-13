@@ -167,6 +167,12 @@ function renderProducts(panel: HTMLElement, commerce: CommerceResponse) {
     meta.textContent = parts.filter(Boolean).join(' · ');
     Object.assign(meta.style, { opacity: '0.7', marginTop: '4px' });
     text.append(title, meta);
+    if (product.provider) {
+      const providerLabel = document.createElement('div');
+      providerLabel.textContent = product.provider;
+      Object.assign(providerLabel.style, { fontSize: '11px', opacity: '0.5', marginTop: '2px' });
+      text.appendChild(providerLabel);
+    }
     row.appendChild(text);
     panel.appendChild(row);
   }
