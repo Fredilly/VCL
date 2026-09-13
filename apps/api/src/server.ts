@@ -11,6 +11,8 @@ import { resolveEbayCredentials, type EbayCredentials } from './ebay-credentials
 import { EtsyCommerceProvider } from './etsy-commerce.js';
 import { resolveEtsyCredentials, type EtsyCredentials } from './etsy-credentials.js';
 import { SerpApiCommerceProvider } from './serpapi-commerce.js';
+import { BraveCommerceProvider } from './brave-commerce.js';
+import { resolveBraveCredentials } from './brave-credentials.js';
 
 export interface Env {
   GEMINI_API_KEY?: string;
@@ -30,6 +32,7 @@ export interface Env {
   COMMERCE_PROVIDER?: string;
   ETSY_KEYSTRING?: string;
   ETSY_SHARED_SECRET?: string;
+  BRAVE_SEARCH_API_KEY?: string;
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider };
@@ -70,9 +73,16 @@ function commerceProviders(env: Env): NamedCommerceProvider[] {
     etsy = { name: 'etsy', provider: new EtsyCommerceProvider(etsyCreds) };
   }
 
+  let brave: NamedCommerceProvider | null = null;
+  const braveCreds = resolveBraveCredentials(env);
+  if (braveCreds) {
+    brave = { name: 'brave', provider: new BraveCommerceProvider(braveCreds.apiKey) };
+  }
+
   if (env.COMMERCE_PROVIDER === 'serpapi') return serpapi ? [serpapi] : [];
   if (env.COMMERCE_PROVIDER === 'ebay') return ebay ? [ebay] : [];
   if (env.COMMERCE_PROVIDER === 'etsy') return etsy ? [etsy] : [];
+  if (env.COMMERCE_PROVIDER === 'brave') return brave ? [brave] : [];
 
   return [serpapi, ebay].filter((entry): entry is NamedCommerceProvider => Boolean(entry));
 }
