@@ -24,8 +24,8 @@ test('provider field is preserved through metadata-only verification path', asyn
   const ebayCandidate = { ...candidate, provenance: 'ebay:browse', provider: 'ebay', id: 'e1', destination: 'https://shop.example/ebay' };
 
   const providers = [
-    { name: 'serpapi', provider: { async search() { return [serpapiCandidate]; } } },
-    { name: 'ebay', provider: { async search() { return [ebayCandidate]; } } },
+    { name: 'serpapi', provider: { async search() { return [serpapiCandidate]; } }, tier: 'primary' },
+    { name: 'ebay', provider: { async search() { return [ebayCandidate]; } }, tier: 'primary' },
   ];
 
   const result = await resolveProducts(providers, queries, description, env);
@@ -41,8 +41,8 @@ test('provider field survives multimodal verification path', async () => {
   const ebayCandidate = { ...candidate, provenance: 'ebay:browse', provider: 'ebay', id: 'e1', destination: 'https://shop.example/ebay' };
 
   const providers = [
-    { name: 'serpapi', provider: { async search() { return [serpapiCandidate]; } } },
-    { name: 'ebay', provider: { async search() { return [ebayCandidate]; } } },
+    { name: 'serpapi', provider: { async search() { return [serpapiCandidate]; } }, tier: 'primary' },
+    { name: 'ebay', provider: { async search() { return [ebayCandidate]; } }, tier: 'primary' },
   ];
 
   const result = await resolveProducts(providers, queries, description, env, undefined, source, verifier);
@@ -58,7 +58,7 @@ test('provider survives deduplication', async () => {
   const duplicate = { ...unique, id: 's2' };
 
   const providers = [
-    { name: 'serpapi', provider: { async search() { return [unique, duplicate]; } } },
+    { name: 'serpapi', provider: { async search() { return [unique, duplicate]; } }, tier: 'primary' },
   ];
 
   const result = await resolveProducts(providers, queries, description, env);
@@ -71,8 +71,8 @@ test('provider survives ranking by verification_score', async () => {
   const strong = { ...candidate, provenance: 'serpapi:google-shopping', provider: 'serpapi', id: 's1' };
 
   const providers = [
-    { name: 'ebay', provider: { async search() { return [weak]; } } },
-    { name: 'serpapi', provider: { async search() { return [strong]; } } },
+    { name: 'ebay', provider: { async search() { return [weak]; } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() { return [strong]; } }, tier: 'primary' },
   ];
 
   const result = await resolveProducts(providers, queries, description, env);
@@ -84,8 +84,8 @@ test('provider survives ranking by verification_score', async () => {
 
 test('providers_used tracks which providers contributed candidates', async () => {
   const providers = [
-    { name: 'serpapi', provider: { async search() { return [{ ...candidate, provider: 'serpapi', id: 's1' }]; } } },
-    { name: 'ebay', provider: { async search() { return [{ ...candidate, provider: 'ebay', id: 'e1', destination: 'https://shop.example/ebay' }]; } } },
+    { name: 'serpapi', provider: { async search() { return [{ ...candidate, provider: 'serpapi', id: 's1' }]; } }, tier: 'primary' },
+    { name: 'ebay', provider: { async search() { return [{ ...candidate, provider: 'ebay', id: 'e1', destination: 'https://shop.example/ebay' }]; } }, tier: 'primary' },
   ];
 
   const result = await resolveProducts(providers, queries, description, env);
@@ -95,7 +95,7 @@ test('providers_used tracks which providers contributed candidates', async () =>
 
 test('provider field defaults to undefined when not set by provider', async () => {
   const providers = [
-    { name: 'unknown', provider: { async search() { return [{ ...candidate, id: 'u1' }]; } } },
+    { name: 'unknown', provider: { async search() { return [{ ...candidate, id: 'u1' }]; } }, tier: 'primary' },
   ];
 
   const result = await resolveProducts(providers, queries, description, env);

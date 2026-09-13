@@ -10,7 +10,7 @@ import { EbayCommerceProvider } from './ebay-commerce.js';
 import { resolveEbayCredentials, type EbayCredentials } from './ebay-credentials.js';
 import { EtsyCommerceProvider } from './etsy-commerce.js';
 import { resolveEtsyCredentials, type EtsyCredentials } from './etsy-credentials.js';
-import { SerpApiCommerceProvider } from './serpapi-commerce.js';
+import { SerpApiCommerceProvider, type SerpApiQuotaInfo } from './serpapi-commerce.js';
 import { BraveCommerceProvider } from './brave-commerce.js';
 import { resolveBraveCredentials } from './brave-credentials.js';
 
@@ -35,7 +35,7 @@ export interface Env {
   BRAVE_SEARCH_API_KEY?: string;
 }
 
-type NamedCommerceProvider = { name: string; provider: CommerceProvider };
+type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 function logSafeError(error: unknown) { console.error('VCL API error', error instanceof Error ? { name: error.name, message: error.message } : { name: typeof error, message: String(error) }); }
@@ -57,26 +57,27 @@ function makeEbayAuth(creds: EbayCredentials): EbayAuth {
 }
 
 function commerceProviders(env: Env): NamedCommerceProvider[] {
-  const serpapi: NamedCommerceProvider | null = env.SERPAPI_API_KEY
-    ? { name: 'serpapi', provider: new SerpApiCommerceProvider(env.SERPAPI_API_KEY) }
-    : null;
+  let serpapi: NamedCommerceProvider | null = null;
+  if (env.SERPAPI_API_KEY) {
+    serpapi = { name: 'serpapi', provider: new SerpApiCommerceProvider(env.SERPAPI_API_KEY), tier: 'fallback' };
+  }
 
   let ebay: NamedCommerceProvider | null = null;
   const ebayCreds = resolveEbayCredentials(env);
   if (ebayCreds) {
-    ebay = { name: 'ebay', provider: new EbayCommerceProvider(makeEbayAuth(ebayCreds)) };
+    ebay = { name: 'ebay', provider: new EbayCommerceProvider(makeEbayAuth(ebayCreds)), tier: 'primary' };
   }
 
   let etsy: NamedCommerceProvider | null = null;
   const etsyCreds = resolveEtsyCredentials(env);
   if (etsyCreds) {
-    etsy = { name: 'etsy', provider: new EtsyCommerceProvider(etsyCreds) };
+    etsy = { name: 'etsy', provider: new EtsyCommerceProvider(etsyCreds), tier: 'primary' };
   }
 
   let brave: NamedCommerceProvider | null = null;
   const braveCreds = resolveBraveCredentials(env);
   if (braveCreds) {
-    brave = { name: 'brave', provider: new BraveCommerceProvider(braveCreds.apiKey) };
+    brave = { name: 'brave', provider: new BraveCommerceProvider(braveCreds.apiKey), tier: 'fallback' };
   }
 
   if (env.COMMERCE_PROVIDER === 'serpapi') return serpapi ? [serpapi] : [];
@@ -87,6 +88,9 @@ function commerceProviders(env: Env): NamedCommerceProvider[] {
   return [serpapi, ebay].filter((entry): entry is NamedCommerceProvider => Boolean(entry));
 }
 
+const LIKELY_CANDIDATE_THRESHOLD = 3;
+const SUFFICIENT_CANDIDATE_THRESHOLD = 3;
+
 export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages) {
   let attempts = 0; let sawProviderFailure = false; let activeProviders = [...providers]; const providersUsed = new Set<string>();
   const accepted: ProductCandidate[] = [];
@@ -94,46 +98,130 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
   const imageEvidence = new Map<string, ImageComparison>();
   const imageBudget = imageRequestBudget();
   const verification = { retrieved: 0, compared: 0, image_failures: 0, image_failure_reasons: {} as Record<string, number>, rejected: 0, contradictions: {} as Record<string, number> };
-  const respond = (query: ProductQuery) => ({ query, products: dedupeProducts(rankVerified(accepted)),
+
+  const primaryProviders = providers.filter((p) => p.tier === 'primary');
+  const serpapiProvider = providers.find((p) => p.name === 'serpapi') ?? null;
+  let skipSerpApi = false;
+  const serpapiTelemetry: { invoked: boolean; skipped: boolean; skip_reason?: string; success: boolean; no_result: boolean; timeout_or_failure: boolean; quota_exhausted: boolean; remaining_quota?: number } = {
+    invoked: false, skipped: false, success: false, no_result: false, timeout_or_failure: false, quota_exhausted: false,
+  };
+
+  const respond = (query: ProductQuery) => {
+    // Capture SerpAPI quota info for telemetry if available.
+    if (serpapiProvider && serpapiProvider.provider instanceof SerpApiCommerceProvider) {
+      const quota = serpapiProvider.provider.getQuotaInfo();
+      serpapiTelemetry.remaining_quota = quota.total_searches_left;
+      if (serpapiProvider.provider.isQuotaExhausted()) {
+        serpapiTelemetry.quota_exhausted = true;
+        serpapiTelemetry.skipped = true;
+        serpapiTelemetry.skip_reason = 'quota_exhausted';
+      }
+    }
+    return { query, products: dedupeProducts(rankVerified(accepted)),
     state: accepted.length ? 'RESULTS' as const : sawProviderFailure ? 'TEMPORARILY_UNAVAILABLE' as const : 'NO_RESULTS' as const,
-    providers_used: [...providersUsed], attempts, verification });
+    providers_used: [...providersUsed], attempts, verification, serpapi: serpapiTelemetry };
+  };
   for (const query of queries) {
     if (!activeProviders.length) break;
     attempts++;
-    const providersForAttempt = [...activeProviders];
-    const settled = await Promise.allSettled(providersForAttempt.map(async ({ name, provider }) => { providersUsed.add(name); return provider.search(query); }));
-    const products: ProductCandidate[] = []; const failedProviders = new Set<string>();
-    settled.forEach((result, index) => {
-      const providerName = providersForAttempt[index].name;
-      if (result.status === 'fulfilled') { products.push(...result.value); return; }
-      if (result.reason instanceof CommerceNoResultsError) return;
-      sawProviderFailure = true; failedProviders.add(providerName); logSafeError(result.reason);
-    });
-    if (failedProviders.size) activeProviders = activeProviders.filter(({ name }) => !failedProviders.has(name));
-    // No title/rank gate before image comparison. Bound work, but consider more than the UI's eight offers.
-    const fresh = products.slice(0, 24).filter((product) => {
-      const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
-    });
-    verification.retrieved += fresh.length;
-    if (sourceImage && env.GEMINI_API_KEY && fresh.length) {
-      const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
-      verification.compared += images.compared;
-      verification.image_failures += images.failures;
-      for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
-      for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
-    }
-    for (const product of fresh) {
-      const decision = verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context);
-      if (decision.product) accepted.push(decision.product);
-      else {
-        verification.rejected++;
-        const reason = decision.reasons[0].split(':')[0];
-        verification.contradictions[reason] = (verification.contradictions[reason] ?? 0) + 1;
+
+    // --- Tier 1: Run primary providers ---
+    const activePrimary = primaryProviders.filter((p) => activeProviders.some((a) => a.name === p.name));
+    if (activePrimary.length) {
+      const settled = await Promise.allSettled(activePrimary.map(async ({ name, provider }) => { providersUsed.add(name); return provider.search(query); }));
+      const products: ProductCandidate[] = []; const failedProviders = new Set<string>();
+      settled.forEach((result, index) => {
+        const providerName = activePrimary[index].name;
+        if (result.status === 'fulfilled') { products.push(...result.value); return; }
+        if (result.reason instanceof CommerceNoResultsError) return;
+        sawProviderFailure = true; failedProviders.add(providerName); logSafeError(result.reason);
+      });
+      if (failedProviders.size) activeProviders = activeProviders.filter(({ name }) => !failedProviders.has(name));
+
+      const fresh = products.slice(0, 24).filter((product) => {
+        const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
+      });
+      verification.retrieved += fresh.length;
+      if (sourceImage && env.GEMINI_API_KEY && fresh.length) {
+        const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
+        verification.compared += images.compared;
+        verification.image_failures += images.failures;
+        for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
+        for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
+      }
+      for (const product of fresh) {
+        const decision = verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context);
+        if (decision.product) accepted.push(decision.product);
+        else {
+          verification.rejected++;
+          const reason = decision.reasons[0].split(':')[0];
+          verification.contradictions[reason] = (verification.contradictions[reason] ?? 0) + 1;
+        }
       }
     }
+
+    // Mark SerpAPI as skipped when primary results are sufficient, before any early exit.
+    if (!skipSerpApi && accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD) {
+      serpapiTelemetry.skipped = true;
+      serpapiTelemetry.skip_reason = 'upstream_sufficient';
+      skipSerpApi = true;
+    }
+
+    // Early exit if we already have enough LIKELY candidates from primary providers.
+    if (accepted.filter((product) => product.result_class === 'LIKELY').length >= LIKELY_CANDIDATE_THRESHOLD) return respond(query);
+
+    // --- Tier 2: Run SerpAPI fallback if primary accepted candidates are insufficient ---
+    const shouldSkipSerpApi = skipSerpApi || accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD;
+
+    if (!shouldSkipSerpApi && serpapiProvider && activeProviders.some((a) => a.name === 'serpapi')) {
+      serpapiTelemetry.invoked = true;
+      let result;
+      try {
+        providersUsed.add('serpapi');
+        result = await serpapiProvider.provider.search(query);
+        serpapiTelemetry.success = true;
+      } catch (error) {
+        if (error instanceof CommerceNoResultsError) { serpapiTelemetry.no_result = true; }
+        else {
+          sawProviderFailure = true;
+          serpapiTelemetry.timeout_or_failure = true;
+          const msg = error instanceof Error ? error.message : '';
+          if (msg.includes('quota exhausted') || msg.includes('HTTP 429')) {
+            serpapiTelemetry.quota_exhausted = true;
+            skipSerpApi = true;
+          }
+          logSafeError(error);
+          activeProviders = activeProviders.filter(({ name }) => name !== 'serpapi');
+        }
+      }
+      if (result) {
+        const fresh = result.slice(0, 24).filter((product) => {
+          const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
+        });
+        verification.retrieved += fresh.length;
+        if (sourceImage && env.GEMINI_API_KEY && fresh.length) {
+          const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
+          verification.compared += images.compared;
+          verification.image_failures += images.failures;
+          for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
+          for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
+        }
+        for (const product of fresh) {
+          const decision = verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context);
+          if (decision.product) accepted.push(decision.product);
+          else {
+            verification.rejected++;
+            const reason = decision.reasons[0].split(':')[0];
+            verification.contradictions[reason] = (verification.contradictions[reason] ?? 0) + 1;
+          }
+        }
+      }
+    }
+
     // A weak first page must not suppress the broader searches. No merchant/price ordering here.
     if (accepted.filter((product) => product.result_class === 'LIKELY').length >= 3) return respond(query);
   }
+
   return respond(queries[Math.max(0, Math.min(attempts - 1, queries.length - 1))]);
 }
 
