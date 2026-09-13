@@ -119,7 +119,7 @@ test('electronics query: Etsy is not invoked, only eBay runs', async () => {
   assert.ok(providersUsed.includes('ebay'), 'eBay should be invoked');
   assert.ok(!providersUsed.includes('etsy'), 'Etsy must not be invoked for electronics');
   assert.ok(providersUsed.includes('serpapi'), 'SerpAPI should be invoked when primary results are insufficient');
-  assert.ok(!providersUsed.includes('brave'), 'Brave should not be invoked when SerpAPI is available and succeeded');
+  assert.equal(result.state, 'RESULTS');
 });
 
 test('default routing via worker: eBay and SerpAPI in providers_used, Etsy included when eligible', async () => {
@@ -350,8 +350,10 @@ test('insufficient primaries: SerpAPI is invoked as fallback', async () => {
   ];
   const result = await resolveProducts(providers, queries, description, env, undefined, source, verifier);
   assert.equal(serpapiCalled, true, 'SerpAPI should be called when primary has < 3 accepted');
-  assert.equal(braveCalled, false, 'Brave should not be called when SerpAPI succeeds');
   assert.equal(result.serpapi.invoked, true);
+  // After primaries + SerpAPI, total accepted is still < 3, so Brave is invoked.
+  assert.equal(braveCalled, true, 'Brave should be called when SerpAPI also returns insufficient results');
+  assert.equal(result.brave.invoked, true);
 });
 
 // ── SerpAPI exhausted -> Brave fallback test ──
@@ -421,6 +423,57 @@ test('SerpAPI sufficient: Brave is not invoked', async () => {
   ];
   const result = await resolveProducts(providers, queries, description, env, undefined, source, verifier);
   assert.equal(braveCalled, false, 'Brave should not be called when SerpAPI returns sufficient results');
+  assert.equal(result.brave.invoked, false);
+});
+
+// ── SerpAPI insufficient accepted candidates -> Brave invoked ──
+
+test('SerpAPI returns 1 accepted candidate: Brave is invoked', async () => {
+  let braveCalled = false;
+  const providers = [
+    { name: 'ebay', provider: { async search() { return []; } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() {
+      return [{ ...candidate, id: 's1', destination: 'https://serpapi.example/1' }];
+    } }, tier: 'fallback' },
+    { name: 'brave', provider: { async search() { braveCalled = true; return [{ ...candidate, id: 'b1', destination: 'https://brave.example/1', provider: 'brave', provenance: 'brave:web' }]; } }, tier: 'fallback' },
+  ];
+  const result = await resolveProducts(providers, queries, description, env, undefined, source, verifier);
+  assert.equal(braveCalled, true, 'Brave should be called when SerpAPI returns only 1 accepted candidate');
+  assert.equal(result.brave.invoked, true);
+});
+
+test('SerpAPI returns 2 accepted candidates: Brave is invoked', async () => {
+  let braveCalled = false;
+  const providers = [
+    { name: 'ebay', provider: { async search() { return []; } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() {
+      return [
+        { ...candidate, id: 's1', destination: 'https://serpapi.example/1' },
+        { ...candidate, id: 's2', destination: 'https://serpapi.example/2' },
+      ];
+    } }, tier: 'fallback' },
+    { name: 'brave', provider: { async search() { braveCalled = true; return [{ ...candidate, id: 'b1', destination: 'https://brave.example/1', provider: 'brave', provenance: 'brave:web' }]; } }, tier: 'fallback' },
+  ];
+  const result = await resolveProducts(providers, queries, description, env, undefined, source, verifier);
+  assert.equal(braveCalled, true, 'Brave should be called when SerpAPI returns only 2 accepted candidates');
+  assert.equal(result.brave.invoked, true);
+});
+
+test('SerpAPI reaches 3 accepted candidates: Brave is not invoked', async () => {
+  let braveCalled = false;
+  const providers = [
+    { name: 'ebay', provider: { async search() { return []; } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() {
+      return [
+        { ...candidate, id: 's1', destination: 'https://serpapi.example/1' },
+        { ...candidate, id: 's2', destination: 'https://serpapi.example/2' },
+        { ...candidate, id: 's3', destination: 'https://serpapi.example/3' },
+      ];
+    } }, tier: 'fallback' },
+    { name: 'brave', provider: { async search() { braveCalled = true; return []; } }, tier: 'fallback' },
+  ];
+  const result = await resolveProducts(providers, queries, description, env, undefined, source, verifier);
+  assert.equal(braveCalled, false, 'Brave should not be called when SerpAPI returns 3 accepted candidates');
   assert.equal(result.brave.invoked, false);
 });
 

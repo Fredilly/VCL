@@ -254,48 +254,40 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     const shouldSkipBrave = skipBrave || accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD;
 
     if (!shouldSkipBrave && braveProvider && eligibleProviders.some((a) => a.name === 'brave')) {
-      // Only invoke Brave if SerpAPI was skipped, exhausted, failed, or returned insufficient results.
-      const serpapiInsufficient = serpapiTelemetry.skipped || serpapiTelemetry.quota_exhausted || serpapiTelemetry.timeout_or_failure || serpapiTelemetry.no_result || !serpapiProvider;
-      if (!serpapiInsufficient && serpapiTelemetry.invoked && serpapiTelemetry.success) {
-        // SerpAPI ran successfully and produced results — do not invoke Brave.
-        braveTelemetry.skipped = true;
-        braveTelemetry.skip_reason = 'serpapi_sufficient';
-      } else {
-        braveTelemetry.invoked = true;
-        let result;
-        try {
-          providersUsed.add('brave');
-          result = await braveProvider.provider.search(query);
-          braveTelemetry.success = true;
-        } catch (error) {
-          if (error instanceof CommerceNoResultsError) { braveTelemetry.no_result = true; }
-          else {
-            sawProviderFailure = true;
-            braveTelemetry.timeout_or_failure = true;
-            logSafeError(error);
-            activeProviders = activeProviders.filter(({ name }) => name !== 'brave');
-          }
+      braveTelemetry.invoked = true;
+      let result;
+      try {
+        providersUsed.add('brave');
+        result = await braveProvider.provider.search(query);
+        braveTelemetry.success = true;
+      } catch (error) {
+        if (error instanceof CommerceNoResultsError) { braveTelemetry.no_result = true; }
+        else {
+          sawProviderFailure = true;
+          braveTelemetry.timeout_or_failure = true;
+          logSafeError(error);
+          activeProviders = activeProviders.filter(({ name }) => name !== 'brave');
         }
-        if (result) {
-          const fresh = result.slice(0, 24).filter((product) => {
-            const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
-          });
-          verification.retrieved += fresh.length;
-          if (sourceImage && env.GEMINI_API_KEY && fresh.length) {
-            const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
-            verification.compared += images.compared;
-            verification.image_failures += images.failures;
-            for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
-            for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
-          }
-          for (const product of fresh) {
-            const decision = verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context);
-            if (decision.product) accepted.push(decision.product);
-            else {
-              verification.rejected++;
-              const reason = decision.reasons[0].split(':')[0];
-              verification.contradictions[reason] = (verification.contradictions[reason] ?? 0) + 1;
-            }
+      }
+      if (result) {
+        const fresh = result.slice(0, 24).filter((product) => {
+          const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
+        });
+        verification.retrieved += fresh.length;
+        if (sourceImage && env.GEMINI_API_KEY && fresh.length) {
+          const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
+          verification.compared += images.compared;
+          verification.image_failures += images.failures;
+          for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
+          for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
+        }
+        for (const product of fresh) {
+          const decision = verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context);
+          if (decision.product) accepted.push(decision.product);
+          else {
+            verification.rejected++;
+            const reason = decision.reasons[0].split(':')[0];
+            verification.contradictions[reason] = (verification.contradictions[reason] ?? 0) + 1;
           }
         }
       }
