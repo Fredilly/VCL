@@ -6,6 +6,7 @@ import { apparelCases, example } from './fixtures/apparel-benchmark.mjs';
 const file = (name) => fileURLToPath(new URL(`../src/${name}.ts`, import.meta.url));
 const { resolveProducts } = loadModule(file('server'), { console: { error() {} } });
 const { candidateKey } = loadModule(file('candidate-images'));
+const { CommerceNoResultsError } = loadModule(file('commerce'));
 const { description, candidate, comparison } = example(apparelCases[0]);
 const query = (query) => ({ query, category: 'Apparel', subcategory: 'T-shirt', brand: 'Nike', model: null, attributes: [] });
 const queries = [query('Nike black tee logo'), query('Nike tee'), query('black tee')];
@@ -90,20 +91,38 @@ test('missing images keep credible type matches as SIMILAR without claiming veri
 
 // ── Default routing scope tests ──
 
-test('default routing: Etsy and Brave are not active in normal production flow', async () => {
+test('fashion query: eBay + Etsy run as primaries, Brave is skipped when sufficient', async () => {
   const providersUsed = [];
   const providers = [
     { name: 'ebay', provider: { async search() { providersUsed.push('ebay'); return [candidate]; } }, tier: 'primary' },
+    { name: 'etsy', provider: { async search() { providersUsed.push('etsy'); return [candidate]; } }, tier: 'primary' },
     { name: 'serpapi', provider: { async search() { providersUsed.push('serpapi'); return []; } }, tier: 'fallback' },
+    { name: 'brave', provider: { async search() { providersUsed.push('brave'); return []; } }, tier: 'fallback' },
   ];
-  const result = await resolveProducts(providers, queries, description, env);
+  const fashionQ = [query('Nike black tee logo'), query('Nike tee'), query('black tee')];
+  const result = await resolveProducts(providers, fashionQ, description, env);
   assert.ok(providersUsed.includes('ebay'), 'eBay should be invoked');
-  assert.ok(providersUsed.includes('serpapi'), 'SerpAPI should be invoked as fallback');
-  assert.ok(!providersUsed.includes('etsy'), 'Etsy must not be in default routing');
-  assert.ok(!providersUsed.includes('brave'), 'Brave must not be in default routing');
+  assert.ok(providersUsed.includes('etsy'), 'Etsy should be invoked for apparel');
+  assert.equal(result.state, 'RESULTS');
 });
 
-test('default routing via worker: only ebay and serpapi in providers_used', async () => {
+test('electronics query: Etsy is not invoked, only eBay runs', async () => {
+  const providersUsed = [];
+  const providers = [
+    { name: 'ebay', provider: { async search() { providersUsed.push('ebay'); return [candidate]; } }, tier: 'primary' },
+    { name: 'etsy', provider: { async search() { providersUsed.push('etsy'); return [candidate]; } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() { providersUsed.push('serpapi'); return []; } }, tier: 'fallback' },
+    { name: 'brave', provider: { async search() { providersUsed.push('brave'); return []; } }, tier: 'fallback' },
+  ];
+  const electronicsQuery = [{ query: 'laptop charger', category: 'electronics', subcategory: 'computers', brand: null, model: null, attributes: [] }];
+  const result = await resolveProducts(providers, electronicsQuery, description, env);
+  assert.ok(providersUsed.includes('ebay'), 'eBay should be invoked');
+  assert.ok(!providersUsed.includes('etsy'), 'Etsy must not be invoked for electronics');
+  assert.ok(providersUsed.includes('serpapi'), 'SerpAPI should be invoked when primary results are insufficient');
+  assert.ok(!providersUsed.includes('brave'), 'Brave should not be invoked when SerpAPI is available and succeeded');
+});
+
+test('default routing via worker: eBay and SerpAPI in providers_used, Etsy included when eligible', async () => {
   const invokedProviders = [];
   const worker = loadModule(file('server'), {
     fetch: async (url) => {
@@ -111,6 +130,7 @@ test('default routing via worker: only ebay and serpapi in providers_used', asyn
       if (u.includes('serpapi.com/account.json')) return Response.json({ total_searches_left: 100, plan_searches_left: 100 });
       if (u.includes('serpapi.com')) { invokedProviders.push('serpapi'); return Response.json({ shopping_results: [] }); }
       if (u.includes('ebay.com')) { invokedProviders.push('ebay'); return Response.json({ itemSummaries: [] }); }
+      if (u.includes('openapi.etsy.com')) { invokedProviders.push('etsy'); return Response.json({ count: 0, results: [] }); }
       return new Response('[]', { headers: { 'content-type': 'image/png' } });
     },
     console: { error() {} },
@@ -121,8 +141,7 @@ test('default routing via worker: only ebay and serpapi in providers_used', asyn
   const result = await response.json();
   assert.ok(result.providers_used.includes('ebay'), 'eBay should be in providers_used');
   assert.ok(result.providers_used.includes('serpapi'), 'SerpAPI should be in providers_used');
-  assert.ok(!result.providers_used.includes('etsy'), 'Etsy must not be in providers_used');
-  assert.ok(!result.providers_used.includes('brave'), 'Brave must not be in providers_used');
+  assert.ok(!result.providers_used.includes('brave'), 'Brave must not be in providers_used when SerpAPI succeeds');
 });
 
 // ── SerpAPI skip-when-sufficient tests ──
@@ -223,4 +242,282 @@ test('SerpAPI telemetry is the only provider telemetry in response', async () =>
   assert.equal(typeof result.serpapi.no_result, 'boolean');
   assert.equal(typeof result.serpapi.timeout_or_failure, 'boolean');
   assert.equal(typeof result.serpapi.quota_exhausted, 'boolean');
+  assert.ok(result.brave, 'response must include brave telemetry');
+  assert.equal(typeof result.brave.invoked, 'boolean');
+});
+
+// ── Category-aware routing tests ──
+
+test('fashion category: eBay + Etsy both run as primaries', async () => {
+  const providersUsed = [];
+  const providers = [
+    { name: 'ebay', provider: { async search() { providersUsed.push('ebay'); return [candidate]; } }, tier: 'primary' },
+    { name: 'etsy', provider: { async search() { providersUsed.push('etsy'); return [{ ...candidate, id: 'etsy1', provider: 'etsy', provenance: 'etsy:listings', destination: 'https://etsy.com/1' }]; } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() { providersUsed.push('serpapi'); return []; } }, tier: 'fallback' },
+    { name: 'brave', provider: { async search() { providersUsed.push('brave'); return []; } }, tier: 'fallback' },
+  ];
+  const fashionQ = [query('Nike black tee logo'), query('Nike tee'), query('black tee')];
+  const result = await resolveProducts(providers, fashionQ, description, env, undefined, source, verifier);
+  assert.ok(providersUsed.includes('ebay'), 'eBay should be invoked for fashion');
+  assert.ok(providersUsed.includes('etsy'), 'Etsy should be invoked for fashion');
+  assert.equal(result.state, 'RESULTS');
+});
+
+test('watches category: eBay + Etsy both run as primaries', async () => {
+  const providersUsed = [];
+  const providers = [
+    { name: 'ebay', provider: { async search() { providersUsed.push('ebay'); return [candidate]; } }, tier: 'primary' },
+    { name: 'etsy', provider: { async search() { providersUsed.push('etsy'); return []; } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() { providersUsed.push('serpapi'); return []; } }, tier: 'fallback' },
+  ];
+  const watchesQuery = [{ query: 'Rolex Submariner', category: 'watches', subcategory: 'luxury', brand: 'Rolex', model: 'Submariner', attributes: [] }];
+  const result = await resolveProducts(providers, watchesQuery, description, env);
+  assert.ok(providersUsed.includes('ebay'), 'eBay should be invoked for watches');
+  assert.ok(providersUsed.includes('etsy'), 'Etsy should be invoked for watches');
+});
+
+test('jewelry category: eBay + Etsy both run as primaries', async () => {
+  const providersUsed = [];
+  const providers = [
+    { name: 'ebay', provider: { async search() { providersUsed.push('ebay'); return [candidate]; } }, tier: 'primary' },
+    { name: 'etsy', provider: { async search() { providersUsed.push('etsy'); return []; } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() { providersUsed.push('serpapi'); return []; } }, tier: 'fallback' },
+  ];
+  const jewelryQuery = [{ query: 'silver pendant necklace', category: 'jewelry', subcategory: 'necklaces', brand: null, model: null, attributes: [] }];
+  const result = await resolveProducts(providers, jewelryQuery, description, env);
+  assert.ok(providersUsed.includes('ebay'), 'eBay should be invoked for jewelry');
+  assert.ok(providersUsed.includes('etsy'), 'Etsy should be invoked for jewelry');
+});
+
+test('electronics category: Etsy is not invoked', async () => {
+  const providersUsed = [];
+  const providers = [
+    { name: 'ebay', provider: { async search() { providersUsed.push('ebay'); return [candidate]; } }, tier: 'primary' },
+    { name: 'etsy', provider: { async search() { providersUsed.push('etsy'); return []; } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() { providersUsed.push('serpapi'); return []; } }, tier: 'fallback' },
+  ];
+  const electronicsQuery = [{ query: 'wireless headphones', category: 'electronics', subcategory: 'audio', brand: null, model: null, attributes: [] }];
+  const result = await resolveProducts(providers, electronicsQuery, description, env);
+  assert.ok(providersUsed.includes('ebay'), 'eBay should be invoked for electronics');
+  assert.ok(!providersUsed.includes('etsy'), 'Etsy must not be invoked for electronics');
+  assert.ok(providersUsed.includes('serpapi'), 'SerpAPI should be invoked when primary results are insufficient');
+});
+
+test('general/unknown category: Etsy is not invoked', async () => {
+  const providersUsed = [];
+  const providers = [
+    { name: 'ebay', provider: { async search() { providersUsed.push('ebay'); return [candidate]; } }, tier: 'primary' },
+    { name: 'etsy', provider: { async search() { providersUsed.push('etsy'); return []; } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() { providersUsed.push('serpapi'); return []; } }, tier: 'fallback' },
+  ];
+  const generalQuery = [{ query: 'random object', category: 'general', subcategory: '', brand: null, model: null, attributes: [] }];
+  const result = await resolveProducts(providers, generalQuery, description, env);
+  assert.ok(providersUsed.includes('ebay'), 'eBay should be invoked for general');
+  assert.ok(!providersUsed.includes('etsy'), 'Etsy must not be invoked for general');
+});
+
+// ── Sufficient primaries -> no SerpAPI or Brave tests ──
+
+test('sufficient primary results: Brave is skipped when SerpAPI is sufficient', async () => {
+  let braveCalled = false;
+  const providers = [
+    { name: 'ebay', provider: { async search() { return []; } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() {
+      return [
+        { ...candidate, id: 's1', destination: 'https://serpapi.example/1' },
+        { ...candidate, id: 's2', destination: 'https://serpapi.example/2' },
+        { ...candidate, id: 's3', destination: 'https://serpapi.example/3' },
+      ];
+    } }, tier: 'fallback' },
+    { name: 'brave', provider: { async search() { braveCalled = true; return []; } }, tier: 'fallback' },
+  ];
+  const result = await resolveProducts(providers, queries, description, env, undefined, source, verifier);
+  assert.equal(braveCalled, false, 'Brave should not be called when SerpAPI returns sufficient results');
+  assert.equal(result.brave.invoked, false);
+});
+
+// ── Insufficient primaries -> SerpAPI test ──
+
+test('insufficient primaries: SerpAPI is invoked as fallback', async () => {
+  let serpapiCalled = false;
+  let braveCalled = false;
+  const providers = [
+    { name: 'ebay', provider: { async search() {
+      return [{ ...candidate, id: 'e1', destination: 'https://shop.example/1' }];
+    } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() { serpapiCalled = true; return [{ ...candidate, id: 's1', destination: 'https://serpapi.example/1' }]; } }, tier: 'fallback' },
+    { name: 'brave', provider: { async search() { braveCalled = true; return []; } }, tier: 'fallback' },
+  ];
+  const result = await resolveProducts(providers, queries, description, env, undefined, source, verifier);
+  assert.equal(serpapiCalled, true, 'SerpAPI should be called when primary has < 3 accepted');
+  assert.equal(braveCalled, false, 'Brave should not be called when SerpAPI succeeds');
+  assert.equal(result.serpapi.invoked, true);
+});
+
+// ── SerpAPI exhausted -> Brave fallback test ──
+
+test('SerpAPI exhausted: Brave is invoked as final fallback', async () => {
+  let braveCalled = false;
+  const providers = [
+    { name: 'ebay', provider: { async search() {
+      return [{ ...candidate, id: 'e1', destination: 'https://shop.example/1' }];
+    } }, tier: 'primary' },
+    { name: 'serpapi', provider: {
+      async search() { throw new Error('SerpAPI quota exhausted — skipping.'); },
+      getQuotaInfo() { return { total_searches_left: 0 }; },
+      isQuotaExhausted() { return true; },
+    }, tier: 'fallback' },
+    { name: 'brave', provider: { async search() { braveCalled = true; return [{ ...candidate, id: 'b1', destination: 'https://brave.example/1', provider: 'brave', provenance: 'brave:web' }]; } }, tier: 'fallback' },
+  ];
+  const result = await resolveProducts(providers, queries, description, env);
+  assert.equal(braveCalled, true, 'Brave should be called when SerpAPI is exhausted');
+  assert.equal(result.brave.invoked, true);
+  assert.equal(result.brave.success, true);
+});
+
+test('SerpAPI failed (HTTP 500): Brave is invoked as final fallback', async () => {
+  let braveCalled = false;
+  const providers = [
+    { name: 'ebay', provider: { async search() {
+      return [{ ...candidate, id: 'e1', destination: 'https://shop.example/1' }];
+    } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() { throw new Error('HTTP 500 Internal Server Error'); } }, tier: 'fallback' },
+    { name: 'brave', provider: { async search() { braveCalled = true; return [{ ...candidate, id: 'b1', destination: 'https://brave.example/1', provider: 'brave', provenance: 'brave:web' }]; } }, tier: 'fallback' },
+  ];
+  const result = await resolveProducts(providers, queries, description, env);
+  assert.equal(braveCalled, true, 'Brave should be called when SerpAPI fails');
+  assert.equal(result.brave.invoked, true);
+  assert.equal(result.brave.success, true);
+});
+
+test('SerpAPI no results: Brave is invoked as final fallback', async () => {
+  let braveCalled = false;
+  const providers = [
+    { name: 'ebay', provider: { async search() {
+      return [{ ...candidate, id: 'e1', destination: 'https://shop.example/1' }];
+    } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() { throw new CommerceNoResultsError('No results'); } }, tier: 'fallback' },
+    { name: 'brave', provider: { async search() { braveCalled = true; return [{ ...candidate, id: 'b1', destination: 'https://brave.example/1', provider: 'brave', provenance: 'brave:web' }]; } }, tier: 'fallback' },
+  ];
+  const result = await resolveProducts(providers, queries, description, env);
+  assert.equal(braveCalled, true, 'Brave should be called when SerpAPI returns no results');
+  assert.equal(result.brave.invoked, true);
+});
+
+// ── SerpAPI sufficient -> Brave not invoked test ──
+
+test('SerpAPI sufficient: Brave is not invoked', async () => {
+  let braveCalled = false;
+  const providers = [
+    { name: 'ebay', provider: { async search() { return []; } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() {
+      return [
+        { ...candidate, id: 's1', destination: 'https://serpapi.example/1' },
+        { ...candidate, id: 's2', destination: 'https://serpapi.example/2' },
+        { ...candidate, id: 's3', destination: 'https://serpapi.example/3' },
+      ];
+    } }, tier: 'fallback' },
+    { name: 'brave', provider: { async search() { braveCalled = true; return []; } }, tier: 'fallback' },
+  ];
+  const result = await resolveProducts(providers, queries, description, env, undefined, source, verifier);
+  assert.equal(braveCalled, false, 'Brave should not be called when SerpAPI returns sufficient results');
+  assert.equal(result.brave.invoked, false);
+});
+
+// ── SerpAPI and Brave never run in parallel test ──
+
+test('SerpAPI and Brave never run in parallel', async () => {
+  let serpapiRunning = false;
+  let braveRunning = false;
+  let sawParallel = false;
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  const providers = [
+    { name: 'ebay', provider: { async search() { return []; } }, tier: 'primary' },
+    { name: 'serpapi', provider: {
+      async search() {
+        serpapiRunning = true;
+        if (braveRunning) sawParallel = true;
+        await sleep(10);
+        serpapiRunning = false;
+        throw new Error('quota exhausted');
+      },
+      getQuotaInfo() { return { total_searches_left: 0 }; },
+      isQuotaExhausted() { return true; },
+    }, tier: 'fallback' },
+    { name: 'brave', provider: {
+      async search() {
+        braveRunning = true;
+        if (serpapiRunning) sawParallel = true;
+        await sleep(10);
+        braveRunning = false;
+        return [{ ...candidate, id: 'b1', destination: 'https://brave.example/1' }];
+      },
+    }, tier: 'fallback' },
+  ];
+  await resolveProducts(providers, queries, description, env);
+  assert.equal(sawParallel, false, 'SerpAPI and Brave must never run in parallel');
+});
+
+// ── Provider failures remain isolated test ──
+
+test('provider failures remain isolated: Etsy failure does not block eBay results', async () => {
+  const providersUsed = [];
+  const providers = [
+    { name: 'ebay', provider: { async search() {
+      providersUsed.push('ebay');
+      return [{ ...candidate, id: 'e1', destination: 'https://shop.example/1' }];
+    } }, tier: 'primary' },
+    { name: 'etsy', provider: { async search() {
+      providersUsed.push('etsy');
+      throw new Error('Etsy unavailable');
+    } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() { providersUsed.push('serpapi'); return []; } }, tier: 'fallback' },
+  ];
+  const fashionQ = [query('Nike black tee logo'), query('Nike tee'), query('black tee')];
+  const result = await resolveProducts(providers, fashionQ, description, env, undefined, source, verifier);
+  assert.ok(providersUsed.includes('ebay'), 'eBay should still be invoked');
+  assert.ok(providersUsed.includes('etsy'), 'Etsy should be attempted');
+  assert.equal(result.state, 'RESULTS');
+  assert.ok(result.products.length > 0, 'eBay results should be present despite Etsy failure');
+});
+
+test('provider failures remain isolated: Brave failure does not affect SerpAPI', async () => {
+  let serpapiCalled = false;
+  const providers = [
+    { name: 'ebay', provider: { async search() { return []; } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() {
+      serpapiCalled = true;
+      throw new Error('quota exhausted');
+    }, getQuotaInfo() { return { total_searches_left: 0 }; }, isQuotaExhausted() { return true; } }, tier: 'fallback' },
+    { name: 'brave', provider: { async search() { throw new Error('Brave API error'); } }, tier: 'fallback' },
+  ];
+  const result = await resolveProducts(providers, queries, description, env);
+  assert.equal(serpapiCalled, true, 'SerpAPI should be called before Brave');
+  assert.equal(result.serpapi.invoked, true);
+  assert.equal(result.brave.invoked, true);
+  assert.equal(result.brave.timeout_or_failure, true);
+  assert.equal(result.state, 'TEMPORARILY_UNAVAILABLE');
+});
+
+// ── Provider provenance preserved test ──
+
+test('provider provenance preserved through category-aware routing', async () => {
+  const ebayCandidate = { ...candidate, id: 'e1', destination: 'https://shop.example/ebay', provider: 'ebay', provenance: 'ebay:browse' };
+  const etsyCandidate = { ...candidate, id: 'etsy1', destination: 'https://etsy.com/1', provider: 'etsy', provenance: 'etsy:listings' };
+  const providers = [
+    { name: 'ebay', provider: { async search() { return [ebayCandidate]; } }, tier: 'primary' },
+    { name: 'etsy', provider: { async search() { return [etsyCandidate]; } }, tier: 'primary' },
+    { name: 'serpapi', provider: { async search() { return []; } }, tier: 'fallback' },
+  ];
+  const fashionQ = [query('Nike black tee logo'), query('Nike tee'), query('black tee')];
+  const result = await resolveProducts(providers, fashionQ, description, env, undefined, source, verifier);
+  assert.equal(result.state, 'RESULTS');
+  for (const product of result.products) {
+    assert.ok(product.provider, `product ${product.id} should have provider`);
+    assert.ok(['ebay', 'etsy'].includes(product.provider), `provider should be ebay or etsy, got ${product.provider}`);
+    if (product.provider === 'ebay') assert.equal(product.provenance, 'ebay:browse');
+    if (product.provider === 'etsy') assert.equal(product.provenance, 'etsy:listings');
+  }
 });
