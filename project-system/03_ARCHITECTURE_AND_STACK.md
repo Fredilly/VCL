@@ -88,16 +88,58 @@ interface CommerceProvider {
 
 Resolver responsibilities:
 1. normalize product intent,
-2. query providers,
-3. deduplicate,
-4. rank relevance,
-5. label confidence/class,
-6. add commercial metadata only after relevance.
+2. route by category/provider capability,
+3. query primary providers,
+4. invoke fallback providers only when needed,
+5. deduplicate,
+6. verify/rank relevance,
+7. label confidence/class,
+8. add commercial metadata only after relevance.
+
+### Provider routing
+
+Use category-aware routing so provider quotas are not wasted.
+
+Initial routing intent:
+
+```text
+fashion / shoes / watches / bags / jewelry
+    eBay + Etsy
+        ↓
+    SerpAPI
+        ↓
+    Brave Search
+
+electronics / appliances / consumer tech
+    Best Buy + eBay
+        ↓
+    SerpAPI
+        ↓
+    Brave Search
+
+unknown category
+    eBay
+        ↓
+    SerpAPI
+        ↓
+    Brave Search
+```
+
+Rules:
+- primary providers may run in parallel where useful,
+- fallback providers should not run when primary results are already sufficient,
+- one provider failure must not fail the resolver,
+- all provider output normalizes into `ProductCandidate`,
+- provider provenance must remain observable internally,
+- quota-limited general search providers are insurance, not the default path.
 
 Initial candidates:
 - eBay Browse/search APIs,
-- compliant merchant/catalog feeds,
-- additional affiliate/catalog providers whose terms allow extension-originated use.
+- Best Buy product/catalog API for relevant electronics/appliance categories,
+- Etsy API for relevant fashion/accessory/vintage categories,
+- SerpAPI as a quota-protected fallback,
+- Brave Search as a final open-web fallback,
+- additional compliant merchant/catalog feeds whose terms allow extension-originated use.
 
 Amazon:
 - optional future adapter only after terms and required approval are satisfied.
@@ -113,7 +155,7 @@ selected image
         ↓
 canonical intent
         ↓
-commerce adapters
+category-aware commerce routing
         ↓
 candidate normalization
         ↓
@@ -142,7 +184,10 @@ MVP:
 - request IDs,
 - latency per stage,
 - provider error rate,
-- cost estimate per request,
+- provider request/success/no-result/timeout counts,
+- candidate count and accepted count per provider,
+- fallback invocation rate,
+- cost/quota estimate per request,
 - no sensitive frame logging by default.
 
 ## Deployment
