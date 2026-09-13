@@ -34,6 +34,7 @@ export type ProductCandidate = {
   identity_key?: string;
   verification_score?: number;
   verification_reasons?: string[];
+  provider?: string;
 };
 
 export interface CommerceProvider {
