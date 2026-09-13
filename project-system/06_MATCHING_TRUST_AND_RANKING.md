@@ -75,15 +75,63 @@ A commercially promoted candidate.
 
 Product retrieval is only candidate generation.
 
+Target pipeline:
+
+`visual evidence -> candidate retrieval -> candidate-image verification -> contradiction filtering -> multimodal reranking -> canonical product -> merchant offers`
+
+Normalize both source and candidate evidence into comparable fields where available:
+- gender,
+- category,
+- subcategory,
+- dominant color family,
+- sleeve length,
+- neckline,
+- material,
+- brand,
+- model/product family,
+- visible text/markings,
+- distinctive construction/details,
+- silhouette/shape.
+
+Candidate evidence can come from:
+- title,
+- structured provider metadata,
+- merchant/catalog fields,
+- candidate image/thumbnail,
+- trusted contextual metadata.
+
+### Contradiction rule
+
+Unknown is not contradiction.
+
+If a candidate does not state or visibly reveal an attribute, keep it eligible and reduce confidence if appropriate.
+
+Explicit high-confidence contradiction is rejection evidence.
+
+Examples:
+- source is clearly mens, candidate is explicitly womens,
+- source is clearly long sleeve, candidate is clearly short sleeve or sleeveless,
+- source is black, candidate is clearly white/red under reliable color evidence,
+- source is a coat, candidate is clearly a dress/T-shirt,
+- source brand is strongly evidenced as BOSS, candidate is explicitly another brand.
+
+Do not create product- or brand-specific exceptions to make a benchmark case pass.
+
+### Verification order
+
 After retrieval:
-1. normalize candidates,
-2. compare candidate evidence against the selected object,
-3. score visual/text/context agreement,
-4. reject weak candidates,
-5. assign `EXACT`, `LIKELY`, or `SIMILAR`,
-6. only then apply commercial ranking.
+1. normalize candidate evidence and provenance,
+2. compare metadata and candidate images against the selected object,
+3. reject explicit high-confidence contradictions,
+4. score visual/text/context agreement for survivors,
+5. rerank using multimodal evidence,
+6. resolve the best canonical product hypothesis where evidence permits,
+7. assign `EXACT`, `LIKELY`, or `SIMILAR`,
+8. only then apply merchant/commercial ranking.
 
 Search rank is not identity confidence.
+
+A zero-result outcome is correct when no candidate survives the relevance/trust gate.
 
 ## Relevance firewall
 

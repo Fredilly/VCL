@@ -161,18 +161,54 @@ The vision model may propose identity hypotheses, but a model guess is not proof
 ### Spike 4d — Candidate verification
 
 Goal:
-verify retrieved product candidates against visual and contextual evidence.
+verify retrieved product candidates against visual and contextual evidence, using a general pipeline that works across brands and categories.
+
+Target pipeline:
+
+`visual evidence -> broad candidate retrieval -> candidate normalization -> candidate-image verification -> contradiction filtering -> multimodal reranking -> canonical product -> merchant offers`
+
+Required:
+- retrieval is candidate generation, not identity,
+- preserve structured source evidence such as gender, category, subcategory, color family, sleeve length, neckline, material, brand, model, visible text, and distinctive details,
+- derive comparable evidence from candidate title/metadata and candidate image where available,
+- use candidate images as first-class verification evidence,
+- reject explicit high-confidence contradictions before ranking,
+- treat missing/unknown candidate attributes as uncertainty, not contradiction,
+- rerank surviving candidates using visual + text + context agreement,
+- resolve product identity before merchant/commercial ranking,
+- allow zero useful candidates when nothing credible survives.
+
+High-confidence contradiction examples:
+- men vs women,
+- long sleeve vs short sleeve/sleeveless,
+- incompatible dominant color families,
+- coat vs dress vs T-shirt vs sweater,
+- strong brand A vs explicit brand B.
 
 Process:
-1. retrieve candidates,
-2. compare candidate details/images against the selected object,
-3. score evidence agreement,
-4. classify conservatively.
+1. retrieve a broad candidate set,
+2. normalize candidate attributes and provenance,
+3. compare candidate details/images against the selected object,
+4. reject explicit contradictions,
+5. score remaining evidence agreement,
+6. resolve the best canonical product hypothesis,
+7. classify conservatively as `EXACT`, `LIKELY`, or `SIMILAR`,
+8. only then apply merchant/commercial ranking.
 
 Do not mark a candidate `EXACT` because:
 - a model guessed the brand/model,
 - a text query matched,
-- a shopping provider ranked it first.
+- a shopping provider ranked it first,
+- the candidate shares only broad category or color.
+
+Acceptance:
+- across multiple brands and product categories, obvious contradictions are rejected,
+- good candidates survive when evidence is incomplete but not contradictory,
+- search rank never overrides stronger visual evidence,
+- zero-result is acceptable when no credible candidate survives,
+- no brand-specific rule is required for a benchmark item to pass.
+
+Do not add custom model training merely to compensate for weak retrieval or verification. Measure the commodity stack first.
 
 ### Spike 4e — Multi-frame evidence
 

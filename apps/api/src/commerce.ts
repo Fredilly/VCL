@@ -290,8 +290,6 @@ export function buildProductQueryVariants(description: ObjectDescription, contex
   const visual = uniqueNonEmpty([
     type || description.subcategory,
     description.color,
-    description.material,
-    ...description.style_attributes.slice(0, 2),
   ]).join(' ');
   if (visual) variants.push(visual);
 

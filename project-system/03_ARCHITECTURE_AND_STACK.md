@@ -89,12 +89,14 @@ interface CommerceProvider {
 Resolver responsibilities:
 1. normalize product intent,
 2. route by category/provider capability,
-3. query primary providers,
+3. query providers broadly enough to preserve recall,
 4. invoke fallback providers only when needed,
 5. deduplicate,
-6. verify/rank relevance,
-7. label confidence/class,
-8. add commercial metadata only after relevance.
+6. normalize candidate evidence and provenance,
+7. pass candidates through verification,
+8. resolve a canonical product hypothesis where evidence permits,
+9. label confidence/class,
+10. add merchant/commercial metadata only after relevance and identity verification.
 
 ### Provider routing
 
@@ -145,7 +147,7 @@ Amazon:
 - optional future adapter only after terms and required approval are satisfied.
 - never a foundational dependency.
 
-## Ranking pipeline
+## Product-resolution and ranking pipeline
 
 ```text
 selected image
@@ -157,14 +159,34 @@ canonical intent
         ↓
 category-aware commerce routing
         ↓
+broad candidate retrieval
+        ↓
 candidate normalization
         ↓
-visual/text relevance
+candidate-image + metadata verification
         ↓
-availability / geography / price
+hard contradiction filtering
+        ↓
+multimodal relevance reranking
+        ↓
+canonical product resolution
+        ↓
+EXACT / LIKELY / SIMILAR
+        ↓
+merchant offers / availability / geography / price
         ↓
 commercial ranking within relevance threshold
 ```
+
+Candidate verification is a distinct layer between retrieval and ranking.
+
+Rules:
+- retrieval rank is never identity confidence,
+- candidate images are first-class evidence when available,
+- explicit high-confidence contradictions are rejected before scoring,
+- unknown or missing attributes do not count as contradictions,
+- product identity is resolved before merchant economics are considered,
+- zero credible candidates is a valid outcome.
 
 ## Cache
 

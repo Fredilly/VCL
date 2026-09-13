@@ -41,6 +41,14 @@ test('provider rank, copied category/brand/model, price and merchant cannot crea
   assert.equal(verifyCandidate(description, fake).product, null);
 });
 
+test('type and audience alone are too weak when image comparison is unavailable', () => {
+  const { description, candidate } = example(apparelCases[0]);
+  candidate.title = 'Men t-shirt'; candidate.metadata = {};
+  assert.equal(verifyCandidate(description, candidate).product, null);
+  candidate.title = 'Men black t-shirt';
+  assert.equal(verifyCandidate(description, candidate).product.result_class, 'SIMILAR');
+});
+
 test('strong multimodal agreement is LIKELY; missing brand and metadata-only matches are SIMILAR', () => {
   const { description, candidate, comparison } = example(apparelCases[0]);
   assert.equal(verifyCandidate(description, candidate, comparison).product.result_class, 'LIKELY');
@@ -82,7 +90,7 @@ test('visual relevance precedes provider order and price; ties are deterministic
 
 test('generic visual attributes cannot masquerade as distinctive identity evidence', () => {
   const { description, candidate, comparison } = example(apparelCases[0]);
-  comparison.matching_details = ['short sleeve t-shirt', 'black color', 'crew neckline'];
+  comparison.matching_details = ['short sleeve t-shirt', 'black color', 'crew neckline', 'solid black color scheme', 'short sleeves and regular casual fit'];
   assert.equal(verifyCandidate(description, candidate, comparison).product.result_class, 'SIMILAR');
 });
 
@@ -104,6 +112,32 @@ test('explicit kids products cannot match an adult selection, regardless of bran
 
 test('weak visual similarity is removed even if broad metadata agrees', () => {
   const { description, candidate, comparison } = example(apparelCases[0]);
-  comparison.similarity = 0.4;
-  assert.equal(verifyCandidate(description, candidate, comparison).product, null);
+  for (const confidence of [0.65, 0.8, 0.95]) {
+    for (const similarity of [0.15, 0.4, 0.59]) {
+      assert.equal(verifyCandidate(description, candidate, { ...comparison, confidence, similarity }).product, null);
+    }
+  }
+  assert.ok(verifyCandidate(description, candidate, { ...comparison, confidence: 0.4, similarity: 0.4 }).product,
+    'unreliable comparison remains uncertainty');
+});
+
+test('cap sleeves contradict clearly sleeveless selections across brands', () => {
+  for (const [brand] of apparelCases) {
+    const { description, candidate } = example([brand, 'dress', 'black', 'sleeveless', 'women']);
+    candidate.title = `${brand} Black Cap-Sleeved Dress`;
+    assert.equal(verifyCandidate(description, candidate).product, null, brand);
+  }
+});
+
+test('a secondary logo color is not evidence of a contradictory dominant color', () => {
+  const { description, candidate } = example(apparelCases[0]);
+  candidate.title = 'Nike t-shirt with red logo'; candidate.metadata = {};
+  assert.ok(verifyCandidate(description, candidate).product);
+});
+
+test('strong matching model and images can establish LIKELY without invented distinctive details', () => {
+  const { description, candidate, comparison } = example(apparelCases[0]);
+  description.model_candidate = 'Family 123'; candidate.metadata.model = 'Family 123';
+  comparison.matching_details = [];
+  assert.equal(verifyCandidate(description, candidate, comparison).product.result_class, 'LIKELY');
 });

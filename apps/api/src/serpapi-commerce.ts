@@ -14,6 +14,7 @@ type SerpApiShoppingResult = {
   price?: string;
   extracted_price?: number;
   thumbnail?: string;
+  snippet?: string;
 };
 
 type SerpApiShoppingResponse = {
@@ -74,12 +75,13 @@ export class SerpApiCommerceProvider implements CommerceProvider {
     const results = (payload.shopping_results ?? []).filter((item) => Boolean(item.title));
     if (results.length === 0) throw new CommerceNoResultsError();
 
-    return results.slice(0, 8).map((item): ProductCandidate => ({
+    return results.slice(0, 12).map((item): ProductCandidate => ({
       id: item.product_id ?? crypto.randomUUID(),
       title: item.title ?? '',
-      brand: query.brand,
-      model: query.model,
-      category: query.subcategory || query.category || null,
+      brand: null,
+      model: null,
+      category: null,
+      metadata: { description: item.snippet?.slice(0, 800) },
       image_reference: item.thumbnail ?? null,
       provenance: item.source ? `serpapi:google-shopping:${item.source}` : 'serpapi:google-shopping',
       destination: item.product_link ?? null,

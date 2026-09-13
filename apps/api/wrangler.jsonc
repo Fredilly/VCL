@@ -4,6 +4,12 @@
   "main": "src/server.ts",
   "compatibility_date": "2026-09-11",
   "workers_dev": true,
+  // Preserve dashboard-managed environment selection, including EBAY_ENVIRONMENT.
+  "keep_vars": true,
+  "observability": {
+    "enabled": true,
+    "traces": { "enabled": true, "head_sampling_rate": 0.01 }
+  },
   "vars": {
     "VISION_PROVIDER": "gemini",
     "GEMINI_MODEL": "gemini-3.5-flash-lite"

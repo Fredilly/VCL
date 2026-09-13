@@ -67,7 +67,7 @@ export function sleeve(text: string): string | null {
   const value = normalize(text);
   const found = [
     /\b(long sleeves?|long sleeved|longsleeve)\b/.test(value) ? 'long' : null,
-    /\b(short sleeves?|short sleeved|shortsleeve)\b/.test(value) ? 'short' : null,
+    /\b(short sleeves?|short sleeved|shortsleeve|cap sleeves?|cap sleeved)\b/.test(value) ? 'short' : null,
     /\b(sleeveless|tank top|vest top)\b/.test(value) ? 'sleeveless' : null,
     /\b(three quarter|3 4)\b/.test(value) ? 'three quarter' : null,
   ].filter(Boolean);

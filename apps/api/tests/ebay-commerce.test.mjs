@@ -379,7 +379,7 @@ test('eBay adapter: category from eBay categories array', async () => {
   assert.equal(result.category, 'Athletic Shoes');
 });
 
-test('eBay adapter: falls back to query category when eBay has no categories', async () => {
+test('eBay adapter: missing attributes stay unknown instead of copying the query', async () => {
   const ctx = makeEbayContext(makeMockAuth(), {
     fetch: async () => Response.json({
       itemSummaries: [{ itemId: '1', title: 'Item' }],
@@ -390,7 +390,10 @@ test('eBay adapter: falls back to query category when eBay has no categories', a
 
   const provider = new EbayCommerceProvider(makeMockAuth());
   const [result] = await provider.search(query);
-  assert.equal(result.category, 'Sneakers');
+  assert.equal(result.category, null);
+  assert.equal(result.brand, null);
+  assert.equal(result.model, null);
+  assert.equal(result.metadata.category, undefined);
 });
 
 test('eBay adapter: searchByImage sends POST to search_by_image endpoint', async () => {
@@ -518,7 +521,7 @@ test('eBay adapter: searchByImage does not swallow non-commerce errors from keyw
   assert.equal(callCount, 2, 'should attempt keyword fallback after image search error');
 });
 
-test('eBay adapter: caps results at 8', async () => {
+test('eBay adapter: retrieves 12 candidates before verification limits display', async () => {
   const items = Array.from({ length: 15 }, (_, i) => ({
     itemId: String(i), title: `Item ${i}`, price: { value: '10.00', currency: 'USD' },
   }));
@@ -530,5 +533,5 @@ test('eBay adapter: caps results at 8', async () => {
 
   const provider = new EbayCommerceProvider(makeMockAuth());
   const results = await provider.search(query);
-  assert.equal(results.length, 8);
+  assert.equal(results.length, 12);
 });

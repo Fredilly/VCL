@@ -33,9 +33,10 @@ function normalizeItem(item: EbayItemSummary, query: ProductQuery): ProductCandi
   return {
     id: item.itemId ?? crypto.randomUUID(),
     title,
-    brand: query.brand ?? item.brand?.brandName ?? null,
-    model: query.model ?? null,
-    category: item.categories?.[0]?.categoryName ?? (query.subcategory || query.category || null),
+    brand: item.brand?.brandName ?? null,
+    model: null,
+    category: item.categories?.[0]?.categoryName ?? null,
+    metadata: { brand: item.brand?.brandName, category: item.categories?.[0]?.categoryName },
     image_reference: item.image?.imageUrl ?? null,
     provenance: 'ebay:browse',
     destination: item.itemWebUrl ?? null,
@@ -61,7 +62,7 @@ export class EbayCommerceProvider implements CommerceProvider {
     const baseUrl = this.auth.getBrowseBaseUrl();
     const url = new URL('/buy/browse/v1/item_summary/search', baseUrl);
     url.searchParams.set('q', query.query);
-    url.searchParams.set('limit', '8');
+    url.searchParams.set('limit', '12');
 
     return this.fetchItems(url, token, query, { method: 'GET' });
   }
@@ -72,7 +73,7 @@ export class EbayCommerceProvider implements CommerceProvider {
 
     try {
       const url = new URL('/buy/browse/v1/item_summary/search_by_image', baseUrl);
-      url.searchParams.set('limit', '8');
+      url.searchParams.set('limit', '12');
 
       return await this.fetchItems(url, token, query, {
         method: 'POST',
@@ -126,6 +127,6 @@ export class EbayCommerceProvider implements CommerceProvider {
     const items = (payload.itemSummaries ?? []).filter((item) => Boolean(item.title));
     if (items.length === 0) throw new CommerceNoResultsError('eBay returned no results.');
 
-    return items.slice(0, 8).map((item) => normalizeItem(item, query));
+    return items.slice(0, 12).map((item) => normalizeItem(item, query));
   }
 }

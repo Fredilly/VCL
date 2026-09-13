@@ -93,10 +93,13 @@ export function verifyCandidate(
     }
   }
   const visual = comparison && comparison.confidence >= 0.65 ? comparison.similarity : 0;
-  if (comparison && comparison.confidence >= HIGH && visual < 0.55) return { product: null, reasons: ['insufficient visual agreement'] };
+  // A usable comparison must contribute positive visual relevance. This is an eligibility
+  // threshold, not a claim of an attribute contradiction; truly uncertain images stay unknown.
+  if (comparison && comparison.confidence >= 0.65 && visual < 0.6) return { product: null, reasons: ['insufficient visual agreement'] };
   if (visual >= 0.6) { score += Math.round(visual * 30); reasons.push('selected crop and candidate image agree'); }
   // Do not double-count basic attributes when the model repeats them as "distinctive" details.
   const basicTokens = new Set(['matching', 'same', 'both', 'product', 'garment', 'color', 'colour', 'sleeve', 'sleeves', 'neck', 'neckline', 'necklines', 'crew', 'round', 'short', 'long', 'shirt', 't',
+    'solid', 'plain', 'basic', 'simple', 'scheme', 'regular', 'casual', 'fit', 'style', 'design', 'and', 'with', 'a', 'the',
     ...attributes.flatMap((key) => normalize(expected[key]?.value).split(' '))]);
   const details = (comparison?.matching_details ?? []).filter((detail) => normalize(detail).split(' ').filter((token) => !basicTokens.has(token)).length >= 2);
   const detailCount = visual >= 0.6 ? Math.min(new Set(details.map(normalize)).size, 3) : 0;
@@ -106,10 +109,11 @@ export function verifyCandidate(
   if (visual >= 0.6 && matched.has('brand') && matched.has('subtype') && context?.title && expected.brand?.value && phrase(context.title, expected.brand.value)) {
     score += 2; reasons.push('context corroborates visual identity');
   }
-  if ((!matched.has('subtype') && visual < 0.65) || score < 20) return { product: null, reasons: ['insufficient positive relevance evidence'] };
+  const usefulMetadata = matched.has('subtype') && (matched.has('brand') || matched.has('color'));
+  if ((!usefulMetadata && visual < 0.65) || score < 20) return { product: null, reasons: ['insufficient positive relevance evidence'] };
   const likely = !brandDisagrees && !identityConflict && visual >= 0.8 && (comparison?.confidence ?? 0) >= HIGH && matched.has('subtype')
     && (matched.has('brand') || (!description.brand_candidate && detailCount >= 2))
-    && (matched.has('model') || detailCount >= 1) && score >= 60;
+    && (matched.has('model') || detailCount >= 2) && score >= 60;
   // Search IDs and model guesses are not verified SKU evidence. Never manufacture EXACT.
   const result_class = likely ? 'LIKELY' : 'SIMILAR';
   if (!comparison) reasons.push('image comparison unavailable; identity remains uncertain');
