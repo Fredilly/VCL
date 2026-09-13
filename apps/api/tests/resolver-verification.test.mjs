@@ -46,9 +46,9 @@ test('production HTTP route forwards the source crop to Gemini and applies image
 test('resolver broadens after every first-query candidate is rejected and uses surviving provider', async () => {
   const calls = [];
   const providers = [
-    { name: 'failed', provider: { async search() { throw new Error('Unavailable'); } } },
+    { name: 'failed', provider: { async search() { throw new Error('Unavailable'); } }, tier: 'primary' },
     { name: 'working', provider: { async search(q) { calls.push(q.query); return q.query === queries[0].query
-      ? [{ ...candidate, title: 'Red dress', image_reference: null }] : [candidate]; } } },
+      ? [{ ...candidate, title: 'Red dress', image_reference: null }] : [candidate]; } }, tier: 'primary' },
   ];
   const result = await resolveProducts(providers, queries, description, {});
   assert.equal(result.state, 'RESULTS'); assert.equal(result.attempts, 3);
@@ -62,7 +62,7 @@ test('all candidates rejected by images returns NO_RESULTS after broadening', as
     for (const [key, value] of result.comparisons) result.comparisons.set(key, { ...value, candidate: { ...value.candidate, color: { value: 'red', confidence: 0.99, basis: 'image' } } });
     return result;
   };
-  const result = await resolveProducts([{ name: 'test', provider: { async search() { return [candidate]; } } }], queries, description, env, undefined, source, bad);
+  const result = await resolveProducts([{ name: 'test', provider: { async search() { return [candidate]; } }, tier: 'primary' }], queries, description, env, undefined, source, bad);
   assert.equal(result.state, 'NO_RESULTS'); assert.equal(result.attempts, 3); assert.equal(result.products.length, 0);
   assert.equal(result.verification.compared, 1, 'duplicate offers are compared only once per request');
 });
@@ -76,13 +76,13 @@ test('resolver verifies all retrieved images before limiting offers; stronger la
     for (const p of args[4]) if (p.id !== '11') result.comparisons.set(candidateKey(p), { ...comparison, similarity: 0.62 });
     return result;
   };
-  const result = await resolveProducts([{ name: 'test', provider: { async search() { return products; } } }], queries, description, env, undefined, source, compare);
+  const result = await resolveProducts([{ name: 'test', provider: { async search() { return products; } }, tier: 'primary' }], queries, description, env, undefined, source, compare);
   assert.equal(received, 12); assert.equal(result.products.length, 8); assert.equal(result.products[0].id, '11');
 });
 
 test('missing images keep credible type matches as SIMILAR without claiming verification', async () => {
   const unavailable = async () => ({ comparisons: new Map(), compared: 0, failures: 1 });
-  const result = await resolveProducts([{ name: 'test', provider: { async search() { return [candidate]; } } }], queries, description, env, undefined, source, unavailable);
+  const result = await resolveProducts([{ name: 'test', provider: { async search() { return [candidate]; } }, tier: 'primary' }], queries, description, env, undefined, source, unavailable);
   assert.equal(result.products[0].result_class, 'SIMILAR');
   assert.equal(result.products[0].verification_status, 'metadata_only');
   assert.equal(result.verification.image_failures, 1);
