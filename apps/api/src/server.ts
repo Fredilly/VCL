@@ -7,22 +7,31 @@ import { candidateKey, compareCandidateImages, parseSourceImage, imageRequestBud
 import type { ImageComparison } from './verification-evidence.js';
 import { EbayAuth } from './ebay-auth.js';
 import { EbayCommerceProvider } from './ebay-commerce.js';
+import { resolveEbayCredentials, type EbayCredentials } from './ebay-credentials.js';
 import { SerpApiCommerceProvider } from './serpapi-commerce.js';
 
-export interface Env { GEMINI_API_KEY?: string; GROQ_API_KEY?: string; VISION_PROVIDER?: string; GEMINI_MODEL?: string; EBAY_CLIENT_ID?: string; EBAY_CLIENT_SECRET?: string; EBAY_SANDBOX?: string; SERPAPI_API_KEY?: string; COMMERCE_PROVIDER?: string; }
+export interface Env {
+  GEMINI_API_KEY?: string;
+  GROQ_API_KEY?: string;
+  VISION_PROVIDER?: string;
+  GEMINI_MODEL?: string;
+  EBAY_SANDBOX_CLIENT_ID?: string;
+  EBAY_SANDBOX_CLIENT_SECRET?: string;
+  EBAY_PRODUCTION_CLIENT_ID?: string;
+  EBAY_PRODUCTION_CLIENT_SECRET?: string;
+  EBAY_DEV_ID?: string;
+  EBAY_ENVIRONMENT?: string;
+  EBAY_CLIENT_ID?: string;
+  EBAY_CLIENT_SECRET?: string;
+  EBAY_SANDBOX?: string;
+  SERPAPI_API_KEY?: string;
+  COMMERCE_PROVIDER?: string;
+}
+
 type NamedCommerceProvider = { name: string; provider: CommerceProvider };
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 function logSafeError(error: unknown) { console.error('VCL API error', error instanceof Error ? { name: error.name, message: error.message } : { name: typeof error, message: String(error) }); }
-
-function commerceProviders(env: Env): NamedCommerceProvider[] {
-  const providers: NamedCommerceProvider[] = [];
-  if (env.SERPAPI_API_KEY) providers.push({ name: 'serpapi', provider: new SerpApiCommerceProvider(env.SERPAPI_API_KEY) });
-  if (env.EBAY_CLIENT_ID && env.EBAY_CLIENT_SECRET) providers.push({ name: 'ebay', provider: new EbayCommerceProvider(new EbayAuth({ clientId: env.EBAY_CLIENT_ID, clientSecret: env.EBAY_CLIENT_SECRET, sandbox: env.EBAY_SANDBOX !== 'false' })) });
-  if (env.COMMERCE_PROVIDER === 'serpapi') return providers.filter(({ name }) => name === 'serpapi');
-  if (env.COMMERCE_PROVIDER === 'ebay') return providers.filter(({ name }) => name === 'ebay');
-  return providers;
-}
 
 function dedupeProducts(products: ProductCandidate[]) {
   const seen = new Set<string>(); const out: ProductCandidate[] = [];
@@ -34,6 +43,27 @@ function normalizeContext(value: unknown): ProductContext | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const v = value as Record<string, unknown>;
   return { platform: typeof v.platform === 'string' ? v.platform.slice(0, 40) : null, title: typeof v.title === 'string' ? v.title.slice(0, 300) : null };
+}
+
+function makeEbayAuth(creds: EbayCredentials): EbayAuth {
+  return new EbayAuth({ clientId: creds.clientId, clientSecret: creds.clientSecret, sandbox: creds.sandbox });
+}
+
+function commerceProviders(env: Env): NamedCommerceProvider[] {
+  const serpapi: NamedCommerceProvider | null = env.SERPAPI_API_KEY
+    ? { name: 'serpapi', provider: new SerpApiCommerceProvider(env.SERPAPI_API_KEY) }
+    : null;
+
+  let ebay: NamedCommerceProvider | null = null;
+  const ebayCreds = resolveEbayCredentials(env);
+  if (ebayCreds) {
+    ebay = { name: 'ebay', provider: new EbayCommerceProvider(makeEbayAuth(ebayCreds)) };
+  }
+
+  if (env.COMMERCE_PROVIDER === 'serpapi') return serpapi ? [serpapi] : [];
+  if (env.COMMERCE_PROVIDER === 'ebay') return ebay ? [ebay] : [];
+
+  return [serpapi, ebay].filter((entry): entry is NamedCommerceProvider => Boolean(entry));
 }
 
 export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages) {

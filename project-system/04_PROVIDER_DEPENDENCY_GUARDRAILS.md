@@ -100,13 +100,34 @@ https://developer.bestbuy.com/
 
 Use as a category-specific provider for fashion/accessories, jewelry, handmade and vintage coverage where current API terms permit the extension flow.
 
+Provider handling class:
+- `fresh-query`,
+- `low-cache`,
+- `direct-link-required`,
+- `OPTIONAL` / `REPLACEABLE`.
+
 Rules:
 - normalize through `CommerceProvider`,
+- query Etsy through the documented API only; do not scrape Etsy pages or reverse engineer internal feeds,
+- link directly back to the relevant Etsy listing/product when Etsy product information or images are shown,
+- keep Etsy product information and images fresh; do not display product information/images more than six hours older than Etsy's current data,
+- cache only for short operational periods needed to serve the user flow; do not treat Etsy as a permanent local catalog,
+- preserve provider provenance so Etsy-sourced results remain distinguishable,
 - do not infer exact identity from a title match alone,
-- verify current application quota, authentication, display rights, caching and commercial-use requirements before shipping,
+- do not replace Etsy checkout or reproduce Etsy's essential user experience,
+- do not use Etsy primarily to divert users to non-Etsy destinations,
+- do not store/process Etsy member personal data unless specifically authorized,
+- respect Etsy trademark/attribution requirements if Etsy marks or branding are displayed,
+- include the required Etsy API non-endorsement notice in the public application before shipping Etsy integration,
+- re-check commercial-use rules before monetizing any VCL surface that includes Etsy data,
 - if approval/access friction is material, keep Etsy optional rather than blocking the MVP.
 
-Primary source to verify during integration:
+Operational implication:
+VCL may identify the object and rank candidate listings, but Etsy should remain a fresh result source whose Etsy candidate links take the user back to Etsy.
+
+Terms reviewed 2026-09-13 from Etsy API Terms of Use.
+Primary references:
+https://www.etsy.com/developers
 https://developers.etsy.com/
 
 ## SerpAPI
