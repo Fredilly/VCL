@@ -8,6 +8,8 @@ import type { ImageComparison } from './verification-evidence.js';
 import { EbayAuth } from './ebay-auth.js';
 import { EbayCommerceProvider } from './ebay-commerce.js';
 import { resolveEbayCredentials, type EbayCredentials } from './ebay-credentials.js';
+import { EtsyCommerceProvider } from './etsy-commerce.js';
+import { resolveEtsyCredentials, type EtsyCredentials } from './etsy-credentials.js';
 import { SerpApiCommerceProvider } from './serpapi-commerce.js';
 
 export interface Env {
@@ -26,6 +28,8 @@ export interface Env {
   EBAY_SANDBOX?: string;
   SERPAPI_API_KEY?: string;
   COMMERCE_PROVIDER?: string;
+  ETSY_KEYSTRING?: string;
+  ETSY_SHARED_SECRET?: string;
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider };
@@ -60,10 +64,17 @@ function commerceProviders(env: Env): NamedCommerceProvider[] {
     ebay = { name: 'ebay', provider: new EbayCommerceProvider(makeEbayAuth(ebayCreds)) };
   }
 
+  let etsy: NamedCommerceProvider | null = null;
+  const etsyCreds = resolveEtsyCredentials(env);
+  if (etsyCreds) {
+    etsy = { name: 'etsy', provider: new EtsyCommerceProvider(etsyCreds) };
+  }
+
   if (env.COMMERCE_PROVIDER === 'serpapi') return serpapi ? [serpapi] : [];
   if (env.COMMERCE_PROVIDER === 'ebay') return ebay ? [ebay] : [];
+  if (env.COMMERCE_PROVIDER === 'etsy') return etsy ? [etsy] : [];
 
-  return [serpapi, ebay].filter((entry): entry is NamedCommerceProvider => Boolean(entry));
+  return [serpapi, ebay, etsy].filter((entry): entry is NamedCommerceProvider => Boolean(entry));
 }
 
 export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages) {
