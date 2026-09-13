@@ -85,7 +85,7 @@ function commerceProviders(env: Env): NamedCommerceProvider[] {
   if (env.COMMERCE_PROVIDER === 'etsy') return etsy ? [etsy] : [];
   if (env.COMMERCE_PROVIDER === 'brave') return brave ? [brave] : [];
 
-  return [ebay, etsy, serpapi, brave].filter((entry): entry is NamedCommerceProvider => Boolean(entry));
+  return [serpapi, ebay].filter((entry): entry is NamedCommerceProvider => Boolean(entry));
 }
 
 const LIKELY_CANDIDATE_THRESHOLD = 3;
@@ -100,16 +100,27 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
   const verification = { retrieved: 0, compared: 0, image_failures: 0, image_failure_reasons: {} as Record<string, number>, rejected: 0, contradictions: {} as Record<string, number> };
 
   const primaryProviders = providers.filter((p) => p.tier === 'primary');
-  const fallbackProviders = providers.filter((p) => p.tier === 'fallback');
+  const serpapiProvider = providers.find((p) => p.name === 'serpapi') ?? null;
   let skipSerpApi = false;
-  let serpApiQuota: SerpApiQuotaInfo | undefined;
   const serpapiTelemetry: { invoked: boolean; skipped: boolean; skip_reason?: string; success: boolean; no_result: boolean; timeout_or_failure: boolean; quota_exhausted: boolean; remaining_quota?: number } = {
     invoked: false, skipped: false, success: false, no_result: false, timeout_or_failure: false, quota_exhausted: false,
   };
 
-  const respond = (query: ProductQuery) => ({ query, products: dedupeProducts(rankVerified(accepted)),
+  const respond = (query: ProductQuery) => {
+    // Capture SerpAPI quota info for telemetry if available.
+    if (serpapiProvider && serpapiProvider.provider instanceof SerpApiCommerceProvider) {
+      const quota = serpapiProvider.provider.getQuotaInfo();
+      serpapiTelemetry.remaining_quota = quota.total_searches_left;
+      if (serpapiProvider.provider.isQuotaExhausted()) {
+        serpapiTelemetry.quota_exhausted = true;
+        serpapiTelemetry.skipped = true;
+        serpapiTelemetry.skip_reason = 'quota_exhausted';
+      }
+    }
+    return { query, products: dedupeProducts(rankVerified(accepted)),
     state: accepted.length ? 'RESULTS' as const : sawProviderFailure ? 'TEMPORARILY_UNAVAILABLE' as const : 'NO_RESULTS' as const,
-    providers_used: [...providersUsed], attempts, verification, serpapi: serpapiTelemetry });
+    providers_used: [...providersUsed], attempts, verification, serpapi: serpapiTelemetry };
+  };
   for (const query of queries) {
     if (!activeProviders.length) break;
     attempts++;
@@ -149,36 +160,42 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       }
     }
 
+    // Mark SerpAPI as skipped when primary results are sufficient, before any early exit.
+    if (!skipSerpApi && accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD) {
+      serpapiTelemetry.skipped = true;
+      serpapiTelemetry.skip_reason = 'upstream_sufficient';
+      skipSerpApi = true;
+    }
+
     // Early exit if we already have enough LIKELY candidates from primary providers.
     if (accepted.filter((product) => product.result_class === 'LIKELY').length >= LIKELY_CANDIDATE_THRESHOLD) return respond(query);
 
-    // --- Tier 2: Run fallback providers (SerpAPI, Brave) if primary candidates are insufficient ---
-    const totalCandidates = accepted.length + verification.retrieved;
-    const shouldSkipSerpApi = skipSerpApi || totalCandidates >= SUFFICIENT_CANDIDATE_THRESHOLD;
+    // --- Tier 2: Run SerpAPI fallback if primary accepted candidates are insufficient ---
+    const shouldSkipSerpApi = skipSerpApi || accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD;
 
-    if (!shouldSkipSerpApi) {
-      const activeFallback = fallbackProviders.filter((p) => activeProviders.some((a) => a.name === p.name));
-      if (activeFallback.length) {
-        serpapiTelemetry.invoked = true;
-        const settled = await Promise.allSettled(activeFallback.map(async ({ name, provider }) => { providersUsed.add(name); return provider.search(query); }));
-        const products: ProductCandidate[] = []; const failedProviders = new Set<string>();
-        settled.forEach((result, index) => {
-          const providerName = activeFallback[index].name;
-          if (result.status === 'fulfilled') { products.push(...result.value); if (providerName === 'serpapi') serpapiTelemetry.success = true; return; }
-          if (result.reason instanceof CommerceNoResultsError) { if (providerName === 'serpapi') serpapiTelemetry.no_result = true; return; }
-          sawProviderFailure = true; failedProviders.add(providerName); logSafeError(result.reason);
-          if (providerName === 'serpapi') {
-            serpapiTelemetry.timeout_or_failure = true;
-            const msg = result.reason instanceof Error ? result.reason.message : '';
-            if (msg.includes('quota exhausted') || msg.includes('HTTP 429')) {
-              serpapiTelemetry.quota_exhausted = true;
-              skipSerpApi = true;
-            }
+    if (!shouldSkipSerpApi && serpapiProvider && activeProviders.some((a) => a.name === 'serpapi')) {
+      serpapiTelemetry.invoked = true;
+      let result;
+      try {
+        providersUsed.add('serpapi');
+        result = await serpapiProvider.provider.search(query);
+        serpapiTelemetry.success = true;
+      } catch (error) {
+        if (error instanceof CommerceNoResultsError) { serpapiTelemetry.no_result = true; }
+        else {
+          sawProviderFailure = true;
+          serpapiTelemetry.timeout_or_failure = true;
+          const msg = error instanceof Error ? error.message : '';
+          if (msg.includes('quota exhausted') || msg.includes('HTTP 429')) {
+            serpapiTelemetry.quota_exhausted = true;
+            skipSerpApi = true;
           }
-        });
-        if (failedProviders.size) activeProviders = activeProviders.filter(({ name }) => !failedProviders.has(name));
-
-        const fresh = products.slice(0, 24).filter((product) => {
+          logSafeError(error);
+          activeProviders = activeProviders.filter(({ name }) => name !== 'serpapi');
+        }
+      }
+      if (result) {
+        const fresh = result.slice(0, 24).filter((product) => {
           const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
         });
         verification.retrieved += fresh.length;
@@ -199,26 +216,10 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
           }
         }
       }
-    } else if (!skipSerpApi) {
-      serpapiTelemetry.skipped = true;
-      serpapiTelemetry.skip_reason = 'upstream_sufficient';
-      skipSerpApi = true;
     }
 
     // A weak first page must not suppress the broader searches. No merchant/price ordering here.
     if (accepted.filter((product) => product.result_class === 'LIKELY').length >= 3) return respond(query);
-  }
-
-  // Capture SerpAPI quota info for telemetry if available.
-  const serpapiProvider = providers.find((p) => p.name === 'serpapi');
-  if (serpapiProvider && serpapiProvider.provider instanceof SerpApiCommerceProvider) {
-    serpApiQuota = serpapiProvider.provider.getQuotaInfo();
-    serpapiTelemetry.remaining_quota = serpApiQuota.total_searches_left;
-    if (serpapiProvider.provider.isQuotaExhausted()) {
-      serpapiTelemetry.quota_exhausted = true;
-      serpapiTelemetry.skipped = true;
-      serpapiTelemetry.skip_reason = 'quota_exhausted';
-    }
   }
 
   return respond(queries[Math.max(0, Math.min(attempts - 1, queries.length - 1))]);
