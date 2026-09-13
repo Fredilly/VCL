@@ -72,7 +72,11 @@ function parsePrice(price?: EtsyPrice): { price: string | null; currency: string
   return { price: value, currency: price.currency_code ?? null };
 }
 
-function normalizeListing(listing: EtsyListingResult, query: ProductQuery): ProductCandidate | null {
+function freshnessTimestamp(listing: EtsyListingResult): number | undefined {
+  return listing.last_modified_timestamp ?? listing.updated_timestamp ?? listing.created_timestamp;
+}
+
+function normalizeListing(listing: EtsyListingResult, query: ProductQuery, fetchedAt: number): ProductCandidate | null {
   const title = (listing.title ?? '').trim();
   if (!title) return null;
   const { price, currency } = parsePrice(listing.price);
@@ -81,6 +85,8 @@ function normalizeListing(listing: EtsyListingResult, query: ProductQuery): Prod
     title.toLowerCase().includes(query.brand.toLowerCase()) &&
     title.toLowerCase().includes(query.model.toLowerCase()),
   );
+
+  const listingTs = freshnessTimestamp(listing);
 
   return {
     id: listing.listing_id != null ? String(listing.listing_id) : crypto.randomUUID(),
@@ -92,6 +98,7 @@ function normalizeListing(listing: EtsyListingResult, query: ProductQuery): Prod
       description: listing.description?.slice(0, 800),
       category: listing.tags?.slice(0, 5).join(', '),
       material: listing.materials?.[0],
+      freshness: `${fetchedAt}${listingTs != null ? ':' + listingTs : ''}`,
     },
     image_reference: null,
     provenance: 'etsy:listings',
@@ -188,8 +195,9 @@ export class EtsyCommerceProvider implements CommerceProvider {
       throw new CommerceNoResultsError('Etsy returned no results.');
     }
 
+    const fetchedAt = Date.now();
     const candidates = results
-      .map((listing) => normalizeListing(listing, query))
+      .map((listing) => normalizeListing(listing, query, fetchedAt))
       .filter((c): c is ProductCandidate => c !== null);
 
     if (candidates.length === 0) {

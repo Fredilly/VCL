@@ -194,6 +194,39 @@ test('SerpAPI invoked when primary returns fewer than threshold accepted', async
   assert.equal(result.serpapi.invoked, true);
 });
 
+test('raw sufficient but verified insufficient: fallbacks still run', async () => {
+  const providersUsed = [];
+  const rejectVerifier = async (_key, _model, _source, _description, products) => ({
+    comparisons: new Map(products.map((p) => [candidateKey(p), { ...comparison, candidate: { ...comparison.candidate, color: { value: 'contradicted', confidence: 0.99 } }, similarity: 0.01, confidence: 0.99 }])),
+    compared: products.length, failures: 0,
+  });
+  const providers = [
+    { name: 'ebay', provider: { async search() {
+      providersUsed.push('ebay');
+      return [
+        { ...candidate, id: 'e1', destination: 'https://shop.example/1' },
+        { ...candidate, id: 'e2', destination: 'https://shop.example/2' },
+        { ...candidate, id: 'e3', destination: 'https://shop.example/3' },
+      ];
+    } }, tier: 'primary' },
+    { name: 'brave', provider: { async search() {
+      providersUsed.push('brave');
+      return [{ ...candidate, id: 'b1', destination: 'https://brave.example/1', provider: 'brave', provenance: 'brave:web' }];
+    } }, tier: 'fallback' },
+    { name: 'serpapi', provider: { async search() {
+      providersUsed.push('serpapi');
+      return [{ ...candidate, id: 's1', destination: 'https://serpapi.example/1' }];
+    } }, tier: 'fallback' },
+  ];
+  const fashionQ = [query('Nike black tee logo'), query('Nike tee'), query('black tee')];
+  const result = await resolveProducts(providers, fashionQ, description, env, undefined, source, rejectVerifier);
+  assert.ok(providersUsed.includes('ebay'), 'eBay should be invoked');
+  assert.ok(providersUsed.includes('brave'), 'Brave MUST run when all 3 raw candidates fail verification');
+  assert.ok(providersUsed.includes('serpapi'), 'SerpAPI MUST run when accepted < 3 after Brave');
+  assert.equal(result.brave.skipped, false);
+  assert.equal(result.serpapi.skipped, false);
+});
+
 // ── SerpAPI telemetry isolation tests ──
 
 test('SerpAPI telemetry reflects only SerpAPI activity', async () => {

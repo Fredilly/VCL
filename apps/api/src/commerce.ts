@@ -27,7 +27,7 @@ export type ProductCandidate = {
   price: string | null;
   currency: string | null;
   result_class: 'LIKELY' | 'SIMILAR';
-  metadata?: { brand?: string; model?: string; category?: string; description?: string; gender?: string; color?: string; sleeve?: string; material?: string };
+  metadata?: { brand?: string; model?: string; category?: string; description?: string; gender?: string; color?: string; sleeve?: string; material?: string; freshness?: string };
   verification_status?: 'multimodal' | 'metadata_only';
   verification_image_similarity?: number;
   verification_image_confidence?: number;
