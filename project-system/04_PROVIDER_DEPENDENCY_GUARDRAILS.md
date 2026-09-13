@@ -17,6 +17,30 @@ Target architecture:
 - zero third-party providers classified `CRITICAL` long-term,
 - except the browser/platform runtime itself.
 
+## Commerce redundancy policy
+
+Commerce reliability must come from multiple replaceable providers, not from increasing dependence on one search API.
+
+Current intended roles:
+
+| Provider | Role | Category focus | Dependency class |
+| --- | --- | --- | --- |
+| eBay Browse | primary broad catalog | fashion, watches, shoes, bags, resale, general products | `REPLACEABLE` |
+| Best Buy | category primary | electronics, appliances, consumer tech | `OPTIONAL` / `REPLACEABLE` |
+| Etsy | category primary | jewelry, bags, apparel, accessories, vintage/handmade | `OPTIONAL` / `REPLACEABLE` |
+| SerpAPI | fallback search | broad shopping discovery | `REPLACEABLE` |
+| Brave Search | final open-web fallback | merchant/product-page discovery | `OPTIONAL` |
+
+Rules:
+- do not query every provider on every request,
+- prefer category-aware routing,
+- protect quota-limited providers for fallback use,
+- keep provider provenance,
+- measure result quality and latency by provider,
+- distinguish provider failure from no-result,
+- preserve a truthful degraded state when every provider fails,
+- re-check quotas and terms during each integration because they can change.
+
 ## Amazon
 
 ### Current guardrail
@@ -47,10 +71,70 @@ Use only documented APIs and allowed terms.
 
 The eBay Browse API is suitable for early product discovery and supports product/item search functionality, including image-oriented capabilities in its Buy API ecosystem.
 
+Current implementation state:
+- adapter exists,
+- OAuth client-credentials flow exists,
+- keyword search exists,
+- image search exists with keyword fallback,
+- production access must be explicitly verified before treating eBay as the primary live provider.
+
 Do not make eBay exclusive.
 
 Primary source:
 https://developer.ebay.com/api-docs/buy/browse/overview.html
+
+## Best Buy
+
+Use as a category-specific provider for electronics, appliances and consumer technology only where current API terms permit the extension flow.
+
+Rules:
+- normalize through `CommerceProvider`,
+- do not call for irrelevant categories,
+- verify current quota, display rights, image use, caching and destination requirements before shipping,
+- treat as replaceable rather than foundational.
+
+Primary source to verify during integration:
+https://developer.bestbuy.com/
+
+## Etsy
+
+Use as a category-specific provider for fashion/accessories, jewelry, handmade and vintage coverage where current API terms permit the extension flow.
+
+Rules:
+- normalize through `CommerceProvider`,
+- do not infer exact identity from a title match alone,
+- verify current application quota, authentication, display rights, caching and commercial-use requirements before shipping,
+- if approval/access friction is material, keep Etsy optional rather than blocking the MVP.
+
+Primary source to verify during integration:
+https://developers.etsy.com/
+
+## SerpAPI
+
+SerpAPI is a fallback, not a foundational catalog.
+
+Rules:
+- do not spend quota when primary catalog providers already returned enough candidates,
+- record remaining quota where available,
+- reserve capacity for broad shopping discovery when catalog providers fail,
+- preserve a replacement path to another search provider.
+
+## Brave Search
+
+Brave Search is a final open-web discovery fallback, not a structured product catalog.
+
+Use only when:
+- catalog providers did not return enough useful candidates, or
+- broader web evidence is needed for identity/product-page discovery.
+
+Rules:
+- hard-budget quota,
+- normalize extracted candidates before verification/ranking,
+- do not treat web-search rank as identity evidence,
+- do not invoke on every click.
+
+Primary source to verify during integration:
+https://brave.com/search/api/
 
 ## YouTube / Google
 
@@ -98,5 +182,8 @@ Before adding any provider:
 8. Can terms change economics unilaterally?
 9. Is there a practical replacement?
 10. What happens if access disappears tomorrow?
+11. What are the current quota/rate limits and how are they measured?
+12. Which categories should invoke this provider?
+13. What is the fallback when quota or access is exhausted?
 
 No integration ships without answers recorded in `11_DECISIONS_AND_DO_NOTS.md`.
