@@ -1,6 +1,8 @@
 # Spike 4f exact-match benchmark
 
-**FAIL for identification calibration; benchmark implementation complete.** The exact-claim safety gate passes with zero EXACT outputs, but exact precision remains unmeasurable. Four deliberately misleading lookalikes are LIKELY despite the conservative SIMILAR expectation. No classification threshold, verification score, or commerce ordering was changed to improve the result.
+**Current decision: PASS for the unchanged static benchmark after the general identity gate fix.** False LIKELY fell from four to zero; all ten true LIKELY results remain. Useful results stay 24/30 and no-results 6/30. EXACT precision remains N/A with zero claims. See the [classification fix and new verification](SPIKE_4F_CLASSIFICATION_FIX.md) and [new measured report](../tests/benchmark/spike-4f/results/classification-fix/report.md).
+
+The sections below preserve the **initial FAIL and category-routing investigation**, before the subsequent classification fix. Original recordings remain unchanged.
 
 The [benchmark README](../tests/benchmark/spike-4f/README.md) defines the protocol and commands. [Machine-readable results](../tests/benchmark/spike-4f/results/report.json), the [per-selection report](../tests/benchmark/spike-4f/results/report.md), and the [pre-fix baseline](../tests/benchmark/spike-4f/results/baseline/report.json) are committed.
 

@@ -49,9 +49,9 @@ test('type and audience alone are too weak when image comparison is unavailable'
   assert.equal(verifyCandidate(description, candidate).product.result_class, 'SIMILAR');
 });
 
-test('strong multimodal agreement is LIKELY; missing brand and metadata-only matches are SIMILAR', () => {
+test('brand and generic construction agreement remain SIMILAR without readable model identity', () => {
   const { description, candidate, comparison } = example(apparelCases[0]);
-  assert.equal(verifyCandidate(description, candidate, comparison).product.result_class, 'LIKELY');
+  assert.equal(verifyCandidate(description, candidate, comparison).product.result_class, 'SIMILAR');
   assert.equal(verifyCandidate(description, candidate).product.result_class, 'SIMILAR');
   comparison.candidate.brand.value = null;
   candidate.title = 'Black short sleeve t-shirt'; candidate.metadata = {};
@@ -135,9 +135,9 @@ test('a secondary logo color is not evidence of a contradictory dominant color',
   assert.ok(verifyCandidate(description, candidate).product);
 });
 
-test('strong matching model and images can establish LIKELY without invented distinctive details', () => {
+test('matching a guessed model to catalog metadata does not establish LIKELY', () => {
   const { description, candidate, comparison } = example(apparelCases[0]);
   description.model_candidate = 'Family 123'; candidate.metadata.model = 'Family 123';
   comparison.matching_details = [];
-  assert.equal(verifyCandidate(description, candidate, comparison).product.result_class, 'LIKELY');
+  assert.equal(verifyCandidate(description, candidate, comparison).product.result_class, 'SIMILAR');
 });

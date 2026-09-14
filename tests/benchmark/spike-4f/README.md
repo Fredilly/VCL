@@ -14,6 +14,12 @@ The first command compiles and executes the current production resolver, verific
 
 The second command recalculates the committed recording's metrics without calling providers. Reports reproduce byte-for-byte. A fresh static execution reproduces decisions; measured local timings naturally vary. `provenance.pipeline_source_sha256` identifies all API TypeScript source independently of the enclosing git revision, including uncommitted changes when the recording was made.
 
+The original FAIL recording is deliberately preserved. Current code passes after the identity gate fix; the new recording is under `results/classification-fix/`. Replay it with the same scoring methodology:
+
+```sh
+node tests/benchmark/spike-4f/run.mjs replay --input tests/benchmark/spike-4f/results/classification-fix/recording.json --strict
+```
+
 ```sh
 # Publish a new measured snapshot intentionally:
 node tests/benchmark/spike-4f/run.mjs static --output tests/benchmark/spike-4f/results
