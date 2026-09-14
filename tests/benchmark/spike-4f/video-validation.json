@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "mode": "reused_acceptance_artifacts",
+  "included_in_static_metrics": false,
+  "fresh_live_video_runs": 0,
+  "public_video_cases": 1,
+  "limitations": "Existing Spike 4e acceptance evidence is reused as requested. These receipts validate capture and evidence delivery, not product-resolution precision. No new live-video accuracy or latency estimate is claimed.",
+  "cases": [
+    {
+      "id": "youtube-watch-nearby",
+      "source": "https://www.youtube.com/watch?v=IpQd3XH0_EQ&t=455s",
+      "artifact": "tests/manual/spike-4e-youtube-evidence.json",
+      "timestamp_seconds": 455,
+      "category": "watches",
+      "ground_truth": "Casio F-91W family: next-frame readable model text, not full SKU/authenticity proof",
+      "worker_version": "d3ba2417-e1a8-46a2-81f2-12e7c85c777a",
+      "frames_used": 3,
+      "frames_contributing": 2,
+      "outcome": "Capture and evidence delivery passed; next-frame visible text accepted, previous object not confirmed, paused playback restored.",
+      "actual_classification": null,
+      "latency_ms": null,
+      "commerce_scored": false
+    },
+    {
+      "id": "local-small-watch-target",
+      "source": "tests/manual/multi-frame.html#small",
+      "artifact": "project-system/SPIKE_4E_MULTI_FRAME_EVIDENCE.md",
+      "category": "watches",
+      "ground_truth": "Synthetic NOVA wristwatch over NORTH STUDIO garment",
+      "outcome": "Prior acceptance: small selected watch retained; surrounding shirt identity excluded.",
+      "commerce_scored": false
+    },
+    {
+      "id": "local-garment-target",
+      "source": "tests/manual/multi-frame.html#small",
+      "artifact": "project-system/SPIKE_4E_MULTI_FRAME_EVIDENCE.md",
+      "category": "apparel",
+      "ground_truth": "Synthetic blue NORTH STUDIO graphic T-shirt",
+      "outcome": "Prior acceptance: large garment click returned blue graphic T-shirt; initial localization failure was retried.",
+      "commerce_scored": false
+    },
+    {
+      "id": "local-bottle-label",
+      "source": "tests/manual/multi-frame.html#bottle",
+      "artifact": "project-system/SPIKE_4E_MULTI_FRAME_EVIDENCE.md",
+      "category": "other",
+      "ground_truth": "Synthetic LUMA TRAIL 750 bottle",
+      "outcome": "Prior acceptance: nearby evidence added brand/model; three frames analyzed with paused playback.",
+      "commerce_scored": false
+    },
+    {
+      "id": "local-nearby-unavailable",
+      "source": "tests/manual/multi-frame.html#bottle",
+      "artifact": "project-system/SPIKE_4E_MULTI_FRAME_EVIDENCE.md",
+      "category": "other",
+      "ground_truth": "Synthetic bottle; nearby evidence unavailable",
+      "outcome": "Prior acceptance: hidden-page presentation timed out; primary bottle hypothesis survived; restoration confirmation failed conservatively.",
+      "commerce_scored": false
+    }
+  ]
+}

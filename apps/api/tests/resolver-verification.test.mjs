@@ -385,7 +385,9 @@ test('Brave sufficient: SerpAPI is not invoked', async () => {
   ];
   const result = await resolveProducts(providers, queries, description, env, undefined, source, verifier);
   assert.equal(serpapiCalled, false, 'SerpAPI should not be called when Brave returns sufficient results');
-  assert.equal(result.serpapi.skip_reason, 'brave_sufficient');
+  assert.equal(result.serpapi.skip_reason, 'upstream_sufficient', 'useful SIMILAR survivors still suppress unnecessary fallback');
+  assert.equal(result.products.length, 3);
+  assert.ok(result.products.every(product => product.result_class === 'SIMILAR'));
 });
 
 // ── Insufficient primaries -> SerpAPI test ──

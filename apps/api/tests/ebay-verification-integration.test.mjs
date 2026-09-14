@@ -12,7 +12,7 @@ const credentials = {
   EBAY_PRODUCTION_CLIENT_ID: 'production-id', EBAY_PRODUCTION_CLIENT_SECRET: 'production-secret',
 };
 
-async function resolve({ environment = 'production', contradiction, withImage = true, browseStatus, missingCredentials = false } = {}) {
+async function resolve({ environment = 'production', contradiction, withImage = true, browseStatus, missingCredentials = false, readableModel = false } = {}) {
   const calls = [];
   const logs = [];
   const worker = loadModule(file, {
@@ -44,8 +44,13 @@ async function resolve({ environment = 'production', contradiction, withImage = 
         const body = JSON.parse(options.body);
         assert.equal(body.contents[0].parts[1].inlineData.data, 'AQID', 'selected crop reaches Gemini');
         const observed = structuredClone(comparison.candidate);
+        const selected = structuredClone(comparison.source);
+        if (readableModel) {
+          selected.model = { value: 'Model Q42', confidence: .95, basis: 'image' };
+          observed.model = { ...selected.model };
+        }
         if (contradiction) observed[contradiction[0]] = { value: contradiction[1], confidence: 0.95, basis: 'image' };
-        return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: comparison.source,
+        return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: selected,
           candidates: [{ index: 0, attributes: observed, similarity: 0.95, confidence: 0.95, matching_details: comparison.matching_details }] }) }] } }] });
       }
       assert.equal(input, candidate.image_reference);
@@ -54,7 +59,8 @@ async function resolve({ environment = 'production', contradiction, withImage = 
     },
   }).default;
   const response = await worker.fetch(new Request('https://api.vcl.article6.org/resolve-products', {
-    method: 'POST', body: JSON.stringify({ description, source_image: withImage ? source : undefined }),
+    method: 'POST', body: JSON.stringify({ description: readableModel ? { ...description, model_candidate: 'Model Q42',
+      visible_text: [...description.visible_text, 'Model Q42'] } : description, source_image: withImage ? source : undefined }),
   }), { ...credentials, ...(missingCredentials ? { EBAY_PRODUCTION_CLIENT_SECRET: undefined } : {}),
     EBAY_ENVIRONMENT: environment, COMMERCE_PROVIDER: 'ebay', GEMINI_API_KEY: 'private-gemini-key' });
   const body = await response.json();
@@ -74,7 +80,15 @@ for (const environment of ['sandbox', 'production']) test(`${environment} creden
   assert.equal(body.products[0].provider, 'ebay');
   assert.equal(body.products[0].provenance, 'ebay:browse');
   assert.equal(body.products[0].verification_status, 'multimodal');
+  assert.equal(body.products[0].result_class, 'SIMILAR', 'brand-only tee fixture has no readable model identity');
+});
+
+test('readable source model plus independently compared candidate pixels retain LIKELY through the HTTP route', async () => {
+  const { response, body } = await resolve({ readableModel: true });
+  assert.equal(response.status, 200);
+  assert.equal(body.products.length, 1);
   assert.equal(body.products[0].result_class, 'LIKELY');
+  assert.equal(body.products[0].provenance, 'ebay:browse');
 });
 
 for (const contradiction of [['brand', 'Adidas'], ['gender', 'women'], ['color', 'red'], ['sleeve', 'long'],

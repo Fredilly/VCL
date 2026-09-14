@@ -3,6 +3,9 @@ import type { ProductCandidate, ProductContext } from './commerce.js';
 import { attributes, canonical, compatible, gender, ageGroup, normalize, phrase, productType, sleeve, type Attribute, type Evidence, type ImageComparison } from './verification-evidence.js';
 
 const HIGH = 0.85;
+// Separate identity classification from the lower visual-relevance threshold. These are
+// conservative evidence floors, not calibrated probabilities of product correctness.
+const IDENTITY_VISUAL = 0.9;
 const critical = new Set<Attribute>(['category', 'subtype', 'gender', 'age_group', 'color', 'sleeve', 'brand']);
 export type VerificationDecision = { product: ProductCandidate | null; reasons: string[] };
 
@@ -44,6 +47,28 @@ export function candidateEvidence(candidate: ProductCandidate): Evidence {
   add('model', metadata.model);
   add('material', metadata.material, 0.8);
   return evidence;
+}
+
+function groundedIdentity(description: ObjectDescription, observed: Evidence, comparison?: ImageComparison): boolean {
+  if (!comparison) return false;
+  return (['brand', 'model'] as const).every(key => {
+    const source = comparison.source[key];
+    const value = canonical(key, source?.value);
+    if (!source || source.basis !== 'image' || source.confidence < HIGH || !value) return false;
+    // A model/brand hypothesis is not a reading. Require literal source markings from
+    // the initial/nearby analysis, corroborated by the independent image comparison.
+    const fields = key === 'brand' ? ['visible_text', 'logos_markings'] as const : ['visible_text'] as const;
+    const readable = fields.some(field => (description.evidence_confidence?.[field] ?? description.identity_confidence) >= HIGH
+      && description[field].some(text => phrase(text, value)));
+    if (!readable) return false;
+    // Real provider metadata or candidate pixels can corroborate the identifier.
+    // A title hit or model-generated "metadata" that the provider never supplied cannot.
+    const image = comparison.candidate[key];
+    return [observed[key], image?.basis === 'image' ? image : undefined].some(item => {
+      const candidateValue = canonical(key, item?.value);
+      return item && item.confidence >= HIGH && candidateValue && compatible(key, value, candidateValue);
+    });
+  });
 }
 
 export function verifyCandidate(
@@ -111,9 +136,11 @@ export function verifyCandidate(
   }
   const usefulMetadata = matched.has('subtype') && (matched.has('brand') || matched.has('color'));
   if ((!usefulMetadata && visual < 0.65) || score < 20) return { product: null, reasons: ['insufficient positive relevance evidence'] };
-  const likely = !brandDisagrees && !identityConflict && visual >= 0.8 && (comparison?.confidence ?? 0) >= HIGH && matched.has('subtype')
-    && (matched.has('brand') || (!description.brand_candidate && detailCount >= 2))
-    && (matched.has('model') || detailCount >= 2) && score >= 60;
+  const identityGrounded = groundedIdentity(description, observed, comparison);
+  const strongVisual = visual >= IDENTITY_VISUAL && (comparison?.confidence ?? 0) >= IDENTITY_VISUAL;
+  const likely = !brandDisagrees && !identityConflict && strongVisual && identityGrounded && matched.has('subtype') && score >= 60;
+  if (!identityGrounded) reasons.push('readable source brand/model and independent candidate identity corroboration required for LIKELY');
+  if (!strongVisual) reasons.push('strong visual agreement and comparison confidence required for LIKELY');
   // Search IDs and model guesses are not verified SKU evidence. Never manufacture EXACT.
   const result_class = likely ? 'LIKELY' : 'SIMILAR';
   if (!comparison) reasons.push('image comparison unavailable; identity remains uncertain');

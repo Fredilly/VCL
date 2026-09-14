@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "mode": "live_deployment_verification",
+  "included_in_benchmark_metrics": false,
+  "worker": "vcl-api",
+  "worker_version": "a7f1dfe5-4eb5-4a22-9a8e-86838fde9785",
+  "code_revision": "f70601f9b9f6abc6dff23e604d4607c0c6ea2695",
+  "bindings_preserved": true,
+  "cases": [
+    {
+      "id": "singular-bag",
+      "mode": "metadata_only",
+      "state": "RESULTS",
+      "resolver_latency_ms": 3407,
+      "providers_used": ["ebay", "etsy"],
+      "returned_provenance": ["ebay:browse"],
+      "returned": 8,
+      "classification_counts": { "SIMILAR": 8, "LIKELY": 0, "EXACT": 0 },
+      "all_survivors_explain_identity_requirement": true
+    },
+    {
+      "id": "adidas-hoodie",
+      "fixture": "apps/api/tests/fixtures/live-apparel.mjs",
+      "runner": "node apps/api/scripts/live-verification-benchmark.mjs adidas-hoodie",
+      "mode": "catalog_image",
+      "state": "RESULTS",
+      "resolver_latency_ms": 53578,
+      "elapsed_ms": 58423,
+      "providers_used": ["ebay", "etsy"],
+      "returned_provenance": ["ebay:browse", "etsy:listings"],
+      "returned": 8,
+      "multimodal_survivors": 7,
+      "metadata_only_survivors": 1,
+      "classification_counts": { "SIMILAR": 8, "LIKELY": 0, "EXACT": 0 },
+      "all_survivors_explain_identity_requirement": true,
+      "verification": {
+        "retrieved": 72,
+        "compared": 36,
+        "rejected": 47,
+        "image_failures": 36,
+        "image_failure_reasons": { "image_missing": 24, "image_budget": 12 }
+      }
+    }
+  ],
+  "limitations": "Operational checks only, not scored live accuracy. Source model text is absent; strong positive identity retention is tested separately through the HTTP route and preserved static benchmark. Missing images/budget omissions and live latency remain observable limitations. No provider listing or image data is retained here."
+}
