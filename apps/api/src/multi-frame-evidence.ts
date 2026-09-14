@@ -1,6 +1,7 @@
 import { parseSourceImage } from './candidate-images.js';
-import { canonical, compatible, sleeve } from './verification-evidence.js';
+import { canonical, compatible, normalize, sleeve } from './verification-evidence.js';
 import { normalizeObjectDescription, type ObjectDescription, type NearbyObservation, type VisionProvider } from './types.js';
+import type { SelectionPoint } from './selection-target.js';
 
 export const EVIDENCE_FIELDS = ['category', 'subcategory', 'brand_candidate', 'model_candidate', 'color', 'material',
   'style_attributes', 'visible_text', 'logos_markings', 'distinctive_features', 'hardware_details', 'shape_silhouette'] as const;
@@ -62,8 +63,10 @@ export function mergeFrameEvidence(primary: ObjectDescription, timestamp: number
     // Never join model clues from another brand to the primary identity.
     const conflictingBrand = known(description.brand_candidate) && known(nearby.brand_candidate) &&
       !compatible('brand', canonical('brand', description.brand_candidate)!, canonical('brand', nearby.brand_candidate)!) && winners.get('brand_candidate')!.confidence >= 0.8;
-    const primaryCategory = canonical('category', description.category);
-    const nearbyCategory = canonical('category', nearby.category);
+    // Unknown taxonomy labels must not disable the object-category guard.
+    // Keep this generic: no selected-product or brand-specific targeting rules.
+    const primaryCategory = canonical('category', description.category) ?? normalize(description.category);
+    const nearbyCategory = canonical('category', nearby.category) ?? normalize(nearby.category);
     const conflictingCategory = primaryCategory && nearbyCategory && primaryCategory !== nearbyCategory;
     for (const field of EVIDENCE_FIELDS) {
       const value = nearby[field];
@@ -126,12 +129,12 @@ export function mergeFrameEvidence(primary: ObjectDescription, timestamp: number
 }
 
 export async function analyzeWithNearbyFrames(provider: VisionProvider, primaryImage: string, primary: ObjectDescription,
-  timestamp: number, frames: EvidenceFrame[]) {
+  timestamp: number, frames: EvidenceFrame[], point?: SelectionPoint) {
   if (!needsNearbyEvidence(primary) || !provider.analyzeNearbyFrame) return mergeFrameEvidence(primary, timestamp, []);
   const observations = [];
   for (const { dataUrl, ...frame } of frames) {
     try {
-      observations.push({ frame, observation: await provider.analyzeNearbyFrame(primaryImage, dataUrl, primary) });
+      observations.push({ frame, observation: await provider.analyzeNearbyFrame(primaryImage, dataUrl, primary, point) });
     } catch {
       // Never log provider payloads or frame bytes. The primary result survives any extra-frame failure.
       observations.push({ frame });

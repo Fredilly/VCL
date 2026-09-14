@@ -2,6 +2,7 @@ import { GeminiVisionProvider } from './gemini-vision.js';
 import { GroqVisionProvider } from './groq-vision.js';
 import { analyzeWithNearbyFrames, mergeFrameEvidence, parseEvidenceFrames } from './multi-frame-evidence.js';
 import { normalizeObjectDescription } from './types.js';
+import { parseSelectionPoint, TargetLocalizationError } from './selection-target.js';
 import { CommerceNoResultsError, buildProductQueryVariants, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
 import { verifyCandidate, rankVerified } from './candidate-verification.js';
 import { candidateKey, compareCandidateImages, parseSourceImage, imageRequestBudget } from './candidate-images.js';
@@ -343,7 +344,7 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
   const path = new URL(request.url).pathname;
   if (request.method !== 'POST') return jsonResponse({ error: 'Not found' }, 404);
   try {
-    if (path === '/analyze-selection') {
+    if (path === '/analyze-selection' || path === '/locate-selection') {
       let parsed: unknown;
       try { parsed = await readAnalysisBody(request); }
       catch { return jsonResponse({ error: 'Invalid or oversized analysis body' }, 400); }
@@ -351,6 +352,12 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const record = parsed as Record<string, unknown>;
       const dataUrl = record.dataUrl;
       if (typeof dataUrl !== 'string' || !parseSourceImage(dataUrl)) return jsonResponse({ error: 'dataUrl must be an image crop under 2 MB' }, 400);
+      let point;
+      if (path === '/locate-selection' || record.point !== undefined) {
+        try { point = parseSelectionPoint(record.point); }
+        catch { return jsonResponse({ error: 'A normalized click point is required' }, 400); }
+        if (path === '/locate-selection' && !parseSourceImage(record.focusDataUrl)) return jsonResponse({ error: 'A bounded focus crop is required' }, 400);
+      }
       const timestamp = record.timestamp;
       if (timestamp !== undefined && (typeof timestamp !== 'number' || !Number.isFinite(timestamp) || timestamp < 0)) return jsonResponse({ error: 'Invalid primary timestamp' }, 400);
       let nearby;
@@ -365,9 +372,16 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const useGemini = env.VISION_PROVIDER === 'gemini'; const apiKey = useGemini ? env.GEMINI_API_KEY : env.GROQ_API_KEY;
       if (!apiKey) return jsonResponse({ error: `Missing ${useGemini ? 'GEMINI_API_KEY' : 'GROQ_API_KEY'}` }, 500);
       const provider = useGemini ? new GeminiVisionProvider(apiKey, env.GEMINI_MODEL) : new GroqVisionProvider(apiKey);
-      if (nearby && primary && typeof timestamp === 'number') return jsonResponse(await analyzeWithNearbyFrames(provider, dataUrl, primary, timestamp, nearby));
+      if (point && path === '/locate-selection') {
+        try { return jsonResponse(await provider.locateSelection(dataUrl, record.focusDataUrl as string, point)); }
+        catch (error) {
+          return jsonResponse({ error: 'Could not isolate the clicked object. Adjust the crop and try again.',
+            reason: error instanceof TargetLocalizationError ? error.reason : 'localization_unavailable' }, 422);
+        }
+      }
+      if (nearby && primary && typeof timestamp === 'number') return jsonResponse(await analyzeWithNearbyFrames(provider, dataUrl, primary, timestamp, nearby, point));
       let description;
-      try { description = normalizeObjectDescription(await provider.analyzeSelection(dataUrl)); }
+      try { description = normalizeObjectDescription(await provider.analyzeSelection(dataUrl, point)); }
       catch { return jsonResponse({ error: 'Object analysis is temporarily unavailable' }, 502); }
       return jsonResponse(timestamp === undefined ? description : mergeFrameEvidence(description, timestamp as number, []));
     }

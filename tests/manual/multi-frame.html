@@ -11,7 +11,9 @@
 <button onclick="prepare('bag')">Bag clasp</button>
 <button onclick="prepare('watch')">Watch face</button>
 <button onclick="prepare('cut')">Scene cut</button>
-<button onclick="prepareBlob()">Blob fallback</button>
+<button onclick="prepare('small')">Small target in large object</button>
+<button onclick="prepareBlob()">Blob video</button>
+<button onclick="prepareMse()">MSE bottle</button>
 <p id="status">Choose a case, invoke VCL, select the object, widen the crop twice, then Analyze and Improve with nearby frames.</p>
 <video controls muted playsinline></video>
 <script>
@@ -33,6 +35,22 @@ function webm(chunks) {
 }
 function draw(ctx, kind, time) {
   if (kind === 'cut') return draw(ctx, time < 0.75 || time > 1.25 ? 'watch' : 'bottle', time);
+  if (kind === 'small') {
+    ctx.fillStyle = '#ddd8cc'; ctx.fillRect(0, 0, 640, 480);
+    ctx.fillStyle = '#183b76'; ctx.beginPath();
+    ctx.moveTo(180, 55); ctx.lineTo(260, 35); ctx.quadraticCurveTo(320, 100, 380, 35);
+    ctx.lineTo(460, 55); ctx.lineTo(535, 190); ctx.lineTo(445, 230); ctx.lineTo(435, 450);
+    ctx.lineTo(200, 450); ctx.lineTo(190, 230); ctx.lineTo(105, 190); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = 'bold 48px sans-serif'; ctx.fillText('NORTH', 320, 185);
+    ctx.font = 'bold 35px sans-serif'; ctx.fillText('STUDIO', 320, 225);
+    ctx.fillStyle = '#bd896b'; ctx.beginPath(); ctx.roundRect(140, 300, 345, 62, 30); ctx.fill();
+    ctx.fillStyle = '#242424'; ctx.fillRect(297, 289, 34, 84);
+    ctx.fillStyle = '#c7cbd0'; ctx.beginPath(); ctx.arc(314, 329, 27, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#121b2a'; ctx.beginPath(); ctx.arc(314, 329, 23, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = '7px sans-serif'; ctx.fillText('NOVA', 314, 319);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(314, 329); ctx.lineTo(314, 324); ctx.moveTo(314, 329); ctx.lineTo(326, 336); ctx.stroke();
+    return;
+  }
   ctx.fillStyle = '#ddd8cc'; ctx.fillRect(0, 0, 640, 480);
   ctx.fillStyle = '#b5ad9a'; ctx.fillRect(0, 400, 640, 80);
   const visible = time < 0.75 || time > 1.25;
@@ -81,7 +99,8 @@ async function prepare(kind) {
     await new Promise(resolve => video.addEventListener('loadeddata', resolve, { once: true }));
     video.currentTime = 1;
     await new Promise(resolve => video.addEventListener('seeked', resolve, { once: true }));
-    status.textContent = `${kind}: selected 1.0s is incomplete; 0.5s and 1.5s reveal details. Invoke VCL and select the object.`;
+    status.textContent = kind === 'small' ? 'Small target: click the wristwatch over the larger labeled garment. Also verify a click on the garment.'
+      : `${kind}: selected 1.0s is incomplete; 0.5s and 1.5s reveal details. Invoke VCL and select the object.`;
   } catch (error) { status.textContent = `Fixture error: ${error.message}`; }
 }
 async function prepareBlob() {
@@ -93,6 +112,23 @@ async function prepareBlob() {
   video.currentTime = 1;
   await new Promise(resolve => video.addEventListener('seeked', resolve, { once: true }));
   video.addEventListener('emptied', () => URL.revokeObjectURL(url), { once: true });
-  document.querySelector('#status').textContent = 'Blob source: selected crop works; nearby capture must fall back without changing playback.';
+  document.querySelector('#status').textContent = 'Blob source: nearby capture should use this player and restore 1.0s paused.';
+}
+async function prepareMse() {
+  await prepare('bottle');
+  const bytes = await (await fetch('/media/bottle.webm')).arrayBuffer();
+  const video = document.querySelector('video');
+  const source = new MediaSource(); const url = URL.createObjectURL(source);
+  video.src = url;
+  await new Promise(resolve => source.addEventListener('sourceopen', resolve, { once: true }));
+  const buffer = source.addSourceBuffer('video/webm; codecs="vp8"');
+  buffer.appendBuffer(bytes);
+  await new Promise(resolve => buffer.addEventListener('updateend', resolve, { once: true }));
+  source.duration = 2.4; source.endOfStream();
+  if (video.readyState < 2) await new Promise(resolve => video.addEventListener('loadeddata', resolve, { once: true }));
+  video.currentTime = 1;
+  await new Promise(resolve => video.addEventListener('seeked', resolve, { once: true }));
+  video.addEventListener('emptied', () => URL.revokeObjectURL(url), { once: true });
+  document.querySelector('#status').textContent = 'Actual MediaSource player: seek neighbors and return to 1.0s paused. No detached source copying.';
 }
 </script>

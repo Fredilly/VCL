@@ -30,7 +30,7 @@ test('legacy single-frame API shape is unchanged and response is not cacheable',
 test('both adapters send primary first and a single nearby crop per comparison', async () => {
   for (const provider of ['gemini', 'groq']) {
     calls.length = 0;
-    const response = await post({ dataUrl: image, timestamp: 10, primary_description: description,
+    const response = await post({ dataUrl: image, timestamp: 10, primary_description: description, point: { x: 0.3, y: 0.7 },
       nearby_frames: [{ id: 'next', timestamp: 10.5, offset: 0.5, dataUrl: 'data:image/png;base64,bmV4dA==' }] }, provider);
     assert.equal(response.status, 200);
     const result = await response.json();
@@ -38,10 +38,19 @@ test('both adapters send primary first and a single nearby crop per comparison',
     assert.equal(result.multi_frame.frames_used, 2);
     assert.equal(result.multi_frame.field_sources.visible_text, 'next');
     assert.equal(calls.length, 1, 'primary analysis is reused');
+    assert.match((calls[0].contents?.[0].parts ?? calls[0].messages[0].content)[0].text, /x=0.3000, y=0.7000/);
     if (provider === 'gemini') assert.deepEqual(calls[0].contents[0].parts.filter(p => p.inlineData).map(p => p.inlineData.data), ['aGVsbG8=', 'bmV4dA==']);
     else assert.deepEqual(calls[0].messages[0].content.filter(p => p.image_url).map(p => p.image_url.url), [image, 'data:image/png;base64,bmV4dA==']);
     assert.doesNotMatch(JSON.stringify(result), /data:image|inlineData/);
   }
+});
+
+test('single-frame analysis retains the click anchor inside the refined crop', async () => {
+  calls.length = 0;
+  const response = await post({ dataUrl: image, point: { x: 0.2, y: 0.8 } });
+  assert.equal(response.status, 200);
+  assert.match(calls[0].contents[0].parts[0].text, /x=0.2000, y=0.8000/);
+  assert.match(calls[0].contents[0].parts[0].text, /Surrounding objects/);
 });
 
 test('nearby provider errors preserve the baseline and never return raw provider payloads', async () => {

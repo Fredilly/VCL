@@ -1,70 +1,67 @@
-# Spike 4e — Multi-frame evidence
+# Spike 4e — Multi-frame evidence acceptance
 
-## Scope and acceptance gate
+## Current decision
 
-The gate in `02_MVP_SCOPE_AND_SPIKES.md` requires user-initiated, permitted nearby-frame capture that materially improves incomplete identification. This spike uses one selected crop and at most two additional crops at −0.5 and +0.5 seconds. It does not continuously scan video.
+**FAIL — the required ordinary YouTube multi-frame improvement is not yet proven. Keep PR #26 open and unmerged.**
 
-An explicit **Improve with nearby frames** action is offered for incomplete descriptions. A detached, paused decoder reads ordinary same-origin HTTP(S) media at the original crop coordinates. It never seeks, plays, or pauses the user's player. Protected media, cross-origin sources, blob/MSE media, live streams, unavailable seeks, blank crops and duplicates degrade to the selected-frame result. Closing the result or pressing Escape cancels further capture.
+This supersedes the earlier synthetic-fixture-only PASS. Passing unit tests, successful single-frame YouTube recognition, and the historical bottle improvement do not establish the expanded acceptance gate.
 
-Gemini and Groq compare each neighbor against the primary crop. A neighbor must support the same physical object, and descriptive fields must have strong direct evidence before contributing. Strong primary evidence survives unknown, weak and conflicting observations. Brand/model claims require visible text or markings; conflicting brands, categories, sleeves and necklines are guarded. Queries are rebuilt from accepted evidence, without adopting rejected neighboring search terms. Additional frames do not automatically produce an `EXACT` commerce classification.
+## Work preserved and completed
 
-The API preserves the legacy single-frame request, bounds the actual request body and individual image sizes, validates nearby slots and timestamps, and returns field-level provenance without frame bytes. Failed nearby model calls preserve the primary result. Frame crops remain transient in extension/API memory; responses use `Cache-Control: no-store`. Provenance UI is enabled only by `VCL_DEBUG_PROVENANCE=true`.
+Work resumed from PR #26 commit `ae9c8e8` on `spike-4e-multi-frame-evidence`, in `/private/tmp/vcl-pr26-acceptance`. The primary checkout was already on `etsy-freshness-fallback-guard`; its work and untracked files were left untouched. Dependency symlinks in the PR worktree are local only.
 
-## Work resumed
+Already present:
 
-Starting branch: `etsy-freshness-fallback-guard`, commit `619be6f`, with an existing open PR #25. Work continued in place on `spike-4e-multi-frame-evidence`; no existing changes were discarded.
+- Explicit improvement action, detached same-origin nearby capture, selected-source binding, bounded API requests, field provenance, Gemini/Groq comparisons and conservative evidence merging.
+- Capture/API/merge tests, synthetic bottle/bag/watch/scene-cut fixtures and a CDP browser helper.
+- Historical live-Worker bottle success: generic selected frame → LUMA / TRAIL 750 from a nearby frame; three analyzed frames; playback paused. This remains valid historical evidence for the detached path, not proof of YouTube support.
+- Earlier resolver/freshness work already committed on the branch.
 
-Already present in the working tree:
+Added:
 
-- Nearby capture module, source binding, explicit improvement UI and background message forwarding.
-- Gemini/Groq comparison prompts, field confidence, evidence merger, API request validation and response provenance.
-- Multi-frame unit/API/capture tests and in-memory bottle, bag and watch fixtures with a CDP helper.
-- Etsy live-fetch freshness correction and partial resolver fallback changes.
-- The reported earlier bottle success: generic baseline → LUMA / TRAIL 750, three analyzed frames, playback paused.
+- Permitted paused-player capture for readable blob/MSE and cross-origin media, with two bounded seeks (−0.5/+0.5 seconds), presentation synchronization, restoration, cancellation and user-playback precedence. Ordinary same-origin media retains its detached path.
+- General click-centered localization using the frozen context crop plus a magnified focus crop. The validated box must contain the click and have confidence at least 0.8. Refined pixels and the click anchor flow through primary and nearby analysis. Ambiguity asks for another selection rather than analyzing the larger surrounding context.
+- Whole-visible-object localization for large targets, selection of the video under the click, proportional padding and preservation of source coordinates for neighboring crops. No object-category, brand or benchmark special cases were added to production logic.
+- A strict Gemini localization schema and explicit coordinate semantics after a real YouTube call returned invalid geometry. Malformed and off-target boxes still fail validation.
+- Category conflict protection for labels outside the canonical taxonomy; repeat agreement cannot raise identity confidence merely because more frames exist.
+- Regression coverage for player capture success/failure, stale presentations, DRM/live/playing sources, cancellation/restoration, small-versus-large selection geometry, provider/message contracts and confidence preservation.
+- A small-target-in-large-garment fixture, actual MediaSource and blob fixtures, and dedicated-browser targeting/diagnostics. Frames remain transient in memory.
 
-Added during resumption:
+## Automated validation and deployment
 
-- Repaired duplicate declarations and dangling resolver variables; completed fallback sufficiency checks using verified accepted candidates, including skip telemetry before early return.
-- Regression coverage proving three rejected candidates from either the primary or Brave tier cannot suppress later fallbacks.
-- Preserved an additional image-verification fallback regression that appeared in the shared tree during completion, including its high-confidence rejection fixture correction.
-- Scene-cut and blob-source fixtures; explicit browser port selection, service-worker wake-up and VCL target selection; compact derived-evidence output.
-- Wrangler build artifacts excluded from Git and this acceptance/evidence record.
+Final production source was checked on 2026-09-14:
 
-The pre-existing empty `created_timestamp` and `updated_timestamp` files were left untouched and are not part of the implementation commit. The inherited Etsy work is preserved: listing creation/update age is distinct from when the listing was fetched live.
+- `pnpm check` — PASS.
+- `pnpm build` — PASS.
+- `node --test apps/api/tests/*.test.mjs apps/extension/tests/*.test.mjs` — **326 passed, 0 failed, 0 skipped**.
+- `git diff --check` and manual helper syntax check — PASS.
+- Backend deployed with `cd apps/api && npx wrangler deploy`.
+- Worker: `vcl-api`, `api.vcl.article6.org`.
+- Latest deployed version: **`6c8b69ec-7224-4071-9a31-1803cd19ce69`**, created 2026-09-14 08:32:46 UTC; deployment list reconfirmed it at 100% traffic.
+- No backend source changed after that deployment; no repeat deployment was needed.
 
-## Validation
+The final test log is `/private/tmp/vcl-pr26-acceptance-tests.log` (local, not committed). The subsequent extension build with `VCL_DEBUG_PROVENANCE=true` only enables derived diagnostics. Existing macOS/WXT version warnings did not fail the checks or deployment.
 
-On 2026-09-14 (Asia/Shanghai):
+## Manual evidence
 
-- `pnpm check` — passed.
-- `pnpm build` — passed.
-- `node --test apps/api/tests/*.test.mjs apps/extension/tests/*.test.mjs` — 311 passed, zero failed/skipped.
-- `npx wrangler deploy --dry-run` — passed.
-- `cd apps/api && npx wrangler deploy` — deployed `vcl-api` to `api.vcl.article6.org` and `vcl-api.fredilly.workers.dev`.
-- Final Worker version: `6c9982f1-84a4-4606-8aa4-834df12759bb`.
+All browser checks used dedicated Chrome for Testing profiles and the real deployed Worker. No vision responses were mocked; no DRM, canvas security or sign-in restrictions were bypassed. Test code generated synthetic media only for the explicitly labeled local fixtures. No captured frame files were retained.
 
-Existing tool warnings: extension version defaults to `0.0.0`; local macOS 12.6 is below Wrangler's recommended runtime version. Build and remote deployment succeeded.
+| Case | Observed result | Acceptance meaning |
+| --- | --- | --- |
+| Small object within larger salient garment | Clicking the small NOVA wristwatch over the large NORTH/STUDIO garment returned **Nova · Wristwatch**, 80% searchable / 70% identity. Refined crop approximately x284.26, y282.65, width59.15, height139.35 in 640×480 source; click314,329. Shirt identity was excluded. Paused at1.0s. | **PASS** for the requested small-object case. |
+| Large-object control | Clicking the garment returned **T-shirt**, blue cotton, graphic, short sleeve, crewneck; 85% searchable / 20% identity. Crop432×432; click320,177. Paused at1.0s. Initial localization failed conservatively; a retry succeeded. | **PASS** for the large-object control, with localization reliability limitation recorded. |
+| Ordinary YouTube selected-frame targeting | [Casio F91W unboxing](https://www.youtube.com/watch?v=IpQd3XH0_EQ), paused18.45s: initial locator returned invalid geometry; after the schema fix, the extension returned **Casio · F-91W · Digital Watch**, with LIKELY commerce results. The final bounded check at455.0s also returned Casio · F-91W · Wristwatch, 99% searchable / 99% identity from the primary frame alone, and remained paused at455.0s. The incomplete-result improvement action was not offered. Other already-tested views likewise produced complete primary identity. Readable blob/MSE source, no mediaKeys. | **PASS for single-frame targeting only.** These complete primary results did not expose the incomplete-result improvement action and do not prove multi-frame acceptance. |
+| Actual MediaSource fixture fallback | The new player path was reached. Presentation waits timed out while Chrome reported the page hidden; nearby pixels were discarded, selected Water Bottle result and confidence retained. The player returned to1.0s paused, although presentation-based restoration confirmation failed. | **PASS for observed graceful fallback. Not a successful capture/improvement.** |
+| Ordinary YouTube nearby evidence | No verified run yet establishes selected-plus-neighbor capture, useful accepted additional evidence and restored playback together. | **UNPROVEN; overall acceptance FAIL.** |
 
-## Manual browser verification
+The small/large fixture successes preceded the final schema tightening; the final adapter and geometry regressions passed afterward. They were not needlessly repeated. YouTube single-frame schema recovery used the latest Worker. The historical LUMA bottle improvement remains recorded separately above.
 
-Controlled synthetic media was generated and served in memory by `tests/manual/multi-frame-server.mjs`. The built extension called the live deployed Worker; neither model results nor API requests were mocked. These are evidence-merging checks, not a real-product retrieval or exact-match benchmark.
+## Remaining gate and limits
 
-Use a dedicated Chrome for Testing profile with the unpacked extension at `apps/extension/.output/chrome-mv3` and remote debugging enabled. Build with `VCL_DEBUG_PROVENANCE=true pnpm --filter @vcl/extension build` to see provenance. Start `node tests/manual/multi-frame-server.mjs`, visit `http://127.0.0.1:8799/`, select a case, invoke VCL, click the object, widen twice, Analyze, then Improve with nearby frames. The CDP helper accepts `--port PORT`; `wake EXTENSION_ID` starts an idle extension worker before `invoke`. `result` prints only derived evidence and playback state.
+Only the real YouTube multi-frame gate remains unproven: use an incomplete selected object on the existing permitted video, activate improvement through the extension, record at least one captured neighbor and an accepted useful contribution for that same object, and verify the exact selected timestamp remains paused. Inspect provenance and commerce labels to ensure confidence was not raised by frame count alone.
 
-The following browser checks used the final Worker version above. Each selected frame was at 1.0 seconds; each permitted nearby pair was at 0.5 and 1.5 seconds.
+Do not merge based on the synthetic proof or 326 passing tests. Fixed crop coordinates can lose a moving object. Hidden or non-presenting pages can time out conservatively. Localization and same-object judgments remain model dependent and may reject useful evidence. Protected media, unavailable seeks, changed playback and unreadable pixels retain the selected-frame fallback. No stream extraction, protected rendering patch, cookie copying or alternative capture bypass is implemented.
 
-| Case | Single frame | Nearby result | Frames analyzed | Playback |
-| --- | --- | --- | ---: | --- |
-| Bottle label | Generic blue Water Bottle; no identity | Next-frame `LUMA / TRAIL 750` accepted as brand/model/text. Previous comparison was not confirmed as the same object. Strong primary color/material preserved. | 3 | Paused at 1.0s |
-| Bag clasp/label | Generic brown leather Briefcase; no identity | `ARBOR / FIELD 20` read in both neighbors, but neither passed same-object gating. Baseline preserved; no hypothesis change. | 3 | Paused at 1.0s |
-| Watch face | Generic Wristwatch; no identity | `NOVA / FIELD 24` read in both neighbors, but neither passed same-object gating. Baseline preserved; no hypothesis change. | 3 | Paused at 1.0s |
-| Scene cut | Generic blue Water Bottle | Neighboring NOVA watch rejected as an unconfirmed object match. No watch identity entered the bottle hypothesis. | 3 | Paused at 1.0s |
-| Blob fallback | Generic blue Water Bottle | Explicit improvement action reported nearby frames unavailable and retained the selected-frame result. | 1 | Paused at 1.0s |
+## Final handoff
 
-The earlier successful bottle result was reproduced. One of the three positive-detail fixtures materially improved identification in this run. Bag and watch illustrate conservative missed improvements, not successful identity resolution. The scene-cut negative control preserved the selected object.
-
-Decision: **PASS for the bounded, user-initiated capture and conservative merge proof.** Retain the explicit opt-in and permitted-source restrictions. Broader multi-category improvement is not established by these fixtures and needs real-video evaluation before expanding scope.
-
-## Limits
-
-This deliberately does not provide nearby capture for YouTube blob/MSE or protected video; those retain the selected-frame fallback. Fixed crop coordinates can miss moving objects, and the same-object gate can conservatively reject a usable neighboring view. Model confidence remains heuristic. These controlled fixtures establish the capture/merge behavior, not exact-product precision, merchant availability, latency targets or production video coverage.
+The final bounded retry reused the same YouTube video; no additional videos were searched. No production code changed after the passing 326-test run and latest deployment. Documentation and the browser helper were checked separately. The dedicated test browsers and fixture server were stopped before handoff. PR #26 remains open and unmerged; this report intentionally does not claim the remaining YouTube gate passed.

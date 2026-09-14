@@ -63,6 +63,24 @@ test('scene cuts and ambiguous same-object matches contribute nothing', () => {
   assert.equal(result.multi_frame.frames_contributing, 1);
 });
 
+test('a larger surrounding object cannot donate its identity even with overconfident same-object output', () => {
+  const selected = primary({ category: 'Accessories', subcategory: 'Wristwatch', style_attributes: [], color: 'silver' });
+  const surrounding = observation({ category: 'Apparel', subcategory: 'T-shirt', brand_candidate: 'North Studio',
+    visible_text: ['NORTH STUDIO'], evidence_confidence: { brand_candidate: 0.99, visible_text: 0.99 } });
+  const result = mergeFrameEvidence(selected, 10, [{ frame, observation: surrounding }]);
+  assert.equal(result.brand_candidate, null);
+  assert.equal(result.subcategory, 'Wristwatch');
+  assert.equal(result.multi_frame.changed_hypothesis, false);
+  assert.equal(result.multi_frame.frames[1].contributions.find(c => c.field === 'brand_candidate').decision, 'category_conflict');
+});
+
+test('repeated neighboring agreement alone cannot inflate identity confidence', () => {
+  const selected = primary({ brand_candidate: 'Example', identity_confidence: 0.6 });
+  const result = mergeFrameEvidence(selected, 10, [{ frame, observation: observation({ visible_text: [],
+    evidence_confidence: { brand_candidate: 0.99 } }) }]);
+  assert.equal(result.identity_confidence, 0.6);
+});
+
 test('conflicting sleeves cannot enter through a different descriptive field', () => {
   const result = mergeFrameEvidence(primary(), 10, [{ frame, observation: observation({ shape_silhouette: ['short sleeves'],
     evidence_confidence: { shape_silhouette: 0.98 } }) }]);

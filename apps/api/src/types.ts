@@ -56,8 +56,9 @@ export function normalizeObjectDescription(value: unknown): ObjectDescription {
 }
 
 export interface VisionProvider {
-  analyzeSelection(dataUrl: string): Promise<ObjectDescription>;
-  analyzeNearbyFrame?(primary: string, nearby: string, description: ObjectDescription): Promise<NearbyObservation>;
+  analyzeSelection(dataUrl: string, point?: import('./selection-target.js').SelectionPoint): Promise<ObjectDescription>;
+  locateSelection?(dataUrl: string, focusDataUrl: string, point: import('./selection-target.js').SelectionPoint): Promise<import('./selection-target.js').TargetBox>;
+  analyzeNearbyFrame?(primary: string, nearby: string, description: ObjectDescription, point?: import('./selection-target.js').SelectionPoint): Promise<NearbyObservation>;
 }
 
 export type NearbyObservation = {

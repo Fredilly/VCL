@@ -11,7 +11,7 @@ const description = { category: 'drinkware', subcategory: 'mug', brand_candidate
   color: 'red', material: 'ceramic', style_attributes: ['plain'], visible_text: [], logos_markings: [], distinctive_features: [], hardware_details: [], shape_silhouette: [], search_terms: ['red mug'], confidence: 0.85, identity_confidence: 0 };
 const commerce = { query: { query: 'red mug' }, products: [], latency_ms: 12 };
 
-async function run({ visionStatus = 200, visionPayload = description, commerceStatus = 200, commercePayload = commerce } = {}) {
+async function run({ visionStatus = 200, visionPayload = description, commerceStatus = 200, commercePayload = commerce, targeted = false, locateFails = false } = {}) {
   let listener;
   let requests = 0;
   const requestBodies = [];
@@ -29,6 +29,8 @@ async function run({ visionStatus = 200, visionPayload = description, commerceSt
     },
   } };
   const context = vm.createContext({ exports: {}, browser, defineBackground: fn => fn(), console, AbortController,
+    selectionPoint: () => ({ x: 0.75, y: 0.25 }), focusBox: () => 'focus', validatedTargetBox: () => 'target',
+    cropFrozenSelection: async (selection, box) => ({ ...selection, dataUrl: box === 'focus' ? 'focus-pixels' : 'target-pixels' }),
     crypto: { randomUUID: () => 'regression-request' },
     location: { hostname: 'www.youtube.com', href: 'https://www.youtube.com/watch?v=test' },
     document: { title: 'Test Video - YouTube', querySelector: () => null, createElement: element, getElementById: id => nodes.get(id), documentElement: element() },
@@ -36,13 +38,15 @@ async function run({ visionStatus = 200, visionPayload = description, commerceSt
       requests++;
       requestBodies.push(JSON.parse(options.body));
       await new Promise(resolve => setTimeout(resolve, 2));
+      if (String(url).includes('/locate-selection')) return Response.json(locateFails ? { error: 'Adjust the crop' }
+        : { x: 0.7, y: 0.2, width: 0.1, height: 0.1, confidence: 0.95 }, { status: locateFails ? 422 : 200 });
       const commerceRequest = String(url).includes('/resolve-products');
       return Response.json(commerceRequest ? commercePayload : visionPayload, { status: commerceRequest ? commerceStatus : visionStatus });
     },
   });
   vm.runInContext(compile(background), context);
   vm.runInContext(compile(content.slice(content.indexOf('const OVERLAY_ID'), content.indexOf('function showOverlay'))), context);
-  await vm.runInContext('showAnalysis({ok:true,dataUrl:"data:image/png;base64,test"})', context);
+  await vm.runInContext(`showAnalysis({ok:true,dataUrl:"data:image/png;base64,test"${targeted ? ',crop:{}' : ''}})`, context);
   await new Promise(resolve => setTimeout(resolve, 10));
   return { panel: nodes.get('vcl-capture-result'), requests, requestBodies };
 }
@@ -54,6 +58,22 @@ test('valid vision response continues through commerce resolution', async () => 
   assert.ok(panel.children.some(child => child.textContent === 'Products · 0 · 12ms'));
   assert.equal(requests, 2);
   assert.equal(requestBodies[1].source_image, requestBodies[0].dataUrl, 'the same selected crop reaches candidate verification');
+});
+
+test('click point and focus reach localization; only the isolated target reaches analysis and commerce', async () => {
+  const { requestBodies, requests } = await run({ targeted: true });
+  assert.equal(requests, 3);
+  assert.deepEqual(requestBodies[0].point, { x: 0.75, y: 0.25 });
+  assert.equal(requestBodies[0].focusDataUrl, 'focus-pixels');
+  assert.equal(requestBodies[1].dataUrl, 'target-pixels');
+  assert.deepEqual(requestBodies[1].point, { x: 0.75, y: 0.25 });
+  assert.equal(requestBodies[2].source_image, 'target-pixels');
+});
+
+test('ambiguous localization never falls back to identifying the larger surrounding crop', async () => {
+  const { requests, panel } = await run({ targeted: true, locateFails: true });
+  assert.equal(requests, 1);
+  assert.ok(panel.children.some(child => child.textContent === 'Adjust the crop'));
 });
 
 test('background listener delivers callback response and returns true to keep channel open', async () => {

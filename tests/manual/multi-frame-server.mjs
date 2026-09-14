@@ -5,7 +5,7 @@ const page = await readFile(new URL('./multi-frame.html', import.meta.url));
 const media = new Map();
 createServer(async (request, response) => {
   response.setHeader('Cache-Control', 'no-store');
-  const key = /^\/media\/(bottle|bag|watch|cut)\.webm$/.exec(request.url)?.[1];
+  const key = /^\/media\/(bottle|bag|watch|cut|small)\.webm$/.exec(request.url)?.[1];
   if (key && request.method === 'POST') {
     const chunks = []; let size = 0;
     for await (const chunk of request) {
