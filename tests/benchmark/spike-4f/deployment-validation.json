@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "mode": "live_metadata_only_routing_smoke",
+  "included_in_benchmark_metrics": false,
+  "worker": "vcl-api",
+  "endpoint": "https://api.vcl.article6.org/resolve-products",
+  "code_revision": "d476e84",
+  "worker_version": "19cb1c02-b062-4ce7-8aa7-15961c96a674",
+  "request": { "category": "bag", "subcategory": "bag", "color": "black", "source_image": null },
+  "state": "RESULTS",
+  "resolver_latency_ms": 3955,
+  "providers_used": ["ebay", "etsy"],
+  "returned": 8,
+  "classification_counts": { "SIMILAR": 8, "LIKELY": 0, "EXACT": 0 },
+  "returned_provenance": ["ebay:browse"],
+  "brave": { "invoked": false, "skip_reason": "upstream_sufficient" },
+  "serpapi": { "invoked": false, "skip_reason": "upstream_sufficient" },
+  "verification": { "retrieved": 24, "compared": 0, "rejected": 14 },
+  "bindings_preserved": true,
+  "ebay_environment": "production",
+  "limitations": "Checks singular-category provider invocation and graceful response only. No images or live product identities were scored. Etsy invocation does not prove Etsy survivor correctness or availability. Product/listing data is not archived."
+}

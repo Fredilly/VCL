@@ -36,4 +36,8 @@ The [five-case validation subset](../tests/benchmark/spike-4f/video-validation.j
 
 `pnpm check`, `pnpm build`, **347 tests (0 failed/skipped)**, deterministic scoring replay, repeated offline semantic execution, and Worker packaging passed before deployment. Deployment is required only because of the scoped category-normalization backend fix. The Workers/Wrangler skill checks retained the existing compatibility target and dashboard-managed bindings; no configuration or secret change was needed.
 
-Worker version and final verification receipt are recorded below after deployment. The Spike 4f PR remains unmerged. Further product work should address independent identity evidence/calibration before claiming exact-match capability.
+Deployed code: `d476e84`; Worker `vcl-api` at `api.vcl.article6.org`; version **`19cb1c02-b062-4ce7-8aa7-15961c96a674`**. Deployment preserved the inspected binding names, `EBAY_ENVIRONMENT=production`, and the Gemini provider/model settings. Existing WXT missing-version and macOS/Wrangler warnings did not fail validation.
+
+One fresh metadata-only `bag` request verified the deployed routing fix: eBay and Etsy were invoked, eight eBay-provenance SIMILAR results returned, and Brave/SerpAPI were skipped as upstream sufficient. Resolver latency was 3,955 ms. This smoke request used no image and is neither a video case nor part of the static metrics; it proves provider invocation, not Etsy survivor quality or primary-provider reliability. See the [deployment receipt](../tests/benchmark/spike-4f/deployment-validation.json).
+
+The Spike 4f PR remains unmerged. Further product work should address independent identity evidence/calibration before claiming exact-match capability.
