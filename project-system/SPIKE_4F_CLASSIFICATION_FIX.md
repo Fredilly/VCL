@@ -42,4 +42,15 @@ Only apparel/shoes/watches/bags-accessories `difficult-lookalike` changed, each 
 
 New regressions failed on the old gate and pass with the correction. They cover moderate similarity despite brand/model agreement; missing/uncertain/non-image source identity; title-only and provider-independent promotion attempts at similarity 1.0; independent catalog/pixel corroboration across arbitrary identities; both confidence floors; and conflicting model evidence. Existing brand-only tests now correctly expect SIMILAR. A positive HTTP-route regression verifies readable model evidence still yields LIKELY through provider normalization and image comparison.
 
-`pnpm check`, `pnpm build`, all **353 tests (0 failed/skipped)**, strict benchmark execution/replay, and Worker deployment dry run passed. No benchmark input or expected classification was changed. Deployment and live verification are recorded below after deployment.
+`pnpm check`, `pnpm build`, all **353 tests (0 failed/skipped)**, strict benchmark execution/replay, and Worker deployment dry run passed. No benchmark input or expected classification was changed.
+
+## Deployment and live verification
+
+Deployed backend commit `f70601f` to `vcl-api` / `api.vcl.article6.org`, Worker version **`a7f1dfe5-4eb5-4a22-9a8e-86838fde9785`**. Inspected binding names, production eBay environment and Gemini provider/model settings were preserved. No config or secret changes.
+
+- Repeated singular `bag` metadata request: eBay + Etsy invoked; eight SIMILAR results, no LIKELY/EXACT; 3,407 ms resolver latency. All survivors expose the new readable-identity requirement.
+- Existing `adidas-hoodie` catalog-image probe: 72 retrieved, 36 compared, 47 rejected; eight SIMILAR survivors (seven multimodal, one metadata-only), retaining eBay/Etsy provenance. No LIKELY/EXACT, and all survivors expose the new identity requirement. Resolver latency 53,578 ms; total probe 58,423 ms. Comparison coverage was limited by 24 missing images and 12 image-budget omissions; these existing limits were not changed or hidden.
+
+The probe supplies brand/type but no readable source model text, so a familiar logo/title/geometry cannot promote its alternatives. The positive readable-model HTTP regression and all ten preserved true LIKELY benchmark controls establish retention separately. Live probes are operational verification, not a newly scored accuracy corpus. The [derived deployment receipt](../tests/benchmark/spike-4f/results/classification-fix/deployment-validation.json) stores counts/provenance only, without product listings or image data.
+
+**Merge recommendation:** the unchanged static Spike 4f gate now passes and is ready for review. Keep PR #27 unmerged until reviewed; no automatic merge. Independent real-video calibration and the existing live latency/image-coverage limitations remain outside this bounded passing result.
