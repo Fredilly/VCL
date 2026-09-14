@@ -1,7 +1,9 @@
-import { captureSelectionAtClientPoint, type FrameCaptureResult } from '../lib/frame-capture';
+import { captureSelectionAtClientPoint, cropFrozenSelection, focusBox, selectionPoint, validatedTargetBox, type FrameCaptureResult } from '../lib/frame-capture';
+import { captureNearbyFrames, nearbyCaptureLimitation } from '../lib/nearby-frame-capture';
 
 const OVERLAY_ID = 'vcl-overlay-root';
 const RESULT_ID = 'vcl-capture-result';
+let activeCapture: AbortController | undefined;
 
 type ObjectDescription = {
   category: string;
@@ -14,6 +16,7 @@ type ObjectDescription = {
   search_terms: string[];
   confidence: number;
   identity_confidence: number;
+  multi_frame?: { frames_used: number; changed_hypothesis: boolean; changed_fields: string[] };
 };
 
 type ProductCandidate = {
@@ -69,7 +72,7 @@ function surfaceContext() {
 }
 
 function removeOverlay() { document.getElementById(OVERLAY_ID)?.remove(); }
-function removeResult() { document.getElementById(RESULT_ID)?.remove(); }
+function removeResult() { activeCapture?.abort(); document.getElementById(RESULT_ID)?.remove(); }
 
 function basePanel(titleText: string) {
   removeResult();
@@ -178,18 +181,36 @@ function renderProducts(panel: HTMLElement, commerce: CommerceResponse) {
   }
 }
 
-async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>) {
+async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, supplied?: ObjectDescription, captureDebug?: unknown) {
   const panel = basePanel('VCL analyzing selection…');
+  const controller = new AbortController();
+  activeCapture = controller;
   const image = document.createElement('img');
   image.src = result.dataUrl;
   image.alt = 'Selected object crop';
   Object.assign(image.style, { display: 'block', width: '100%', maxHeight: '180px', objectFit: 'contain', borderRadius: '10px', background: '#000', marginBottom: '10px' });
   panel.appendChild(image);
+  addClose(panel);
 
   try {
+    if (!supplied && result.crop) {
+      panel.firstElementChild!.textContent = 'VCL locating the clicked object…';
+      const focus = await cropFrozenSelection(result, focusBox(result));
+      if (controller.signal.aborted) return;
+      const located = await browser.runtime.sendMessage({ type: 'VCL_LOCATE_SELECTION', requestId: crypto.randomUUID(),
+        dataUrl: result.dataUrl, focusDataUrl: focus.dataUrl, point: selectionPoint(result) });
+      if (controller.signal.aborted) return;
+      if (located?.error) throw new Error(located.error + (__VCL_DEBUG_PROVENANCE__ && located.reason ? ` (${located.reason})` : ''));
+      result = await cropFrozenSelection(result, validatedTargetBox(located, result));
+      if (controller.signal.aborted) return;
+      image.src = result.dataUrl;
+      panel.firstElementChild!.textContent = 'VCL analyzing the clicked object…';
+    }
     const requestId = crypto.randomUUID();
-    const response = await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', requestId, dataUrl: result.dataUrl });
-    if (response && typeof response === 'object' && typeof response.error === 'string') throw new Error(response.error);
+    const response: unknown = supplied ?? await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', requestId, dataUrl: result.dataUrl, timestamp: result.currentTime,
+      point: result.crop ? selectionPoint(result) : undefined });
+    if (controller.signal.aborted) return;
+    if (response && typeof response === 'object' && 'error' in response && typeof response.error === 'string') throw new Error(response.error);
     const analysis = parseObjectDescription(response);
     panel.firstElementChild!.textContent = 'VCL object understanding: success';
 
@@ -213,6 +234,62 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>) {
     Object.assign(identityConfidence.style, { opacity: '0.75', marginTop: '3px' });
     panel.appendChild(identityConfidence);
 
+    if (__VCL_DEBUG_PROVENANCE__) {
+      const details = document.createElement('details');
+      const label = document.createElement('summary'); label.textContent = 'Frame evidence provenance';
+      const text = document.createElement('pre');
+      text.style.whiteSpace = 'pre-wrap'; text.style.fontSize = '11px';
+      text.textContent = JSON.stringify({ evidence: analysis.multi_frame ?? { frames_used: 1, changed_hypothesis: false }, capture: captureDebug, selection: result.crop }, null, 2);
+      details.append(label, text); panel.appendChild(details);
+    }
+
+    // A confident primary guess must not prevent the user from checking another view.
+    // Confidence still comes from grounded evidence, never from action availability.
+    if (!supplied) {
+      const improve = button('Improve with nearby frames');
+      const note = document.createElement('div');
+      note.textContent = 'Check up to two nearby frames (±0.5 seconds), then return to your paused position.';
+      panel.append(note, improve);
+      improve.addEventListener('click', async () => {
+        improve.disabled = true;
+        const limitation = nearbyCaptureLimitation(result);
+        if (limitation) {
+          note.textContent = 'Nearby frames are unavailable for this video. Keeping the selected-frame result.';
+          if (__VCL_DEBUG_PROVENANCE__) note.textContent += ` (${limitation})`;
+          return;
+        }
+        note.textContent = 'Checking nearby frames…';
+        let captured;
+        try {
+          captured = await captureNearbyFrames(result, controller.signal);
+          if (controller.signal.aborted) return;
+          if (!captured.frames.length) {
+            note.textContent = 'No useful nearby crops were captured. Keeping the selected-frame result.';
+            if (__VCL_DEBUG_PROVENANCE__) note.textContent += ` ${JSON.stringify(captured)}`;
+            return;
+          }
+          const { multi_frame: _debug, ...primaryDescription } = analysis;
+          const response = await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', requestId: crypto.randomUUID(),
+            dataUrl: result.dataUrl, timestamp: result.currentTime, primary_description: primaryDescription, nearby_frames: captured.frames,
+            point: selectionPoint(result) });
+          if (controller.signal.aborted) return;
+          if (response?.error) throw new Error('Nearby analysis unavailable');
+          const merged = parseObjectDescription(response);
+          const debug = { attempts: captured.attempts, limitation: captured.limitation, mode: captured.mode, restored: captured.restored };
+          if (merged.multi_frame?.changed_hypothesis) await showAnalysis(result, merged, debug);
+          else {
+            note.textContent = 'Nearby evidence did not change the selected-object hypothesis.';
+            if (__VCL_DEBUG_PROVENANCE__) {
+              const text = document.createElement('pre'); text.style.whiteSpace = 'pre-wrap';
+              text.textContent = JSON.stringify({ evidence: merged.multi_frame, capture: debug }, null, 2); panel.appendChild(text);
+            }
+          }
+        } catch {
+          if (!controller.signal.aborted) note.textContent = 'Nearby analysis is unavailable. Keeping the selected-frame result.';
+        } finally { if (captured) captured.frames.length = 0; }
+      }, { once: true });
+    }
+
     const commerceRaw = await browser.runtime.sendMessage({
       type: 'VCL_RESOLVE_PRODUCTS',
       requestId: crypto.randomUUID(),
@@ -220,16 +297,16 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>) {
       context: surfaceContext(),
       source_image: result.dataUrl,
     });
+    if (controller.signal.aborted) return;
     if (commerceRaw && typeof commerceRaw === 'object' && typeof commerceRaw.error === 'string') throw new Error(commerceRaw.error);
     renderProducts(panel, parseCommerceResponse(commerceRaw));
   } catch (error) {
+    if (controller.signal.aborted) return;
     const message = document.createElement('div');
     message.textContent = error instanceof Error ? error.message : 'VCL request failed.';
     Object.assign(message.style, { lineHeight: '1.4', opacity: '0.9', marginTop: '10px' });
     panel.appendChild(message);
   }
-
-  addClose(panel);
 }
 
 function showSelectionPreview(clientX: number, clientY: number) {
@@ -240,8 +317,13 @@ function showSelectionPreview(clientX: number, clientY: number) {
   const panel = basePanel('VCL selection · adjust before analyzing');
   const image = document.createElement('img');
   image.alt = 'Selected object crop preview';
-  Object.assign(image.style, { display: 'block', width: '100%', maxHeight: '220px', objectFit: 'contain', borderRadius: '10px', background: '#000', marginBottom: '10px' });
-  panel.appendChild(image);
+  Object.assign(image.style, { display: 'block', width: '100%', height: '100%', borderRadius: '10px', background: '#000' });
+  const preview = document.createElement('div');
+  Object.assign(preview.style, { position: 'relative', width: '220px', height: '220px', margin: '0 auto 10px' });
+  const pointMarker = document.createElement('span');
+  Object.assign(pointMarker.style, { position: 'absolute', width: '12px', height: '12px', border: '2px solid #fff',
+    boxShadow: '0 0 0 2px #111', borderRadius: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none' });
+  preview.append(image, pointMarker); panel.appendChild(preview);
 
   const cropLabel = document.createElement('div');
   Object.assign(cropLabel.style, { opacity: '0.7', marginBottom: '10px' });
@@ -261,7 +343,9 @@ function showSelectionPreview(clientX: number, clientY: number) {
     if (!next.ok) { showFailure(next); return; }
     capture = next;
     image.src = capture.dataUrl;
-    cropLabel.textContent = `Selection size: ${Math.round(cropFraction * 100)}% · use − / + until the whole object is visible`;
+    const point = selectionPoint(capture);
+    pointMarker.style.left = `${point.x * 100}%`; pointMarker.style.top = `${point.y * 100}%`;
+    cropLabel.textContent = `The marked point selects your object. Include its whole outline using − / +. Context size: ${Math.round(cropFraction * 100)}%.`;
   };
 
   tighter.addEventListener('click', () => {

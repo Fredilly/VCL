@@ -1,0 +1,479 @@
+{
+  "video": "https://www.youtube.com/watch?v=IpQd3XH0_EQ&t=455s",
+  "worker_version": "d3ba2417-e1a8-46a2-81f2-12e7c85c777a",
+  "source": {
+    "protocol": "blob:",
+    "mediaKeys": false,
+    "visibility": "visible"
+  },
+  "before": {
+    "timestamp": 455,
+    "paused": true,
+    "primary": {
+      "evidence_confidence": {
+        "category": 1,
+        "subcategory": 0.95,
+        "brand_candidate": 0.99,
+        "model_candidate": 0.99,
+        "color": 0.95,
+        "material": 0.99,
+        "style_attributes": 0.9,
+        "visible_text": 0.99,
+        "logos_markings": 0.99,
+        "distinctive_features": 0.95,
+        "hardware_details": 0.95,
+        "shape_silhouette": 0.95,
+        "search_terms": 0.99,
+        "confidence": 0.99,
+        "identity_confidence": 0.99
+      },
+      "category": "Accessories",
+      "subcategory": "Wristwatch",
+      "brand_candidate": "Casio",
+      "model_candidate": "F-91W",
+      "color": "silver",
+      "material": "stainless steel",
+      "style_attributes": [
+        "digital watch case back",
+        "back cover"
+      ],
+      "visible_text": [],
+      "logos_markings": [
+        "CASIO"
+      ],
+      "distinctive_features": [
+        "engraved text on stainless steel back plate",
+        "secured by four corner screws"
+      ],
+      "hardware_details": [
+        "four corner screws"
+      ],
+      "shape_silhouette": [],
+      "search_terms": [
+        "Casio F-91W watch back",
+        "Casio F91W stainless steel back cover",
+        "Casio 593 module back"
+      ],
+      "confidence": 0.99,
+      "identity_confidence": 0.99
+    },
+    "selection": {
+      "x": 343,
+      "y": 134,
+      "width": 240,
+      "height": 240,
+      "clickX": 463,
+      "clickY": 254
+    }
+  },
+  "after": {
+    "timestamp": 455,
+    "paused": true,
+    "displayed_result": "VCL object understanding: success\nClose\nCasio \u00b7 F-91W \u00b7 Wristwatch\nsilver \u00b7 stainless steel \u00b7 digital watch case back \u00b7 back cover\nCommercially searchable confidence: 99%\nIdentity confidence: 99%\nFrame evidence provenance\nProducts",
+    "evidence": {
+      "strategy": "user_requested_previous_current_next",
+      "frames_used": 3,
+      "frames_contributing": 2,
+      "frames": [
+        {
+          "id": "current",
+          "timestamp": 455,
+          "offset": 0,
+          "status": "primary",
+          "contributions": [
+            {
+              "field": "category",
+              "value": "Accessories",
+              "confidence": 1,
+              "decision": "primary"
+            },
+            {
+              "field": "subcategory",
+              "value": "Wristwatch",
+              "confidence": 0.95,
+              "decision": "primary"
+            },
+            {
+              "field": "brand_candidate",
+              "value": "Casio",
+              "confidence": 0.99,
+              "decision": "primary"
+            },
+            {
+              "field": "model_candidate",
+              "value": "F-91W",
+              "confidence": 0.99,
+              "decision": "primary"
+            },
+            {
+              "field": "color",
+              "value": "silver",
+              "confidence": 0.95,
+              "decision": "primary"
+            },
+            {
+              "field": "material",
+              "value": "stainless steel",
+              "confidence": 0.99,
+              "decision": "primary"
+            },
+            {
+              "field": "style_attributes",
+              "value": [
+                "digital watch case back",
+                "back cover"
+              ],
+              "confidence": 0.9,
+              "decision": "primary"
+            },
+            {
+              "field": "logos_markings",
+              "value": [
+                "CASIO"
+              ],
+              "confidence": 0.99,
+              "decision": "primary"
+            },
+            {
+              "field": "distinctive_features",
+              "value": [
+                "engraved text on stainless steel back plate",
+                "secured by four corner screws"
+              ],
+              "confidence": 0.95,
+              "decision": "primary"
+            },
+            {
+              "field": "hardware_details",
+              "value": [
+                "four corner screws"
+              ],
+              "confidence": 0.95,
+              "decision": "primary"
+            }
+          ]
+        },
+        {
+          "id": "previous",
+          "timestamp": 454.5,
+          "offset": -0.5,
+          "status": "object_not_confirmed",
+          "contributions": [
+            {
+              "field": "category",
+              "value": "Accessories",
+              "confidence": 0.8,
+              "decision": "object_not_confirmed"
+            },
+            {
+              "field": "subcategory",
+              "value": "Wristwatch",
+              "confidence": 0.7,
+              "decision": "object_not_confirmed"
+            },
+            {
+              "field": "brand_candidate",
+              "value": null,
+              "confidence": 0,
+              "decision": "unknown"
+            },
+            {
+              "field": "model_candidate",
+              "value": null,
+              "confidence": 0,
+              "decision": "unknown"
+            },
+            {
+              "field": "color",
+              "value": "black",
+              "confidence": 0.5,
+              "decision": "object_not_confirmed"
+            },
+            {
+              "field": "material",
+              "value": "resin",
+              "confidence": 0.4,
+              "decision": "object_not_confirmed"
+            },
+            {
+              "field": "style_attributes",
+              "value": [
+                "digital watch case"
+              ],
+              "confidence": 0.4,
+              "decision": "object_not_confirmed"
+            },
+            {
+              "field": "visible_text",
+              "value": [],
+              "confidence": 0,
+              "decision": "unknown"
+            },
+            {
+              "field": "logos_markings",
+              "value": [],
+              "confidence": 0,
+              "decision": "unknown"
+            },
+            {
+              "field": "distinctive_features",
+              "value": [],
+              "confidence": 0,
+              "decision": "unknown"
+            },
+            {
+              "field": "hardware_details",
+              "value": [],
+              "confidence": 0,
+              "decision": "unknown"
+            },
+            {
+              "field": "shape_silhouette",
+              "value": [],
+              "confidence": 0.3,
+              "decision": "unknown"
+            }
+          ]
+        },
+        {
+          "id": "next",
+          "timestamp": 455.5,
+          "offset": 0.5,
+          "status": "same_object",
+          "contributions": [
+            {
+              "field": "category",
+              "value": "Accessories",
+              "confidence": 1,
+              "decision": "agreement"
+            },
+            {
+              "field": "subcategory",
+              "value": "Wristwatch",
+              "confidence": 0.95,
+              "decision": "agreement"
+            },
+            {
+              "field": "brand_candidate",
+              "value": "Casio",
+              "confidence": 0.99,
+              "decision": "agreement"
+            },
+            {
+              "field": "model_candidate",
+              "value": "F-91W",
+              "confidence": 0.99,
+              "decision": "agreement"
+            },
+            {
+              "field": "color",
+              "value": "silver",
+              "confidence": 0.95,
+              "decision": "agreement"
+            },
+            {
+              "field": "material",
+              "value": "stainless steel",
+              "confidence": 0.99,
+              "decision": "agreement"
+            },
+            {
+              "field": "style_attributes",
+              "value": [
+                "digital watch case back",
+                "back cover"
+              ],
+              "confidence": 0.9,
+              "decision": "agreement"
+            },
+            {
+              "field": "visible_text",
+              "value": [
+                "CASIO",
+                "593",
+                "F-91W",
+                "STAINLESS STEEL BACK",
+                "WATER RESISTANT",
+                "MADE IN THAILAND",
+                "ED"
+              ],
+              "confidence": 0.95,
+              "decision": "accepted"
+            },
+            {
+              "field": "logos_markings",
+              "value": [
+                "CASIO"
+              ],
+              "confidence": 0.99,
+              "decision": "agreement"
+            },
+            {
+              "field": "distinctive_features",
+              "value": [
+                "engraved text on stainless steel back plate",
+                "secured by four corner screws"
+              ],
+              "confidence": 0.95,
+              "decision": "agreement"
+            },
+            {
+              "field": "hardware_details",
+              "value": [
+                "four corner screws"
+              ],
+              "confidence": 0.95,
+              "decision": "agreement"
+            },
+            {
+              "field": "shape_silhouette",
+              "value": [],
+              "confidence": 0.95,
+              "decision": "unknown"
+            }
+          ]
+        }
+      ],
+      "changed_hypothesis": true,
+      "changed_fields": [
+        "visible_text"
+      ],
+      "field_sources": {
+        "category": "current",
+        "subcategory": "current",
+        "brand_candidate": "current",
+        "model_candidate": "current",
+        "color": "current",
+        "material": "current",
+        "style_attributes": "current",
+        "visible_text": "next",
+        "logos_markings": "current",
+        "distinctive_features": "current",
+        "hardware_details": "current",
+        "shape_silhouette": "current"
+      },
+      "primary_hypothesis": {
+        "evidence_confidence": {
+          "category": 1,
+          "subcategory": 0.95,
+          "brand_candidate": 0.99,
+          "model_candidate": 0.99,
+          "color": 0.95,
+          "material": 0.99,
+          "style_attributes": 0.9,
+          "visible_text": 0.99,
+          "logos_markings": 0.99,
+          "distinctive_features": 0.95,
+          "hardware_details": 0.95,
+          "shape_silhouette": 0.95,
+          "search_terms": 0.99,
+          "confidence": 0.99,
+          "identity_confidence": 0.99
+        },
+        "category": "Accessories",
+        "subcategory": "Wristwatch",
+        "brand_candidate": "Casio",
+        "model_candidate": "F-91W",
+        "color": "silver",
+        "material": "stainless steel",
+        "style_attributes": [
+          "digital watch case back",
+          "back cover"
+        ],
+        "visible_text": [],
+        "logos_markings": [
+          "CASIO"
+        ],
+        "distinctive_features": [
+          "engraved text on stainless steel back plate",
+          "secured by four corner screws"
+        ],
+        "hardware_details": [
+          "four corner screws"
+        ],
+        "shape_silhouette": [],
+        "search_terms": [
+          "Casio F-91W watch back",
+          "Casio F91W stainless steel back cover",
+          "Casio 593 module back"
+        ],
+        "confidence": 0.99,
+        "identity_confidence": 0.99
+      }
+    },
+    "capture": {
+      "attempts": [
+        {
+          "id": "previous",
+          "offset": -0.5,
+          "status": "captured"
+        },
+        {
+          "id": "next",
+          "offset": 0.5,
+          "status": "captured"
+        }
+      ],
+      "mode": "player",
+      "restored": true
+    },
+    "selection": {
+      "x": 343,
+      "y": 134,
+      "width": 240,
+      "height": 240,
+      "clickX": 463,
+      "clickY": 254
+    }
+  },
+  "playback_events": [
+    {
+      "event": "seeking",
+      "time": 454.5,
+      "paused": true,
+      "visibility": "visible"
+    },
+    {
+      "event": "presented",
+      "time": 454.5
+    },
+    {
+      "event": "seeked",
+      "time": 454.5,
+      "paused": true,
+      "visibility": "visible"
+    },
+    {
+      "event": "seeking",
+      "time": 455.5,
+      "paused": true,
+      "visibility": "visible"
+    },
+    {
+      "event": "presented",
+      "time": 455.5
+    },
+    {
+      "event": "seeked",
+      "time": 455.5,
+      "paused": true,
+      "visibility": "visible"
+    },
+    {
+      "event": "seeking",
+      "time": 455,
+      "paused": true,
+      "visibility": "visible"
+    },
+    {
+      "event": "presented",
+      "time": 455
+    },
+    {
+      "event": "seeked",
+      "time": 455,
+      "paused": true,
+      "visibility": "visible"
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Spike 4e controlled video cases</title>
+<style>
+  body { background:#eee; color:#222; font:16px system-ui; margin:24px }
+  button { padding:10px; margin:4px } video { display:block; width:640px; height:480px; margin-top:16px }
+</style>
+<h1>Spike 4e: nearby evidence</h1>
+<p>Controlled synthetic scenes, not real-product benchmark results. Media is generated and served in memory only.</p>
+<button onclick="prepare('bottle')">Bottle label</button>
+<button onclick="prepare('bag')">Bag clasp</button>
+<button onclick="prepare('watch')">Watch face</button>
+<button onclick="prepare('cut')">Scene cut</button>
+<button onclick="prepare('small')">Small target in large object</button>
+<button onclick="prepareBlob()">Blob video</button>
+<button onclick="prepareMse()">MSE bottle</button>
+<p id="status">Choose a case, invoke VCL, select the object, widen the crop twice, then Analyze and Improve with nearby frames.</p>
+<video controls muted playsinline></video>
+<script>
+const concat = (...arrays) => { const output = new Uint8Array(arrays.reduce((n, a) => n + a.length, 0)); let at = 0; for (const a of arrays) { output.set(a, at); at += a.length; } return output; };
+const bytes = hex => Uint8Array.from(hex.match(/../g).map(x => parseInt(x, 16)));
+const size = n => { for (let width = 1; width <= 4; width++) if (n < 2 ** (7 * width) - 1) { const out = new Uint8Array(width); for (let i = width - 1; i >= 0; i--) { out[i] = n & 255; n = Math.floor(n / 256); } out[0] |= 1 << (8 - width); return out; } throw Error('fixture too large'); };
+const element = (id, data) => concat(bytes(id), size(data.length), data);
+const uint = n => { const values = []; do { values.unshift(n & 255); n = Math.floor(n / 256); } while (n); return Uint8Array.from(values); };
+const text = value => new TextEncoder().encode(value);
+function webm(chunks) {
+  const duration = new Uint8Array(8); new DataView(duration.buffer).setFloat64(0, 2400);
+  const header = element('1a45dfa3', concat(element('4286', uint(1)), element('42f7', uint(1)), element('42f2', uint(4)), element('42f3', uint(8)), element('4282', text('webm')), element('4287', uint(2)), element('4285', uint(2))));
+  const info = element('1549a966', concat(element('2ad7b1', uint(1000000)), element('4489', duration), element('4d80', text('VCL fixture')), element('5741', text('VCL fixture'))));
+  const video = element('e0', concat(element('b0', uint(640)), element('ba', uint(480))));
+  const track = element('ae', concat(element('d7', uint(1)), element('73c5', uint(1)), element('83', uint(1)), element('86', text('V_VP8')), element('23e383', uint(100000000)), video));
+  const tracks = element('1654ae6b', track);
+  const cluster = element('1f43b675', concat(element('e7', uint(0)), ...chunks.map(({ time, data }) => element('a3', concat(Uint8Array.of(0x81, time >> 8, time & 255, 0x80), data)))));
+  return concat(header, element('18538067', concat(info, tracks, cluster)));
+}
+function draw(ctx, kind, time) {
+  if (kind === 'cut') return draw(ctx, time < 0.75 || time > 1.25 ? 'watch' : 'bottle', time);
+  if (kind === 'small') {
+    ctx.fillStyle = '#ddd8cc'; ctx.fillRect(0, 0, 640, 480);
+    ctx.fillStyle = '#183b76'; ctx.beginPath();
+    ctx.moveTo(180, 55); ctx.lineTo(260, 35); ctx.quadraticCurveTo(320, 100, 380, 35);
+    ctx.lineTo(460, 55); ctx.lineTo(535, 190); ctx.lineTo(445, 230); ctx.lineTo(435, 450);
+    ctx.lineTo(200, 450); ctx.lineTo(190, 230); ctx.lineTo(105, 190); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = 'bold 48px sans-serif'; ctx.fillText('NORTH', 320, 185);
+    ctx.font = 'bold 35px sans-serif'; ctx.fillText('STUDIO', 320, 225);
+    ctx.fillStyle = '#bd896b'; ctx.beginPath(); ctx.roundRect(140, 300, 345, 62, 30); ctx.fill();
+    ctx.fillStyle = '#242424'; ctx.fillRect(297, 289, 34, 84);
+    ctx.fillStyle = '#c7cbd0'; ctx.beginPath(); ctx.arc(314, 329, 27, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#121b2a'; ctx.beginPath(); ctx.arc(314, 329, 23, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = '7px sans-serif'; ctx.fillText('NOVA', 314, 319);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(314, 329); ctx.lineTo(314, 324); ctx.moveTo(314, 329); ctx.lineTo(326, 336); ctx.stroke();
+    return;
+  }
+  ctx.fillStyle = '#ddd8cc'; ctx.fillRect(0, 0, 640, 480);
+  ctx.fillStyle = '#b5ad9a'; ctx.fillRect(0, 400, 640, 80);
+  const visible = time < 0.75 || time > 1.25;
+  const label = (brand, model, x, y) => {
+    ctx.fillStyle = '#f7f6e8'; ctx.fillRect(x - 83, y - 26, 166, 72);
+    ctx.textAlign = 'center'; ctx.fillStyle = '#111'; ctx.font = 'bold 26px sans-serif'; ctx.fillText(brand, x, y);
+    ctx.font = '20px sans-serif'; ctx.fillText(model, x, y + 30);
+  };
+  ctx.lineWidth = 8; ctx.strokeStyle = '#333';
+  if (kind === 'bottle') {
+    ctx.fillStyle = '#185c98'; ctx.beginPath(); ctx.roundRect(240, 128, 160, 270, 32); ctx.fill();
+    ctx.fillStyle = '#222'; ctx.fillRect(275, 90, 90, 42);
+    ctx.fillStyle = '#4288b9'; ctx.fillRect(254, 159, 18, 185);
+    if (visible) label('LUMA', 'TRAIL 750', 320, 235);
+  } else if (kind === 'bag') {
+    ctx.beginPath(); ctx.ellipse(320, 170, 85, 77, 0, Math.PI, 0); ctx.stroke();
+    ctx.fillStyle = '#7c4227'; ctx.beginPath(); ctx.roundRect(165, 165, 310, 210, 28); ctx.fill();
+    ctx.fillStyle = '#955535'; ctx.beginPath(); ctx.roundRect(177, 165, 286, 105, 24); ctx.fill();
+    ctx.strokeStyle = '#dab08a'; ctx.lineWidth = 2; ctx.strokeRect(180, 180, 280, 175);
+    if (visible) { ctx.fillStyle = '#d6b54b'; ctx.fillRect(295, 250, 50, 34); ctx.fillStyle = '#333'; ctx.fillRect(317, 250, 6, 34); label('ARBOR', 'FIELD 20', 320, 320); }
+  } else {
+    ctx.fillStyle = '#372719'; ctx.fillRect(280, 58, 80, 352);
+    ctx.fillStyle = '#d5b85f'; ctx.beginPath(); ctx.arc(320, 236, 116, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#1b2342'; ctx.beginPath(); ctx.arc(320, 236, 101, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#d5b85f'; ctx.fillRect(434, 224, 20, 22);
+    if (visible) {
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = 'bold 24px sans-serif'; ctx.fillText('NOVA', 320, 183); ctx.font = '16px sans-serif'; ctx.fillText('FIELD 24', 320, 300);
+      for (let i = 0; i < 12; i++) { const a = i * Math.PI / 6; ctx.fillRect(318 + Math.sin(a) * 87, 234 - Math.cos(a) * 87, 4, 7); }
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(320, 236); ctx.lineTo(320, 200); ctx.moveTo(320, 236); ctx.lineTo(377, 266); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.fillRect(375, 220, 26, 22); ctx.fillStyle = '#111'; ctx.font = '16px sans-serif'; ctx.fillText('24', 388, 237);
+    } else { ctx.fillStyle = '#8b95ac'; ctx.fillRect(236, 175, 168, 130); }
+  }
+}
+async function prepare(kind) {
+  const status = document.querySelector('#status'); status.textContent = 'Generating controlled fixture…';
+  try {
+    const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 480;
+    const ctx = canvas.getContext('2d'); const chunks = []; let error;
+    const encoder = new VideoEncoder({ output(chunk) { const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data); chunks.push({ time: Math.round(chunk.timestamp / 1000), data }); }, error(e) { error = e; } });
+    encoder.configure({ codec: 'vp8', width: 640, height: 480, bitrate: 1000000, framerate: 10 });
+    for (let i = 0; i < 24; i++) { draw(ctx, kind, i / 10); const frame = new VideoFrame(canvas, { timestamp: i * 100000, duration: 100000 }); encoder.encode(frame, { keyFrame: true }); frame.close(); }
+    await encoder.flush(); encoder.close(); canvas.width = 0; canvas.height = 0;
+    if (error) throw error;
+    await fetch(`/media/${kind}.webm`, { method: 'POST', body: webm(chunks) }); chunks.length = 0;
+    const video = document.querySelector('video'); video.src = `/media/${kind}.webm`;
+    await new Promise(resolve => video.addEventListener('loadeddata', resolve, { once: true }));
+    video.currentTime = 1;
+    await new Promise(resolve => video.addEventListener('seeked', resolve, { once: true }));
+    status.textContent = kind === 'small' ? 'Small target: click the wristwatch over the larger labeled garment. Also verify a click on the garment.'
+      : `${kind}: selected 1.0s is incomplete; 0.5s and 1.5s reveal details. Invoke VCL and select the object.`;
+  } catch (error) { status.textContent = `Fixture error: ${error.message}`; }
+}
+async function prepareBlob() {
+  await prepare('bottle');
+  const video = document.querySelector('video');
+  const url = URL.createObjectURL(await (await fetch('/media/bottle.webm')).blob());
+  video.src = url;
+  await new Promise(resolve => video.addEventListener('loadeddata', resolve, { once: true }));
+  video.currentTime = 1;
+  await new Promise(resolve => video.addEventListener('seeked', resolve, { once: true }));
+  video.addEventListener('emptied', () => URL.revokeObjectURL(url), { once: true });
+  document.querySelector('#status').textContent = 'Blob source: nearby capture should use this player and restore 1.0s paused.';
+}
+async function prepareMse() {
+  await prepare('bottle');
+  const bytes = await (await fetch('/media/bottle.webm')).arrayBuffer();
+  const video = document.querySelector('video');
+  const source = new MediaSource(); const url = URL.createObjectURL(source);
+  video.src = url;
+  await new Promise(resolve => source.addEventListener('sourceopen', resolve, { once: true }));
+  const buffer = source.addSourceBuffer('video/webm; codecs="vp8"');
+  buffer.appendBuffer(bytes);
+  await new Promise(resolve => buffer.addEventListener('updateend', resolve, { once: true }));
+  source.duration = 2.4; source.endOfStream();
+  if (video.readyState < 2) await new Promise(resolve => video.addEventListener('loadeddata', resolve, { once: true }));
+  video.currentTime = 1;
+  await new Promise(resolve => video.addEventListener('seeked', resolve, { once: true }));
+  video.addEventListener('emptied', () => URL.revokeObjectURL(url), { once: true });
+  document.querySelector('#status').textContent = 'Actual MediaSource player: seek neighbors and return to 1.0s paused. No detached source copying.';
+}
+</script>

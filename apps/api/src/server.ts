@@ -1,6 +1,8 @@
 import { GeminiVisionProvider } from './gemini-vision.js';
 import { GroqVisionProvider } from './groq-vision.js';
+import { analyzeWithNearbyFrames, mergeFrameEvidence, parseEvidenceFrames } from './multi-frame-evidence.js';
 import { normalizeObjectDescription } from './types.js';
+import { parseSelectionPoint, TargetLocalizationError } from './selection-target.js';
 import { CommerceNoResultsError, buildProductQueryVariants, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
 import { verifyCandidate, rankVerified } from './candidate-verification.js';
 import { candidateKey, compareCandidateImages, parseSourceImage, imageRequestBudget } from './candidate-images.js';
@@ -37,8 +39,28 @@ export interface Env {
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
-const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 function logSafeError(error: unknown) { console.error('VCL API error', error instanceof Error ? { name: error.name, message: error.message } : { name: typeof error, message: String(error) }); }
+
+async function readAnalysisBody(request: Request): Promise<unknown> {
+  // Three <=2 MB crops as base64 plus bounded metadata. Check actual streamed bytes,
+  // not just Content-Length; image requests must never be cached or logged.
+  const limit = 8_500_000;
+  if (Number(request.headers.get('content-length')) > limit || !request.body) throw new Error('Invalid analysis body');
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let size = 0; let text = '';
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) { await reader.cancel(); throw new Error('Analysis body too large'); }
+      text += decoder.decode(value, { stream: true });
+    }
+    return JSON.parse(text + decoder.decode());
+  } finally { reader.releaseLock(); }
+}
 
 function dedupeProducts(products: ProductCandidate[]) {
   const seen = new Set<string>(); const out: ProductCandidate[] = [];
@@ -192,7 +214,14 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       }
     }
 
-    // Mark SerpAPI/Brave as skipped when upstream results are sufficient.
+    // --- Sufficiency checks (after verification) ---
+    const shouldSkipBrave = skipBrave || accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD;
+
+    if (shouldSkipBrave && !braveTelemetry.skip_reason) {
+      braveTelemetry.skipped = true;
+      braveTelemetry.skip_reason = accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD ? 'upstream_sufficient' : 'already_skipped';
+    }
+
     if (!skipSerpApi && accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD) {
       serpapiTelemetry.skipped = true;
       serpapiTelemetry.skip_reason = 'upstream_sufficient';
@@ -201,9 +230,6 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
 
     // Early exit if we already have enough LIKELY candidates from primary providers.
     if (accepted.filter((product) => product.result_class === 'LIKELY').length >= LIKELY_CANDIDATE_THRESHOLD) return respond(query);
-
-    // --- Tier 2: Run Brave fallback first (primary live fallback) ---
-    const shouldSkipBrave = skipBrave || accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD;
 
     if (!shouldSkipBrave && braveProvider && eligibleProviders.some((a) => a.name === 'brave')) {
       braveTelemetry.invoked = true;
@@ -222,18 +248,18 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
         }
       }
       if (result) {
-        const fresh = result.slice(0, 24).filter((product) => {
+        const braveFresh = result.slice(0, 24).filter((product) => {
           const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
         });
-        verification.retrieved += fresh.length;
-        if (sourceImage && env.GEMINI_API_KEY && fresh.length) {
-          const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
+        verification.retrieved += braveFresh.length;
+        if (sourceImage && env.GEMINI_API_KEY && braveFresh.length) {
+          const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, braveFresh, context, imageBudget);
           verification.compared += images.compared;
           verification.image_failures += images.failures;
           for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
           for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
         }
-        for (const product of fresh) {
+        for (const product of braveFresh) {
           const decision = verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context);
           if (decision.product) accepted.push(decision.product);
           else {
@@ -282,18 +308,18 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
           }
         }
         if (result) {
-          const fresh = result.slice(0, 24).filter((product) => {
+          const serpapiFresh = result.slice(0, 24).filter((product) => {
             const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
           });
-          verification.retrieved += fresh.length;
-          if (sourceImage && env.GEMINI_API_KEY && fresh.length) {
-            const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
+          verification.retrieved += serpapiFresh.length;
+          if (sourceImage && env.GEMINI_API_KEY && serpapiFresh.length) {
+            const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, serpapiFresh, context, imageBudget);
             verification.compared += images.compared;
             verification.image_failures += images.failures;
             for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
             for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
           }
-          for (const product of fresh) {
+          for (const product of serpapiFresh) {
             const decision = verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context);
             if (decision.product) accepted.push(decision.product);
             else {
@@ -318,15 +344,46 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
   const path = new URL(request.url).pathname;
   if (request.method !== 'POST') return jsonResponse({ error: 'Not found' }, 404);
   try {
-    if (path === '/analyze-selection') {
-      const parsed: unknown = await request.json();
+    if (path === '/analyze-selection' || path === '/locate-selection') {
+      let parsed: unknown;
+      try { parsed = await readAnalysisBody(request); }
+      catch { return jsonResponse({ error: 'Invalid or oversized analysis body' }, 400); }
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return jsonResponse({ error: 'dataUrl image is required' }, 400);
-      const dataUrl = (parsed as { dataUrl?: unknown }).dataUrl;
-      if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) return jsonResponse({ error: 'dataUrl image is required' }, 400);
+      const record = parsed as Record<string, unknown>;
+      const dataUrl = record.dataUrl;
+      if (typeof dataUrl !== 'string' || !parseSourceImage(dataUrl)) return jsonResponse({ error: 'dataUrl must be an image crop under 2 MB' }, 400);
+      let point;
+      if (path === '/locate-selection' || record.point !== undefined) {
+        try { point = parseSelectionPoint(record.point); }
+        catch { return jsonResponse({ error: 'A normalized click point is required' }, 400); }
+        if (path === '/locate-selection' && !parseSourceImage(record.focusDataUrl)) return jsonResponse({ error: 'A bounded focus crop is required' }, 400);
+      }
+      const timestamp = record.timestamp;
+      if (timestamp !== undefined && (typeof timestamp !== 'number' || !Number.isFinite(timestamp) || timestamp < 0)) return jsonResponse({ error: 'Invalid primary timestamp' }, 400);
+      let nearby;
+      let primary;
+      if (record.nearby_frames !== undefined) {
+        try {
+          if (typeof timestamp !== 'number') throw new Error('Primary timestamp required');
+          nearby = parseEvidenceFrames(record.nearby_frames, timestamp);
+          primary = normalizeObjectDescription(record.primary_description);
+        } catch { return jsonResponse({ error: 'Invalid multi-frame evidence request' }, 400); }
+      }
       const useGemini = env.VISION_PROVIDER === 'gemini'; const apiKey = useGemini ? env.GEMINI_API_KEY : env.GROQ_API_KEY;
       if (!apiKey) return jsonResponse({ error: `Missing ${useGemini ? 'GEMINI_API_KEY' : 'GROQ_API_KEY'}` }, 500);
       const provider = useGemini ? new GeminiVisionProvider(apiKey, env.GEMINI_MODEL) : new GroqVisionProvider(apiKey);
-      return jsonResponse(normalizeObjectDescription(await provider.analyzeSelection(dataUrl)));
+      if (point && path === '/locate-selection') {
+        try { return jsonResponse(await provider.locateSelection(dataUrl, record.focusDataUrl as string, point)); }
+        catch (error) {
+          return jsonResponse({ error: 'Could not isolate the clicked object. Adjust the crop and try again.',
+            reason: error instanceof TargetLocalizationError ? error.reason : 'localization_unavailable' }, 422);
+        }
+      }
+      if (nearby && primary && typeof timestamp === 'number') return jsonResponse(await analyzeWithNearbyFrames(provider, dataUrl, primary, timestamp, nearby, point));
+      let description;
+      try { description = normalizeObjectDescription(await provider.analyzeSelection(dataUrl, point)); }
+      catch { return jsonResponse({ error: 'Object analysis is temporarily unavailable' }, 502); }
+      return jsonResponse(timestamp === undefined ? description : mergeFrameEvidence(description, timestamp as number, []));
     }
     if (path === '/resolve-products') {
       const parsed: unknown = await request.json();
