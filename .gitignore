@@ -8,3 +8,5 @@ dist/
 .DS_Store
 coverage/
 .wrangler/
+.firecrawl/
+tests/benchmark/spike-4f/local/

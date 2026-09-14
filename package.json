@@ -6,7 +6,10 @@
     "dev": "pnpm --filter @vcl/extension dev",
     "dev:api": "pnpm --filter @vcl/api dev",
     "build": "pnpm -r build",
-    "check": "pnpm -r check"
+    "check": "pnpm -r check",
+    "test": "pnpm --filter @vcl/api build && node --test apps/api/tests/*.test.mjs apps/extension/tests/*.test.mjs tests/benchmark/spike-4f/*.test.mjs",
+    "benchmark": "pnpm --filter @vcl/api build && node tests/benchmark/spike-4f/run.mjs static",
+    "benchmark:replay": "node tests/benchmark/spike-4f/run.mjs replay"
   },
   "devDependencies": {
     "wrangler": "^4.131.0"

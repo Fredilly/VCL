@@ -5,6 +5,7 @@ import { normalizeObjectDescription } from './types.js';
 import { parseSelectionPoint, TargetLocalizationError } from './selection-target.js';
 import { CommerceNoResultsError, buildProductQueryVariants, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
 import { verifyCandidate, rankVerified } from './candidate-verification.js';
+import { canonical } from './verification-evidence.js';
 import { candidateKey, compareCandidateImages, parseSourceImage, imageRequestBudget } from './candidate-images.js';
 import type { ImageComparison } from './verification-evidence.js';
 import { EbayAuth } from './ebay-auth.js';
@@ -120,6 +121,10 @@ function isEtsyEligible(query: ProductQuery): boolean {
   const subcategory = (query.subcategory ?? '').toLowerCase();
   if (ETSY_ELIGIBLE_CATEGORIES.has(category)) return true;
   if (ETSY_ELIGIBLE_CATEGORIES.has(subcategory)) return true;
+  // Model descriptions also use singular/product-type taxonomy (watch, bag, boots).
+  // Reuse the verification taxonomy so these supported categories retain their providers.
+  const normalized = [canonical('category', category), canonical('category', subcategory)];
+  if (normalized.some(value => value && ['apparel', 'shoes', 'watch', 'bag'].includes(value))) return true;
   const text = `${category} ${subcategory} ${query.query}`.toLowerCase();
   for (const eligible of ETSY_ELIGIBLE_CATEGORIES) {
     if (text.includes(eligible)) return true;
