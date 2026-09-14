@@ -243,7 +243,9 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       details.append(label, text); panel.appendChild(details);
     }
 
-    if (!supplied && (analysis.identity_confidence < 0.8 || analysis.confidence < 0.8 || !analysis.brand_candidate || !analysis.model_candidate || !analysis.color)) {
+    // A confident primary guess must not prevent the user from checking another view.
+    // Confidence still comes from grounded evidence, never from action availability.
+    if (!supplied) {
       const improve = button('Improve with nearby frames');
       const note = document.createElement('div');
       note.textContent = 'Check up to two nearby frames (±0.5 seconds), then return to your paused position.';

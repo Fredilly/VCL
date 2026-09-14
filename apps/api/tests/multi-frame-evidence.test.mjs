@@ -119,10 +119,16 @@ test('all nearby failures and unsupported adapters fall back cleanly', async () 
   }
 });
 
-test('sufficient single-frame evidence skips additional model calls', async () => {
-  const provider = { async analyzeNearbyFrame() { assert.fail('unnecessary analysis'); } };
-  const result = await analyzeWithNearbyFrames(provider, image, primary({ brand_candidate: 'Known', model_candidate: 'One', identity_confidence: 0.95 }), 10, [{ ...frame, dataUrl: image }]);
-  assert.equal(result.multi_frame.frames_used, 1);
+test('complete primary identity still permits requested comparisons without confidence voting', async () => {
+  const baseline = primary({ brand_candidate: 'Known', model_candidate: 'One', identity_confidence: 0.95 });
+  let calls = 0;
+  const provider = { async analyzeNearbyFrame() { calls++; return { same_object_confidence: 0.99, identity_support: true, description: baseline }; } };
+  const result = await analyzeWithNearbyFrames(provider, image, baseline, 10, [{ ...frame, dataUrl: image }]);
+  assert.equal(calls, 1);
+  assert.equal(result.multi_frame.frames_used, 2);
+  assert.equal(result.identity_confidence, baseline.identity_confidence);
+  assert.equal(result.confidence, baseline.confidence);
+  assert.equal(result.multi_frame.changed_hypothesis, false);
 });
 
 test('frame contract enforces count, unique slots, image and relative timestamps', () => {

@@ -20,11 +20,6 @@ function structure(text: string, attribute: 'sleeve' | 'neckline'): string | nul
   return necklines.length === 1 ? necklines[0] : null;
 }
 
-export function needsNearbyEvidence(description: ObjectDescription): boolean {
-  return description.identity_confidence < 0.8 || description.confidence < 0.8 ||
-    !known(description.brand_candidate) || !known(description.model_candidate) || !known(description.color);
-}
-
 export function parseEvidenceFrames(value: unknown, timestamp: number): EvidenceFrame[] {
   if (!Array.isArray(value) || value.length > 2) throw new Error('Use at most two nearby crops');
   const seen = new Set<string>();
@@ -130,7 +125,9 @@ export function mergeFrameEvidence(primary: ObjectDescription, timestamp: number
 
 export async function analyzeWithNearbyFrames(provider: VisionProvider, primaryImage: string, primary: ObjectDescription,
   timestamp: number, frames: EvidenceFrame[], point?: SelectionPoint) {
-  if (!needsNearbyEvidence(primary) || !provider.analyzeNearbyFrame) return mergeFrameEvidence(primary, timestamp, []);
+  // The frames are an explicit user request, including when the primary guess is confident.
+  // The merger still decides which evidence is strong enough to contribute.
+  if (!provider.analyzeNearbyFrame) return mergeFrameEvidence(primary, timestamp, []);
   const observations = [];
   for (const { dataUrl, ...frame } of frames) {
     try {

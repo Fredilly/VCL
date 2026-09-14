@@ -77,3 +77,20 @@ test('actual oversized request body is bounded even without Content-Length', asy
   const response = await worker.fetch(new Request('https://api.test/analyze-selection', { method: 'POST', body: ' '.repeat(8_500_001) }), {});
   assert.equal(response.status, 400);
 });
+
+test('explicit nearby frames reach both adapters even when primary identity is complete', async () => {
+  const complete = { ...description, brand_candidate: 'Example', model_candidate: 'M1', identity_confidence: 0.99 };
+  for (const provider of ['gemini', 'groq']) {
+    calls.length = 0;
+    const result = await (await post({ dataUrl: image, timestamp: 10, primary_description: complete,
+      nearby_frames: [{ id: 'next', timestamp: 10.5, offset: 0.5, dataUrl: image }] }, provider)).json();
+    assert.equal(calls.length, 1, 'the explicit request must not be silently skipped');
+    assert.equal(result.multi_frame.frames_used, 2);
+    assert.deepEqual(result.visible_text, ['750 ml']);
+    assert.equal(result.multi_frame.field_sources.visible_text, 'next');
+    assert.equal(result.brand_candidate, complete.brand_candidate);
+    assert.equal(result.model_candidate, complete.model_candidate);
+    assert.equal(result.identity_confidence, complete.identity_confidence);
+    assert.equal(result.confidence, complete.confidence);
+  }
+});
