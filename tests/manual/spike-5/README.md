@@ -12,3 +12,8 @@ The pass rule is eight or more sessions that are commercially useful or are a
 truthful low-confidence/no-result state, with no false `EXACT` or unsupported
 `LIKELY` classifications. A row must retain its source, timestamp, and selected
 item even when it fails.
+
+Stage timing is recorded where observable from the extension UI. The Worker
+currently exposes retrieval and candidate verification as one commerce latency,
+so the report does not invent a separate verification duration. Earlier
+preserved rows contain that Worker value as a lower-bound total.
