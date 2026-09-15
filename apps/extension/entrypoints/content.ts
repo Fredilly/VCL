@@ -36,6 +36,7 @@ type CommerceResponse = {
   latency_ms: number;
   state?: 'RESULTS' | 'NO_RESULTS' | 'TEMPORARILY_UNAVAILABLE';
   providers_used?: string[];
+  timing?: { provider_retrieval_ms?: number; candidate_verification_ms?: number; total_ms?: number };
 };
 
 function parseObjectDescription(value: unknown): ObjectDescription {
@@ -181,7 +182,7 @@ function renderProducts(panel: HTMLElement, commerce: CommerceResponse) {
   }
 }
 
-async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, supplied?: ObjectDescription, captureDebug?: unknown) {
+async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, supplied?: ObjectDescription, captureDebug?: unknown, stageTiming: Record<string, number | null> = {}) {
   const panel = basePanel('VCL analyzing selection…');
   const controller = new AbortController();
   activeCapture = controller;
@@ -195,6 +196,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
   try {
     if (!supplied && result.crop) {
       panel.firstElementChild!.textContent = 'VCL locating the clicked object…';
+      const localizationStarted = Date.now();
       const focus = await cropFrozenSelection(result, focusBox(result));
       if (controller.signal.aborted) return;
       const located = await browser.runtime.sendMessage({ type: 'VCL_LOCATE_SELECTION', requestId: crypto.randomUUID(),
@@ -202,13 +204,16 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       if (controller.signal.aborted) return;
       if (located?.error) throw new Error(located.error + (__VCL_DEBUG_PROVENANCE__ && located.reason ? ` (${located.reason})` : ''));
       result = await cropFrozenSelection(result, validatedTargetBox(located, result));
+      stageTiming.localization_ms = Date.now() - localizationStarted;
       if (controller.signal.aborted) return;
       image.src = result.dataUrl;
       panel.firstElementChild!.textContent = 'VCL analyzing the clicked object…';
     }
     const requestId = crypto.randomUUID();
+    const visionStarted = Date.now();
     const response: unknown = supplied ?? await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', requestId, dataUrl: result.dataUrl, timestamp: result.currentTime,
       point: result.crop ? selectionPoint(result) : undefined });
+    if (!supplied) stageTiming.vision_ms = Date.now() - visionStarted;
     if (controller.signal.aborted) return;
     if (response && typeof response === 'object' && 'error' in response && typeof response.error === 'string') throw new Error(response.error);
     const analysis = parseObjectDescription(response);
@@ -239,7 +244,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       const label = document.createElement('summary'); label.textContent = 'Frame evidence provenance';
       const text = document.createElement('pre');
       text.style.whiteSpace = 'pre-wrap'; text.style.fontSize = '11px';
-      text.textContent = JSON.stringify({ evidence: analysis.multi_frame ?? { frames_used: 1, changed_hypothesis: false }, capture: captureDebug, selection: result.crop }, null, 2);
+      text.textContent = JSON.stringify({ evidence: analysis.multi_frame ?? { frames_used: 1, changed_hypothesis: false }, capture: captureDebug, selection: result.crop, timing: stageTiming }, null, 2);
       details.append(label, text); panel.appendChild(details);
     }
 
@@ -299,7 +304,15 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     });
     if (controller.signal.aborted) return;
     if (commerceRaw && typeof commerceRaw === 'object' && typeof commerceRaw.error === 'string') throw new Error(commerceRaw.error);
-    renderProducts(panel, parseCommerceResponse(commerceRaw));
+    const commerce = parseCommerceResponse(commerceRaw);
+    if (__VCL_DEBUG_PROVENANCE__) {
+      const timing = document.createElement('div');
+      const total = Object.values(stageTiming).reduce<number>((sum, value) => sum + (value ?? 0), 0) + (commerce.timing?.total_ms ?? commerce.latency_ms);
+      timing.textContent = `Timing · capture ${stageTiming.capture_ms ?? 'n/a'}ms · localization ${stageTiming.localization_ms ?? 'n/a'}ms · vision ${stageTiming.vision_ms ?? 'n/a'}ms · retrieval ${commerce.timing?.provider_retrieval_ms ?? 'n/a'}ms · verification ${commerce.timing?.candidate_verification_ms ?? 'n/a'}ms · total ${total}ms`;
+      Object.assign(timing.style, { opacity: '0.6', fontSize: '11px', marginTop: '8px' });
+      panel.appendChild(timing);
+    }
+    renderProducts(panel, commerce);
   } catch (error) {
     if (controller.signal.aborted) return;
     const message = document.createElement('div');
@@ -311,7 +324,9 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
 
 function showSelectionPreview(clientX: number, clientY: number) {
   let cropFraction = 0.5;
+  const captureStarted = Date.now();
   let capture = captureSelectionAtClientPoint(clientX, clientY, cropFraction);
+  const captureMs = Date.now() - captureStarted;
   if (!capture.ok) { showFailure(capture); return; }
 
   const panel = basePanel('VCL selection · adjust before analyzing');
@@ -356,7 +371,7 @@ function showSelectionPreview(clientX: number, clientY: number) {
     cropFraction = Math.min(0.9, Math.round((cropFraction + 0.1) * 100) / 100);
     refresh();
   });
-  analyze.addEventListener('click', () => { if (capture.ok) void showAnalysis(capture); });
+  analyze.addEventListener('click', () => { if (capture.ok) void showAnalysis(capture, undefined, undefined, { capture_ms: captureMs }); });
 
   refresh();
   addClose(panel);

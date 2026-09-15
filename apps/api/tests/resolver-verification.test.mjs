@@ -38,6 +38,9 @@ test('production HTTP route forwards the source crop to Gemini and applies image
     const result = await response.json();
     assert.equal(comparisons, 1);
     assert.equal(result.verification.compared, 1);
+    assert.ok(Number.isFinite(result.timing.provider_retrieval_ms));
+    assert.ok(Number.isFinite(result.timing.candidate_verification_ms));
+    assert.equal(result.timing.total_ms, result.latency_ms);
     assert.equal(result.state, contradict ? 'NO_RESULTS' : 'RESULTS');
     if (!contradict) assert.equal(result.products[0].verification_status, 'multimodal');
     else assert.equal(result.verification.contradictions['color contradiction'], 1);
@@ -68,7 +71,7 @@ test('all candidates rejected by images returns NO_RESULTS after broadening', as
   assert.equal(result.verification.compared, 1, 'duplicate offers are compared only once per request');
 });
 
-test('resolver verifies all retrieved images before limiting offers; stronger late candidate wins', async () => {
+test('resolver verifies the complete bounded candidate set before ranking offers', async () => {
   const products = Array.from({ length: 12 }, (_, i) => ({ ...candidate, id: String(i), destination: `https://shop.example/${i}` }));
   let received = 0;
   const compare = async (...args) => {
@@ -78,7 +81,9 @@ test('resolver verifies all retrieved images before limiting offers; stronger la
     return result;
   };
   const result = await resolveProducts([{ name: 'test', provider: { async search() { return products; } }, tier: 'primary' }], queries, description, env, undefined, source, compare);
-  assert.equal(received, 12); assert.equal(result.products.length, 8); assert.equal(result.products[0].id, '11');
+  assert.equal(received, 12);
+  assert.equal(result.products.length, 8); assert.equal(result.products[0].id, '11');
+  assert.ok(Number.isFinite(result.timing.candidate_verification_ms));
 });
 
 test('missing images keep credible type matches as SIMILAR without claiming verification', async () => {

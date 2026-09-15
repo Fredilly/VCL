@@ -149,6 +149,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
   const imageEvidence = new Map<string, ImageComparison>();
   const imageBudget = imageRequestBudget();
   const verification = { retrieved: 0, compared: 0, image_failures: 0, image_failure_reasons: {} as Record<string, number>, rejected: 0, contradictions: {} as Record<string, number> };
+  const timing = { provider_retrieval_ms: 0, candidate_verification_ms: 0 };
 
   const serpapiProvider = providers.find((p) => p.name === 'serpapi') ?? null;
   const braveProvider = providers.find((p) => p.name === 'brave') ?? null;
@@ -174,7 +175,36 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     }
     return { query, products: dedupeProducts(rankVerified(accepted)),
     state: accepted.length ? 'RESULTS' as const : sawProviderFailure ? 'TEMPORARILY_UNAVAILABLE' as const : 'NO_RESULTS' as const,
-    providers_used: [...providersUsed], attempts, verification, serpapi: serpapiTelemetry, brave: braveTelemetry };
+    providers_used: [...providersUsed], attempts, verification, timing, serpapi: serpapiTelemetry, brave: braveTelemetry };
+  };
+
+  // Candidate-image comparison remains bounded to the provider's top 24. Every
+  // returned candidate still passes the same image/identity/relevance gates.
+  // The verifier performs its independent six-image batches concurrently, rather
+  // than serially delaying a complete evidence set.
+  const verifyFresh = async (products: ProductCandidate[]) => {
+    const fresh = products.slice(0, 24).filter((product) => {
+      const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
+    });
+    verification.retrieved += fresh.length;
+    const verificationStarted = Date.now();
+    if (sourceImage && env.GEMINI_API_KEY && fresh.length) {
+      const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
+      verification.compared += images.compared;
+      verification.image_failures += images.failures;
+      for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
+      for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
+    }
+    for (const product of fresh) {
+      const decision = verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context);
+      if (decision.product) accepted.push(decision.product);
+      else {
+        verification.rejected++;
+        const reason = decision.reasons[0].split(':')[0];
+        verification.contradictions[reason] = (verification.contradictions[reason] ?? 0) + 1;
+      }
+    }
+    timing.candidate_verification_ms += Date.now() - verificationStarted;
   };
   for (const query of queries) {
     if (!activeProviders.length) break;
@@ -187,7 +217,9 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     // --- Tier 1: Run primary providers ---
     const activePrimary = primaryProviders.filter((p) => eligibleProviders.some((a) => a.name === p.name));
     if (activePrimary.length) {
+      const retrievalStarted = Date.now();
       const settled = await Promise.allSettled(activePrimary.map(async ({ name, provider }) => { providersUsed.add(name); return provider.search(query); }));
+      timing.provider_retrieval_ms += Date.now() - retrievalStarted;
       const products: ProductCandidate[] = []; const failedProviders = new Set<string>();
       settled.forEach((result, index) => {
         const providerName = activePrimary[index].name;
@@ -197,26 +229,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       });
       if (failedProviders.size) activeProviders = activeProviders.filter(({ name }) => !failedProviders.has(name));
 
-      const fresh = products.slice(0, 24).filter((product) => {
-        const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
-      });
-      verification.retrieved += fresh.length;
-      if (sourceImage && env.GEMINI_API_KEY && fresh.length) {
-        const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
-        verification.compared += images.compared;
-        verification.image_failures += images.failures;
-        for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
-        for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
-      }
-      for (const product of fresh) {
-        const decision = verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context);
-        if (decision.product) accepted.push(decision.product);
-        else {
-          verification.rejected++;
-          const reason = decision.reasons[0].split(':')[0];
-          verification.contradictions[reason] = (verification.contradictions[reason] ?? 0) + 1;
-        }
-      }
+      await verifyFresh(products);
     }
 
     // --- Sufficiency checks (after verification) ---
@@ -239,6 +252,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     if (!shouldSkipBrave && braveProvider && eligibleProviders.some((a) => a.name === 'brave')) {
       braveTelemetry.invoked = true;
       let result;
+      const retrievalStarted = Date.now();
       try {
         providersUsed.add('brave');
         result = await braveProvider.provider.search(query);
@@ -251,28 +265,9 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
           logSafeError(error);
           activeProviders = activeProviders.filter(({ name }) => name !== 'brave');
         }
-      }
+      } finally { timing.provider_retrieval_ms += Date.now() - retrievalStarted; }
       if (result) {
-        const braveFresh = result.slice(0, 24).filter((product) => {
-          const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
-        });
-        verification.retrieved += braveFresh.length;
-        if (sourceImage && env.GEMINI_API_KEY && braveFresh.length) {
-          const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, braveFresh, context, imageBudget);
-          verification.compared += images.compared;
-          verification.image_failures += images.failures;
-          for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
-          for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
-        }
-        for (const product of braveFresh) {
-          const decision = verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context);
-          if (decision.product) accepted.push(decision.product);
-          else {
-            verification.rejected++;
-            const reason = decision.reasons[0].split(':')[0];
-            verification.contradictions[reason] = (verification.contradictions[reason] ?? 0) + 1;
-          }
-        }
+        await verifyFresh(result);
       }
     }
 
@@ -294,6 +289,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       } else {
         serpapiTelemetry.invoked = true;
         let result;
+        const retrievalStarted = Date.now();
         try {
           providersUsed.add('serpapi');
           result = await serpapiProvider.provider.search(query);
@@ -311,28 +307,9 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
             logSafeError(error);
             activeProviders = activeProviders.filter(({ name }) => name !== 'serpapi');
           }
-        }
+        } finally { timing.provider_retrieval_ms += Date.now() - retrievalStarted; }
         if (result) {
-          const serpapiFresh = result.slice(0, 24).filter((product) => {
-            const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
-          });
-          verification.retrieved += serpapiFresh.length;
-          if (sourceImage && env.GEMINI_API_KEY && serpapiFresh.length) {
-            const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, serpapiFresh, context, imageBudget);
-            verification.compared += images.compared;
-            verification.image_failures += images.failures;
-            for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
-            for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
-          }
-          for (const product of serpapiFresh) {
-            const decision = verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context);
-            if (decision.product) accepted.push(decision.product);
-            else {
-              verification.rejected++;
-              const reason = decision.reasons[0].split(':')[0];
-              verification.contradictions[reason] = (verification.contradictions[reason] ?? 0) + 1;
-            }
-          }
+          await verifyFresh(result);
         }
       }
     }
@@ -399,7 +376,8 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const description = normalizeObjectDescription(record.description); const context = normalizeContext(record.context);
       const providers = commerceProviders(env); if (!providers.length) return jsonResponse({ error: 'No configured commerce provider' }, 503);
       const queries = buildProductQueryVariants(description, context); const started = Date.now(); const resolved = await resolveProducts(providers, queries, description, env, context, sourceImage);
-      return jsonResponse({ ...resolved, latency_ms: Date.now() - started });
+      const total_ms = Date.now() - started;
+      return jsonResponse({ ...resolved, latency_ms: total_ms, timing: { ...resolved.timing, total_ms } });
     }
     return jsonResponse({ error: 'Not found' }, 404);
   } catch (error) { logSafeError(error); return jsonResponse({ error: error instanceof Error ? error.message : 'Unknown API error' }, 500); }
