@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "spike": "7",
+  "run_date": null,
+  "pricing_snapshot_date": null,
+  "runs": [],
+  "summary": {
+    "sample_size": 0,
+    "mean_cost_usd": null,
+    "median_cost_usd": null,
+    "p50_latency_ms": null,
+    "p95_latency_ms": null,
+    "projected_100_usd": null,
+    "projected_1000_usd": null,
+    "projected_10000_usd": null,
+    "dominant_cost_stage": null
+  }
+}
