@@ -51,6 +51,48 @@ const ELIGIBLE_CATEGORIES = new Set([
   'handmade',
 ]);
 
+const PET_TERMS = ['pet', 'pets', 'dog', 'dogs', 'puppy', 'puppies', 'cat', 'cats', 'kitten', 'kittens'];
+const DOLL_TERMS = ['doll', 'dolls', 'barbie', 'blythe', 'american girl', 'toy clothing', 'toy clothes'];
+const CHILD_TERMS = ['baby', 'babies', 'toddler', 'toddlers', 'kid', 'kids', 'child', 'children', 'youth', 'infant', 'infants'];
+const ADULT_TERMS = ['adult', 'men', 'mens', "men's", 'women', 'womens', "women's", 'unisex adult'];
+
+function normalizeText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function containsAnyTerm(text: string, terms: string[]): boolean {
+  const normalized = ` ${normalizeText(text)} `;
+  return terms.some((term) => normalized.includes(` ${normalizeText(term)} `));
+}
+
+function queryAudienceText(query: ProductQuery): string {
+  return [query.query, query.category, query.subcategory, ...query.attributes].join(' ');
+}
+
+function listingAudienceText(listing: EtsyListingResult): string {
+  return [listing.title ?? '', listing.description ?? '', ...(listing.tags ?? [])].join(' ');
+}
+
+function hasAudienceContradiction(listing: EtsyListingResult, query: ProductQuery): boolean {
+  const source = queryAudienceText(query);
+  const candidate = listingAudienceText(listing);
+  const sourceIsPet = containsAnyTerm(source, PET_TERMS);
+  const sourceIsDoll = containsAnyTerm(source, DOLL_TERMS);
+  const sourceIsChild = containsAnyTerm(source, CHILD_TERMS);
+  const sourceIsAdult = containsAnyTerm(source, ADULT_TERMS);
+
+  // Etsy frequently mixes human apparel searches with pet and doll clothing.
+  // Treat those explicit audience changes as hard contradictions unless the
+  // source query itself asks for that audience.
+  if (!sourceIsPet && containsAnyTerm(candidate, PET_TERMS)) return true;
+  if (!sourceIsDoll && containsAnyTerm(candidate, DOLL_TERMS)) return true;
+
+  // Child-sized apparel is rejected only when the source explicitly says adult.
+  if (sourceIsAdult && !sourceIsChild && containsAnyTerm(candidate, CHILD_TERMS)) return true;
+
+  return false;
+}
+
 function isEligibleCategory(query: ProductQuery): boolean {
   const category = (query.category ?? '').toLowerCase();
   const subcategory = (query.subcategory ?? '').toLowerCase();
@@ -78,7 +120,7 @@ function freshnessTimestamp(listing: EtsyListingResult): number | undefined {
 
 function normalizeListing(listing: EtsyListingResult, query: ProductQuery, fetchedAt: number): ProductCandidate | null {
   const title = (listing.title ?? '').trim();
-  if (!title) return null;
+  if (!title || hasAudienceContradiction(listing, query)) return null;
   const { price, currency } = parsePrice(listing.price);
   const isLikely = Boolean(
     query.brand && query.model &&
