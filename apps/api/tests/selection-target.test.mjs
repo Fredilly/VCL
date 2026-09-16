@@ -23,7 +23,16 @@ test('both vision adapters use exact click coordinates and two-scale images to l
     const response = await post({ dataUrl: image, focusDataUrl: image, point }, provider);
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('cache-control'), 'no-store');
-    assert.deepEqual(await response.json(), target);
+    const payload = await response.json();
+    const { provider_usage, ...box } = payload;
+    assert.deepEqual(box, target);
+    if (provider === 'groq') {
+      assert.equal(provider_usage.provider, 'groq');
+      assert.equal(provider_usage.model, 'qwen/qwen3.6-27b');
+      assert.equal(provider_usage.requests, 1);
+    } else {
+      assert.equal(provider_usage, undefined);
+    }
     const request = calls[0];
     if (provider === 'gemini') assert.deepEqual(request.generationConfig.responseJsonSchema.required, ['x', 'y', 'width', 'height', 'confidence']);
     const parts = request.contents?.[0].parts ?? request.messages[0].content;
