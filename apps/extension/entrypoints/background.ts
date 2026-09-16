@@ -7,6 +7,22 @@ function friendlyError(responseStatus?: number, providerMessage?: string) {
     : 'Something went wrong. Try again.';
 }
 
+function localizationFallback(reason?: string) {
+  return { x: 0, y: 0, width: 1, height: 1, confidence: 1, fallback: true, ...(reason ? { fallback_reason: reason } : {}) };
+}
+
+function validLocalization(payload: unknown, point: unknown) {
+  if (!payload || typeof payload !== 'object' || !point || typeof point !== 'object') return false;
+  const box = payload as Record<string, unknown>;
+  const click = point as Record<string, unknown>;
+  const values = [box.x, box.y, box.width, box.height, box.confidence, click.x, click.y];
+  if (!values.every((value) => typeof value === 'number' && Number.isFinite(value))) return false;
+  const x = box.x as number; const y = box.y as number; const width = box.width as number; const height = box.height as number;
+  const confidence = box.confidence as number; const clickX = click.x as number; const clickY = click.y as number;
+  return confidence >= 0.8 && confidence <= 1 && x >= 0 && y >= 0 && width > 0 && height > 0 &&
+    x + width <= 1.001 && y + height <= 1.001 && clickX >= x && clickY >= y && clickX <= x + width && clickY <= y + height;
+}
+
 export default defineBackground(() => {
   browser.action.onClicked.addListener(async (tab) => {
     if (!tab.id) return;
@@ -32,15 +48,24 @@ export default defineBackground(() => {
       body: JSON.stringify(body),
     }).then(async (response) => {
       const payload = await response.json();
+      if (isLocate) {
+        if (!response.ok || !validLocalization(payload, message.point)) {
+          sendResponse(localizationFallback(typeof payload?.reason === 'string' ? payload.reason : typeof payload?.error === 'string' ? payload.error : undefined));
+          return;
+        }
+        sendResponse(payload);
+        return;
+      }
       if (!response.ok) {
-        sendResponse({
-          error: friendlyError(response.status, typeof payload?.error === 'string' ? payload.error : undefined),
-          ...(isLocate && typeof payload?.reason === 'string' ? { reason: payload.reason } : {}),
-        });
+        sendResponse({ error: friendlyError(response.status, typeof payload?.error === 'string' ? payload.error : undefined) });
         return;
       }
       sendResponse(payload);
     }).catch(() => {
+      if (isLocate) {
+        sendResponse(localizationFallback('request_failed'));
+        return;
+      }
       sendResponse({ error: 'Something went wrong. Try again.' });
     });
 
