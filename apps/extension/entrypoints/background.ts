@@ -1,3 +1,12 @@
+function friendlyError(responseStatus?: number, providerMessage?: string) {
+  const detail = (providerMessage ?? '').toLowerCase();
+  const temporarilyUnavailable = responseStatus === 429 || responseStatus === 503 ||
+    detail.includes('temporarily unavailable') || detail.includes('rate limit') || detail.includes('quota') || detail.includes('too many requests');
+  return temporarilyUnavailable
+    ? 'Scoop is temporarily busy. Try again in a moment.'
+    : 'Something went wrong. Try again.';
+}
+
 export default defineBackground(() => {
   browser.action.onClicked.addListener(async (tab) => {
     if (!tab.id) return;
@@ -24,13 +33,15 @@ export default defineBackground(() => {
     }).then(async (response) => {
       const payload = await response.json();
       if (!response.ok) {
-        sendResponse({ error: payload?.error || `VCL API failed with HTTP ${response.status}`,
-          ...(isLocate && typeof payload?.reason === 'string' ? { reason: payload.reason } : {}) });
+        sendResponse({
+          error: friendlyError(response.status, typeof payload?.error === 'string' ? payload.error : undefined),
+          ...(isLocate && typeof payload?.reason === 'string' ? { reason: payload.reason } : {}),
+        });
         return;
       }
       sendResponse(payload);
-    }).catch((error: unknown) => {
-      sendResponse({ error: error instanceof Error ? error.message : 'VCL request failed.' });
+    }).catch(() => {
+      sendResponse({ error: 'Something went wrong. Try again.' });
     });
 
     return true;
