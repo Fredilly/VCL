@@ -89,6 +89,9 @@ export class GroqVisionProvider implements VisionProvider {
           ...images.map((dataUrl) => { const image = parseDataUrl(dataUrl); return { type: 'image_url', image_url: { url: `data:${image.mimeType};base64,${image.data}` } }; }),
         ] }],
         response_format: { type: 'json_object' },
+        reasoning_effort: 'none',
+        reasoning_format: 'hidden',
+        max_completion_tokens: 1024,
         temperature: 0.2,
       }),
     });
