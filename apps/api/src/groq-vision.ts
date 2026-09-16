@@ -13,7 +13,7 @@ function parseDataUrl(dataUrl: string) {
 export class GroqVisionProvider implements VisionProvider {
   constructor(
     private readonly apiKey: string,
-    private readonly model = 'meta-llama/llama-4-scout-17b-16e-instruct',
+    private readonly model = 'qwen/qwen3.6-27b',
   ) {}
 
   async analyzeSelection(dataUrl: string, point?: SelectionPoint): Promise<ObjectDescription> {
