@@ -1,3 +1,15 @@
+export type ProviderUsage = {
+  provider: string;
+  model: string;
+  requests: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  prompt_time_ms?: number;
+  completion_time_ms?: number;
+  total_time_ms?: number;
+};
+
 export type ObjectDescription = {
   category: string;
   subcategory: string;
@@ -15,12 +27,25 @@ export type ObjectDescription = {
   confidence: number;
   identity_confidence: number;
   evidence_confidence?: Record<string, number>;
+  provider_usage?: ProviderUsage;
 };
 
 function stringArray(value: unknown, limit: number): string[] {
   return Array.isArray(value)
     ? value.map(String).map((item) => item.trim()).filter(Boolean).slice(0, limit)
     : [];
+}
+
+function providerUsage(value: unknown): ProviderUsage | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const v = value as Record<string, unknown>;
+  if (typeof v.provider !== 'string' || typeof v.model !== 'string' || typeof v.requests !== 'number' || !Number.isFinite(v.requests) || v.requests < 0) return undefined;
+  const usage: ProviderUsage = { provider: v.provider.slice(0, 40), model: v.model.slice(0, 120), requests: Math.floor(v.requests) };
+  for (const key of ['prompt_tokens', 'completion_tokens', 'total_tokens', 'prompt_time_ms', 'completion_time_ms', 'total_time_ms'] as const) {
+    const number = v[key];
+    if (typeof number === 'number' && Number.isFinite(number) && number >= 0) usage[key] = number;
+  }
+  return usage;
 }
 
 export function normalizeObjectDescription(value: unknown): ObjectDescription {
@@ -33,10 +58,12 @@ export function normalizeObjectDescription(value: unknown): ObjectDescription {
   const identityConfidence = Number(record.identity_confidence ?? 0);
   if (!Number.isFinite(confidence)) throw new Error('Vision output had invalid confidence.');
   if (!Number.isFinite(identityConfidence)) throw new Error('Vision output had invalid identity confidence.');
+  const usage = providerUsage(record.provider_usage);
 
   return {
     ...(record.evidence_confidence && typeof record.evidence_confidence === 'object' && !Array.isArray(record.evidence_confidence)
       ? { evidence_confidence: Object.fromEntries(Object.entries(record.evidence_confidence).filter(([, value]) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1)) as Record<string, number> } : {}),
+    ...(usage ? { provider_usage: usage } : {}),
     category: typeof record.category === 'string' ? record.category : '',
     subcategory: typeof record.subcategory === 'string' ? record.subcategory : '',
     brand_candidate: record.brand_candidate == null ? null : String(record.brand_candidate),
