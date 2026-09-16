@@ -23,10 +23,20 @@ function validLocalization(payload: unknown, point: unknown) {
     x + width <= 1.001 && y + height <= 1.001 && clickX >= x && clickY >= y && clickX <= x + width && clickY <= y + height;
 }
 
+async function toggleOverlay(tabId?: number) {
+  if (!tabId) return;
+  await browser.tabs.sendMessage(tabId, { type: 'VCL_TOGGLE_OVERLAY' }).catch(() => undefined);
+}
+
 export default defineBackground(() => {
   browser.action.onClicked.addListener(async (tab) => {
-    if (!tab.id) return;
-    await browser.tabs.sendMessage(tab.id, { type: 'VCL_TOGGLE_OVERLAY' }).catch(() => undefined);
+    await toggleOverlay(tab.id);
+  });
+
+  browser.commands.onCommand.addListener(async (command) => {
+    if (command !== 'toggle-scoop') return;
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+    await toggleOverlay(tab?.id);
   });
 
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
