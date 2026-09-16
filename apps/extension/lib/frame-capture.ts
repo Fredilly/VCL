@@ -106,6 +106,36 @@ function visibleArea(video: HTMLVideoElement): number {
   return Math.max(0, right - left) * Math.max(0, bottom - top);
 }
 
+function objectPositionOffset(value: string | undefined, freeSpace: number): number {
+  if (!value) return freeSpace / 2;
+  if (value.endsWith('%')) {
+    const percent = Number.parseFloat(value);
+    return Number.isFinite(percent) ? freeSpace * percent / 100 : freeSpace / 2;
+  }
+  const pixels = Number.parseFloat(value);
+  return Number.isFinite(pixels) ? pixels : freeSpace / 2;
+}
+
+// Map client coordinates to the decoded video pixels. Replaced video elements may
+// use object-fit: cover/none/scale-down, so rect/source aspect-ratio math alone
+// is not reliable outside the common contain layout.
+export function displayedVideoBounds(video: HTMLVideoElement) {
+  const rect = video.getBoundingClientRect();
+  const style = getComputedStyle(video);
+  const sourceWidth = video.videoWidth;
+  const sourceHeight = video.videoHeight;
+  const fit = style.objectFit || 'fill';
+  const contain = Math.min(rect.width / sourceWidth, rect.height / sourceHeight);
+  const cover = Math.max(rect.width / sourceWidth, rect.height / sourceHeight);
+  const scale = fit === 'cover' ? cover : fit === 'none' ? 1 : fit === 'scale-down' ? Math.min(1, contain) : contain;
+  const width = fit === 'fill' ? rect.width : sourceWidth * scale;
+  const height = fit === 'fill' ? rect.height : sourceHeight * scale;
+  const position = (style.objectPosition || '50% 50%').trim().split(/\s+/);
+  const left = rect.left + objectPositionOffset(position[0], rect.width - width);
+  const top = rect.top + objectPositionOffset(position[1] ?? position[0], rect.height - height);
+  return { left, top, width, height, scaleX: sourceWidth / width, scaleY: sourceHeight / height };
+}
+
 export function findPrimaryVisibleVideo(): HTMLVideoElement | null {
   const videos = Array.from(document.querySelectorAll<HTMLVideoElement>('video'));
   return videos
@@ -185,16 +215,11 @@ export function captureSelectionAtClientPoint(
   const notReady = ensureReady(video);
   if (notReady) return notReady;
 
-  const rect = video.getBoundingClientRect();
   const sourceWidth = video.videoWidth;
   const sourceHeight = video.videoHeight;
-  const displayScale = Math.min(rect.width / sourceWidth, rect.height / sourceHeight);
-  const displayedWidth = sourceWidth * displayScale;
-  const displayedHeight = sourceHeight * displayScale;
-  const contentLeft = rect.left + (rect.width - displayedWidth) / 2;
-  const contentTop = rect.top + (rect.height - displayedHeight) / 2;
+  const displayed = displayedVideoBounds(video);
 
-  if (clientX < contentLeft || clientX > contentLeft + displayedWidth || clientY < contentTop || clientY > contentTop + displayedHeight) {
+  if (clientX < displayed.left || clientX > displayed.left + displayed.width || clientY < displayed.top || clientY > displayed.top + displayed.height) {
     return {
       ok: false,
       code: 'CLICK_OUTSIDE_VIDEO',
@@ -202,8 +227,8 @@ export function captureSelectionAtClientPoint(
     };
   }
 
-  const clickX = Math.min(sourceWidth - 1, Math.max(0, (clientX - contentLeft) / displayScale));
-  const clickY = Math.min(sourceHeight - 1, Math.max(0, (clientY - contentTop) / displayScale));
+  const clickX = Math.min(sourceWidth - 1, Math.max(0, (clientX - displayed.left) * displayed.scaleX));
+  const clickY = Math.min(sourceHeight - 1, Math.max(0, (clientY - displayed.top) * displayed.scaleY));
   const cropSize = Math.max(96, Math.round(Math.min(sourceWidth, sourceHeight) * cropFraction));
   const cropWidth = Math.min(sourceWidth, cropSize);
   const cropHeight = Math.min(sourceHeight, cropSize);

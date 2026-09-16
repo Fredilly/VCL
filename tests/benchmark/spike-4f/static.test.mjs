@@ -11,7 +11,11 @@ test('unchanged production resolver executes all 30 fixtures offline and repeats
     const corpus = createCorpus();
     const first = await runStatic(corpus);
     const second = await runStatic(corpus);
-    const semantic = run => run.observations.map(({ latency_ms, ...observation }) => observation);
+    // Stage timing is operational telemetry and intentionally non-deterministic;
+    // the frozen benchmark compares resolver semantics, not wall-clock samples.
+    const semantic = run => run.observations.map(({ latency_ms, response, ...observation }) => ({
+      ...observation, response: { ...response, timing: undefined },
+    }));
     assert.deepEqual(semantic(first), semantic(second));
     const rows = corpus.selections.map((s, i) => scoreSelection(s, first.observations[i], first.reviews[s.id]));
     const metrics = summarize(rows);

@@ -178,7 +178,10 @@ export async function compareCandidateImages(
     ));
     try {
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(25000),
+        // A verifier result is useful only while the interaction is still live.
+        // Keep this bounded below the former 25s serial-batch stall; failure
+        // remains an unknown comparison and never promotes a candidate.
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(12000),
         body: JSON.stringify({ systemInstruction: { parts: [{ text: INSTRUCTIONS }] }, contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', responseSchema, temperature: 0, maxOutputTokens: 12000 } }),
       });
       if (!response.ok) { failure(`model_http_${response.status}`, images.length); await response.body?.cancel(); failures += images.length; return; }

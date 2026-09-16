@@ -34,7 +34,7 @@ for (const fixture of selected) {
       source_image: `data:${mime};base64,${bytes.toString('base64')}`, context: { title: `${fixture.brand} ${fixture.subtype} catalog photograph` } }));
     const row = { case: fixture.id, source: fixture.page, elapsed_ms: Date.now() - started, ...result };
     report.push(row);
-    console.log(JSON.stringify({ case: row.case, state: row.state, elapsed_ms: row.elapsed_ms, verification: row.verification,
+    console.log(JSON.stringify({ case: row.case, state: row.state, elapsed_ms: row.elapsed_ms, timing: row.timing, verification: row.verification,
       products: row.products?.map((p) => ({ title: p.title, classification: p.result_class, score: p.verification_score, status: p.verification_status, reasons: p.verification_reasons })) }));
   } catch (error) { const row = { case: fixture.id, error: error.message, elapsed_ms: Date.now() - started }; report.push(row); console.log(JSON.stringify(row)); }
 }

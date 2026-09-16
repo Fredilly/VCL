@@ -93,3 +93,26 @@ test('image subrequest budget is shared across broadening and leaves room for re
   assert.equal(third.compared, 0); assert.equal(third.failure_reasons.image_budget, 24);
   assert.equal(requests, 42); assert.equal(modelCalls, 6); assert.equal(budget.remaining, 0);
 });
+
+test('verification batches run sequentially: second batch starts only after first completes', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  let concurrent = 0, maxConcurrent = 0, modelCalls = 0;
+  const { compareCandidateImages } = loadModule(filename, { fetch: async (url, options) => {
+    if (!String(url).includes('generativelanguage')) {
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+    }
+    modelCalls++;
+    concurrent++;
+    maxConcurrent = Math.max(maxConcurrent, concurrent);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const count = JSON.parse(options.body).contents[0].parts.filter((p) => p.inlineData).length - 1;
+    concurrent--;
+    return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: comparison.source,
+      candidates: Array.from({ length: count }, (_, index) => ({ index, attributes: comparison.candidate, ...comparison })) }) }] } }] });
+  } });
+  const products = Array.from({ length: 12 }, (_, i) => ({ ...candidate, id: String(i), destination: `https://shop.example/${i}` }));
+  const result = await compareCandidateImages('key', 'model', image, description, products);
+  assert.equal(result.compared, 12);
+  assert.equal(modelCalls, 2);
+  assert.equal(maxConcurrent, 1);
+});

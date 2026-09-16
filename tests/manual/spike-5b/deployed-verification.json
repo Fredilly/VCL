@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "bounded_deployed_resolver_verification",
+  "run_at": "2026-09-15T00:00:00Z",
+  "worker_version": "10058fee-45b9-4efa-be42-2471b802a1e1",
+  "endpoint": "https://api.vcl.article6.org/resolve-products",
+  "method": "Five independently run catalog-image requests. Wall time includes source-image download; Worker stages are returned by the deployed API. This is resolver evidence, not a replacement for the frozen ten-session extension protocol.",
+  "summary": {
+    "sessions": 5,
+    "useful_results": 5,
+    "false_exact": 0,
+    "false_likely": 0,
+    "provider_failures": 0,
+    "wall_total_ms": { "p50": 24721, "p95": 29860 },
+    "worker_total_ms": { "p50": 19949, "p95": 20610 },
+    "provider_retrieval_ms": { "p50": 3015, "p95": 4531 },
+    "candidate_verification_ms": { "p50": 16801, "p95": 17546 }
+  },
+  "cases": [
+    { "id": "uniqlo-tee", "wall_total_ms": 28007, "worker_total_ms": 20610, "provider_retrieval_ms": 4241, "candidate_verification_ms": 16369, "state": "RESULTS", "product_count": 8, "classes": ["SIMILAR"], "providers": ["ebay", "etsy"], "compared": 23, "image_failures": 36 },
+    { "id": "adidas-hoodie", "wall_total_ms": 23949, "worker_total_ms": 19683, "provider_retrieval_ms": 2882, "candidate_verification_ms": 16801, "state": "RESULTS", "product_count": 8, "classes": ["SIMILAR"], "providers": ["ebay", "etsy"], "compared": 22, "image_failures": 48 },
+    { "id": "patagonia-jacket", "wall_total_ms": 24721, "worker_total_ms": 19949, "provider_retrieval_ms": 3015, "candidate_verification_ms": 16934, "state": "RESULTS", "product_count": 8, "classes": ["SIMILAR"], "providers": ["ebay", "etsy"], "compared": 23, "image_failures": 48 },
+    { "id": "levis-jeans", "wall_total_ms": 29860, "worker_total_ms": 20460, "provider_retrieval_ms": 2914, "candidate_verification_ms": 17546, "state": "RESULTS", "product_count": 8, "classes": ["SIMILAR"], "providers": ["ebay", "etsy"], "compared": 18, "image_failures": 49 },
+    { "id": "hm-dress", "wall_total_ms": 24088, "worker_total_ms": 19145, "provider_retrieval_ms": 4531, "candidate_verification_ms": 14614, "state": "RESULTS", "product_count": 3, "classes": ["SIMILAR"], "providers": ["ebay", "etsy", "brave"], "compared": 12, "image_failures": 12 }
+  ]
+}

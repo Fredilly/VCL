@@ -73,3 +73,21 @@ test('a smaller video under the click wins over an unrelated large visible playe
   assert.equal(result.ok, true);
   assert.equal(drawn, small);
 });
+
+test('click coordinates follow object-fit cover rather than treating clipped pixels as letterboxing', () => {
+  const video = {
+    videoWidth: 1600, videoHeight: 900, readyState: 4, currentTime: 1, paused: true, currentSrc: 'same-origin',
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 800, right: 800, bottom: 800 }),
+  };
+  const module = loadModule(new URL('../lib/frame-capture.ts', import.meta.url).pathname, {
+    HTMLMediaElement: { HAVE_CURRENT_DATA: 2 }, window: { innerWidth: 1200, innerHeight: 900 },
+    getComputedStyle: () => ({ opacity: '1', visibility: 'visible', display: 'block', objectFit: 'cover', objectPosition: '50% 50%' }),
+    document: { querySelectorAll: () => [video], createElement: () => ({
+      width: 0, height: 0, getContext: () => ({ drawImage() {} }), toDataURL: () => 'pixels',
+    }) },
+  });
+  const result = module.captureSelectionAtClientPoint(400, 400);
+  assert.equal(result.ok, true);
+  assert.equal(result.crop.clickX, 800, 'the centre client point maps to the centre decoded pixel');
+  assert.equal(result.crop.clickY, 450);
+});
