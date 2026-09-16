@@ -117,31 +117,43 @@ function endpoint(url) {
 }
 
 async function collectApiResponses(worker, runAction) {
-  await worker.send('Network.enable');
-  const seen = new Map();
-  const bodies = [];
-  const offResponse = worker.on('Network.responseReceived', (event) => {
-    const name = endpoint(event.response.url);
-    if (name) seen.set(event.requestId, { name, status: event.response.status });
-  });
-  const offFinished = worker.on('Network.loadingFinished', async ({ requestId }) => {
-    const info = seen.get(requestId);
-    if (!info) return;
-    seen.delete(requestId);
-    try {
-      const body = await worker.send('Network.getResponseBody', { requestId });
-      bodies.push({ ...info, body: JSON.parse(body.body) });
-    } catch {
-      bodies.push({ ...info, body: null });
-    }
-  });
+  // CDP Network events are not reliable for extension service-worker fetches in every
+  // Chromium build. Wrap fetch inside the worker instead and keep only the tiny JSON
+  // responses needed for cost telemetry. No image request bodies are retained.
+  await worker.eval(`(() => {
+    if (!globalThis.__vclCostOriginalFetch) globalThis.__vclCostOriginalFetch = globalThis.fetch;
+    globalThis.__vclCostResponses = [];
+    globalThis.fetch = async (...args) => {
+      const response = await globalThis.__vclCostOriginalFetch(...args);
+      try {
+        const url = String(args[0] instanceof Request ? args[0].url : args[0]);
+        const parsed = new URL(url);
+        if (parsed.origin === ${JSON.stringify(apiOrigin)} && ['/locate-selection','/analyze-selection','/resolve-products'].includes(parsed.pathname)) {
+          const clone = response.clone();
+          let body = null;
+          try { body = await clone.json(); } catch {}
+          globalThis.__vclCostResponses.push({ name: parsed.pathname.slice(1), status: response.status, body });
+        }
+      } catch {}
+      return response;
+    };
+    return true;
+  })()`);
   try {
     await runAction();
-    await waitFor(() => bodies.some((item) => item.name === 'resolve-products'), 90000, 'Timed out waiting for product resolution');
+    await waitFor(async () => {
+      const responses = await worker.eval(`globalThis.__vclCostResponses ?? []`);
+      return responses.some((item) => item.name === 'resolve-products') ? responses : null;
+    }, 120000, 'Timed out waiting for product resolution');
     await sleep(300);
-    return bodies;
+    return await worker.eval(`globalThis.__vclCostResponses ?? []`);
   } finally {
-    offResponse(); offFinished();
+    await worker.eval(`(() => {
+      if (globalThis.__vclCostOriginalFetch) globalThis.fetch = globalThis.__vclCostOriginalFetch;
+      delete globalThis.__vclCostOriginalFetch;
+      delete globalThis.__vclCostResponses;
+      return true;
+    })()`).catch(() => undefined);
   }
 }
 
