@@ -27,5 +27,14 @@ export default defineConfig({
         128: 'icons/scoop-extension-128.png',
       },
     },
+    commands: {
+      'toggle-scoop': {
+        suggested_key: {
+          default: 'Ctrl+Shift+S',
+          mac: 'Command+Shift+S',
+        },
+        description: 'Open Scoop product selection',
+      },
+    },
   },
 });
