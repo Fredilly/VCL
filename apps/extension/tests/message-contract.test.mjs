@@ -11,6 +11,8 @@ const description = { category: 'drinkware', subcategory: 'mug', brand_candidate
   color: 'red', material: 'ceramic', style_attributes: ['plain'], visible_text: [], logos_markings: [], distinctive_features: [], hardware_details: [], shape_silhouette: [], search_terms: ['red mug'], confidence: 0.85, identity_confidence: 0 };
 const commerce = { query: { query: 'red mug' }, products: [], latency_ms: 12 };
 
+const commandApi = { onCommand: { addListener() {} } };
+
 async function run({ visionStatus = 200, visionPayload = description, commerceStatus = 200, commercePayload = commerce, targeted = false, locateFails = false, improve = false } = {}) {
   let listener;
   let requests = 0;
@@ -19,7 +21,7 @@ async function run({ visionStatus = 200, visionPayload = description, commerceSt
   const element = () => ({ style: {}, children: [], listeners: new Map(), appendChild(child) { this.children.push(child); if (child.id) nodes.set(child.id, child); },
     append(...children) { for (const child of children) this.appendChild(child); },
     get firstElementChild() { return this.children[0]; }, addEventListener(type, fn) { this.listeners.set(type, fn); }, remove() { nodes.delete(this.id); } });
-  const browser = { action: { onClicked: { addListener() {} } }, runtime: {
+  const browser = { action: { onClicked: { addListener() {} } }, commands: commandApi, tabs: { async query() { return [{ id: 1 }]; }, async sendMessage() {} }, runtime: {
     onMessage: { addListener(fn) { listener = fn; } },
     async sendMessage(message) {
       return await new Promise((resolve, reject) => {
@@ -85,7 +87,7 @@ test('ambiguous localization never falls back to identifying the larger surround
 
 test('background listener delivers callback response and returns true to keep channel open', async () => {
   let listener;
-  const browser = { action: { onClicked: { addListener() {} } }, runtime: { onMessage: { addListener(fn) { listener = fn; } } } };
+  const browser = { action: { onClicked: { addListener() {} } }, commands: commandApi, tabs: { async query() { return [{ id: 1 }]; }, async sendMessage() {} }, runtime: { onMessage: { addListener(fn) { listener = fn; } } } };
   const context = vm.createContext({ exports: {}, browser, defineBackground: fn => fn(), console,
     fetch: async () => Response.json(description) });
   vm.runInContext(compile(background), context);
