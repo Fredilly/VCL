@@ -59,7 +59,8 @@ export class GroqVisionProvider implements VisionProvider {
   }
 
   async locateSelection(dataUrl: string, focusDataUrl: string, point: SelectionPoint) {
-    return normalizeTargetBox(await this.generate(selectionTargetPrompt(point), [dataUrl, focusDataUrl]), point);
+    const target = normalizeTargetBox(await this.generate(selectionTargetPrompt(point), [dataUrl, focusDataUrl]), point);
+    return { ...target, provider_usage: this.getUsageSnapshot() };
   }
 
   async analyzeNearbyFrame(primary: string, nearby: string, description: ObjectDescription, point?: SelectionPoint) {
