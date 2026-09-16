@@ -196,9 +196,6 @@ export async function compareCandidateImages(
       failures += images.length;
     }
   };
-  // Batches have no shared model state. Start them together so a slow model call
-  // bounds verification once, instead of once per six candidates. `reserve` runs
-  // synchronously before each await, retaining the request-budget guard.
-  await Promise.all(batches.map(run));
+  for (const batch of batches) await run(batch);
   return { comparisons, failures, compared: comparisons.size, failure_reasons };
 }
