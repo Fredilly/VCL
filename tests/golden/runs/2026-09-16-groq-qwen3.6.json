@@ -1,0 +1,231 @@
+{
+  "schema_version": 1,
+  "suite": "golden",
+  "session_id": "2026-09-16-groq-qwen3.6",
+  "run_date": "2026-09-16",
+  "configured_vision_provider": "groq",
+  "configured_vision_model": "qwen/qwen3.6-27b",
+  "notes": "Manual Golden 5 baseline. Three official runs per case. Extra exploratory runs are intentionally excluded from scoring. Candidate-image verification may still use Gemini when available.",
+  "cases": [
+    {
+      "case_id": "golden-001-billions-tie",
+      "runs": [
+        {
+          "run": 1,
+          "outcome": "PASS",
+          "returned_identity": "Necktie",
+          "returned_attributes": ["dark green", "striped", "formal", "business"],
+          "commercial_confidence_pct": 85,
+          "identity_confidence_pct": 0,
+          "products_returned": 2,
+          "best_visible_product": "New Classic Striped Dark Green JACQUARD WOVEN 100% Silk Men's Tie Necktie",
+          "result_class": "SIMILAR",
+          "latency_ms": 23466,
+          "notes": "Correct object identification; useful commercial result; no unsupported exact identity claim."
+        },
+        {
+          "run": 2,
+          "outcome": "PASS",
+          "returned_identity": "Necktie",
+          "returned_attributes": ["dark green and silver", "silk", "striped", "formal", "business"],
+          "commercial_confidence_pct": 85,
+          "identity_confidence_pct": 0,
+          "products_returned": 1,
+          "best_visible_product": "GEOFFREY BEENE MENS TIE DARK GREEN SILVER AND BLUE STRIPES 3.75 X 59",
+          "result_class": "SIMILAR",
+          "latency_ms": 28343,
+          "notes": "Correct object identification with slightly richer color/material description."
+        },
+        {
+          "run": 3,
+          "outcome": "PASS",
+          "returned_identity": "tie",
+          "returned_attributes": ["dark green and light stripes", "silk", "striped", "formal", "business"],
+          "commercial_confidence_pct": 85,
+          "identity_confidence_pct": 0,
+          "products_returned": 2,
+          "best_visible_product": "Green & Navy Formal Business Striped 3 Inch Tie Mens Professional Fashion",
+          "result_class": "SIMILAR",
+          "latency_ms": 29150,
+          "notes": "Correct object identification; similar-only retrieval; visible attribute drift remains."
+        }
+      ]
+    },
+    {
+      "case_id": "golden-002-casio-f91w",
+      "runs": [
+        {
+          "run": 1,
+          "outcome": "PASS",
+          "returned_identity": "Casio F-91W Wristwatch",
+          "returned_attributes": ["grey", "resin", "digital", "casual", "sport", "retro", "vintage"],
+          "commercial_confidence_pct": 99,
+          "identity_confidence_pct": 99,
+          "products_returned": 5,
+          "best_visible_product": "Casio F-91W listing",
+          "result_class": "SIMILAR",
+          "latency_ms": 44014,
+          "notes": "Exact model correctly identified; top commerce result was weaker/customized."
+        },
+        {
+          "run": 2,
+          "outcome": "PASS",
+          "returned_identity": "Casio F-91W Wristwatch",
+          "returned_attributes": ["black", "resin", "digital", "casual", "sport", "vintage"],
+          "commercial_confidence_pct": 100,
+          "identity_confidence_pct": 100,
+          "products_returned": 6,
+          "best_visible_product": "Casio F91WM-9A Digital Chronograph Watch",
+          "result_class": "LIKELY",
+          "latency_ms": 15700,
+          "notes": "Exact family/model recognized with strong commerce result."
+        },
+        {
+          "run": 3,
+          "outcome": "PASS",
+          "returned_identity": "Casio F-91W Wristwatch",
+          "returned_attributes": ["black", "resin", "digital", "casual", "sport", "retro"],
+          "commercial_confidence_pct": 100,
+          "identity_confidence_pct": 100,
+          "products_returned": 7,
+          "best_visible_product": "Casio F-91W-1CR Classic Digital Watch Black Resin Alarm Stopwatch NEW IN BOX",
+          "result_class": "LIKELY",
+          "latency_ms": 13637,
+          "notes": "Excellent identification and strong product match."
+        }
+      ]
+    },
+    {
+      "case_id": "golden-003-hugo-boss-bottled",
+      "runs": [
+        {
+          "run": 1,
+          "outcome": "PASS",
+          "returned_identity": "Hugo Boss Boss Bottled Perfume",
+          "returned_attributes": ["amber", "glass", "luxury", "masculine", "fragrance"],
+          "commercial_confidence_pct": 95,
+          "identity_confidence_pct": 95,
+          "products_returned": 8,
+          "best_visible_product": "Hugo Boss Bottled Eau de Toilette Woody Men's Cologne Spray 3.3 Oz 100ml Authent",
+          "result_class": "SIMILAR",
+          "latency_ms": 36277,
+          "notes": "Strong object understanding and brand/model capture."
+        },
+        {
+          "run": 2,
+          "outcome": "PROVIDER_BLOCKED",
+          "returned_identity": "BOSS Fragrance",
+          "returned_attributes": ["clear", "glass", "transparent", "curved"],
+          "commercial_confidence_pct": 95,
+          "identity_confidence_pct": 95,
+          "products_returned": 0,
+          "best_visible_product": null,
+          "result_class": null,
+          "latency_ms": 32067,
+          "notes": "Object understanding succeeded; shopping sources reported temporarily unavailable."
+        },
+        {
+          "run": 3,
+          "outcome": "PASS",
+          "returned_identity": "Hugo Boss Perfume Bottle",
+          "returned_attributes": ["clear", "amber", "glass", "plastic", "transparent", "embossed"],
+          "commercial_confidence_pct": 95,
+          "identity_confidence_pct": 95,
+          "products_returned": 3,
+          "best_visible_product": "HUGO BOSS Bottled Absolu Parfum Intense Spray for Men 3.3 oz / 100 ml New In Box",
+          "result_class": "SIMILAR",
+          "latency_ms": 33791,
+          "notes": "Good brand capture and relevant commerce results."
+        }
+      ]
+    },
+    {
+      "case_id": "golden-004-white-denim-jacket",
+      "runs": [
+        {
+          "run": 1,
+          "outcome": "PASS",
+          "returned_identity": "Jacket",
+          "returned_attributes": ["white", "denim", "casual", "denim jacket", "long sleeve", "collared", "button-up"],
+          "commercial_confidence_pct": 95,
+          "identity_confidence_pct": 0,
+          "products_returned": 8,
+          "best_visible_product": "New Direction Woman White Denim Jacket 100% Cotton Trucker Style",
+          "result_class": "SIMILAR",
+          "latency_ms": 15783,
+          "notes": "Strong and specific garment understanding with good commerce relevance."
+        },
+        {
+          "run": 2,
+          "outcome": "PASS",
+          "returned_identity": "Jacket",
+          "returned_attributes": ["white", "denim", "casual", "button-up", "collared", "pocketed"],
+          "commercial_confidence_pct": 95,
+          "identity_confidence_pct": 0,
+          "products_returned": 8,
+          "best_visible_product": "White Denim Jacket NWOT",
+          "result_class": "SIMILAR",
+          "latency_ms": 14991,
+          "notes": "Stable product-type result with minor attribute drift."
+        },
+        {
+          "run": 3,
+          "outcome": "PASS",
+          "returned_identity": "Jacket",
+          "returned_attributes": ["white", "denim", "casual", "button-up", "collared", "long sleeve"],
+          "commercial_confidence_pct": 95,
+          "identity_confidence_pct": 0,
+          "products_returned": 8,
+          "best_visible_product": "H&M Jacket Womens M White Denim Trucker Collared Button Pockets Unlined Casual",
+          "result_class": "SIMILAR",
+          "latency_ms": 16840,
+          "notes": "Consistent object understanding and useful retrieval."
+        }
+      ]
+    },
+    {
+      "case_id": "golden-005-dior-book-tote",
+      "runs": [
+        {
+          "run": 1,
+          "outcome": "PASS",
+          "returned_identity": "Christian Dior Book Tote Tote Bag",
+          "returned_attributes": ["blue", "beige", "white", "canvas", "embroidered textile", "structured", "large", "open top"],
+          "commercial_confidence_pct": 95,
+          "identity_confidence_pct": 95,
+          "products_returned": 3,
+          "best_visible_product": "Christian Dior Oblique Book Tote 42 – Navy Blue color Bag",
+          "result_class": "SIMILAR",
+          "latency_ms": 6562,
+          "notes": "Excellent brand/model recognition and fast first run."
+        },
+        {
+          "run": 2,
+          "outcome": "PASS",
+          "returned_identity": "Christian Dior Book Tote Tote Bag",
+          "returned_attributes": ["blue and beige", "canvas", "structured", "large", "patterned", "double handle"],
+          "commercial_confidence_pct": 95,
+          "identity_confidence_pct": 95,
+          "products_returned": 3,
+          "best_visible_product": "DIOR Book Tote Navy Blue Monogram Oblique Bag Only",
+          "result_class": "SIMILAR",
+          "latency_ms": 37755,
+          "notes": "Stable identity with much slower retrieval."
+        },
+        {
+          "run": 3,
+          "outcome": "PASS",
+          "returned_identity": "Christian Dior Book Tote Tote Bag",
+          "returned_attributes": ["blue and beige", "canvas", "embroidered", "monogram", "structured", "luxury"],
+          "commercial_confidence_pct": 98,
+          "identity_confidence_pct": 95,
+          "products_returned": 4,
+          "best_visible_product": "DIOR Book Tote Navy Blue Monogram Oblique Bag Only",
+          "result_class": "SIMILAR",
+          "latency_ms": 37369,
+          "notes": "Stable brand/model recognition with richer visual attributes."
+        }
+      ]
+    }
+  ]
+}

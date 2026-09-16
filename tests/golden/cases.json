@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "suite": "golden",
+  "cases": [
+    {
+      "id": "golden-001-billions-tie",
+      "name": "Billions tie",
+      "url_at_time": "https://youtu.be/T-bpMn0VMYk?t=157",
+      "target_object": "tie on the left",
+      "click_point": "tie knot",
+      "expected_identity": "men's necktie",
+      "expected_brand_model": null,
+      "notes": "Brand/model not visibly supported. Do not infer luxury branding from show context."
+    },
+    {
+      "id": "golden-002-casio-f91w",
+      "name": "Casio F-91W",
+      "url_at_time": "https://youtu.be/CT0mvnFbOYQ?t=2",
+      "target_object": "Casio watch",
+      "click_point": "center of watch face",
+      "expected_identity": "digital wristwatch",
+      "expected_brand_model": "Casio F-91W",
+      "notes": "Brand/model is visibly supported on the watch face."
+    },
+    {
+      "id": "golden-003-hugo-boss-bottled",
+      "name": "Hugo Boss bottle",
+      "url_at_time": "https://youtu.be/jndGRB5Il3k?t=7",
+      "target_object": "perfume bottle",
+      "click_point": "center/body of perfume bottle",
+      "expected_identity": "perfume / fragrance bottle",
+      "expected_brand_model": "Hugo Boss Boss Bottled",
+      "notes": "BOSS / HUGO BOSS branding is visible in the frozen frame."
+    },
+    {
+      "id": "golden-004-white-denim-jacket",
+      "name": "White denim jacket",
+      "url_at_time": "https://youtu.be/Fr8xhEDNhfU?t=121",
+      "target_object": "white denim jacket",
+      "click_point": "side of jacket",
+      "expected_identity": "white denim jacket",
+      "expected_brand_model": null,
+      "notes": "Brand/model unknown. Product-type specificity is the target."
+    },
+    {
+      "id": "golden-005-dior-book-tote",
+      "name": "Christian Dior Book Tote",
+      "url_at_time": "https://youtu.be/4Gmrv8KEuTo?t=504",
+      "target_object": "handbag",
+      "click_point": "bag surface",
+      "expected_identity": "tote bag / handbag",
+      "expected_brand_model": "Christian Dior Book Tote",
+      "notes": "CHRISTIAN DIOR branding and Book Tote form are visibly supported."
+    }
+  ]
+}
