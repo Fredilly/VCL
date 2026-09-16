@@ -150,6 +150,12 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
   const imageBudget = imageRequestBudget();
   const verification = { retrieved: 0, compared: 0, image_failures: 0, image_failure_reasons: {} as Record<string, number>, rejected: 0, contradictions: {} as Record<string, number> };
   const timing = { provider_retrieval_ms: 0, candidate_verification_ms: 0 };
+  const commerceCalls: Record<string, number> = {};
+  const verificationUsage = {
+    provider: 'gemini', model: env.GEMINI_MODEL || 'gemini-3.5-flash-lite', requests: 0,
+    prompt_tokens: 0, completion_tokens: 0, total_tokens: 0,
+  };
+  const noteCommerceCall = (name: string) => { commerceCalls[name] = (commerceCalls[name] ?? 0) + 1; };
 
   const serpapiProvider = providers.find((p) => p.name === 'serpapi') ?? null;
   const braveProvider = providers.find((p) => p.name === 'brave') ?? null;
@@ -175,7 +181,8 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     }
     return { query, products: dedupeProducts(rankVerified(accepted)),
     state: accepted.length ? 'RESULTS' as const : sawProviderFailure ? 'TEMPORARILY_UNAVAILABLE' as const : 'NO_RESULTS' as const,
-    providers_used: [...providersUsed], attempts, verification, timing, serpapi: serpapiTelemetry, brave: braveTelemetry };
+    providers_used: [...providersUsed], attempts, verification, timing, serpapi: serpapiTelemetry, brave: braveTelemetry,
+    cost_usage: { commerce_calls: { ...commerceCalls }, verification_usage: { ...verificationUsage } } };
   };
 
   // Candidate-image comparison is bounded to the provider's top 8. Every
@@ -190,6 +197,10 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
       verification.compared += images.compared;
       verification.image_failures += images.failures;
+      verificationUsage.requests += images.usage?.requests ?? 0;
+      verificationUsage.prompt_tokens += images.usage?.prompt_tokens ?? 0;
+      verificationUsage.completion_tokens += images.usage?.completion_tokens ?? 0;
+      verificationUsage.total_tokens += images.usage?.total_tokens ?? 0;
       for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
       for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
     }
@@ -216,7 +227,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     const activePrimary = primaryProviders.filter((p) => eligibleProviders.some((a) => a.name === p.name));
     if (activePrimary.length) {
       const retrievalStarted = Date.now();
-      const settled = await Promise.allSettled(activePrimary.map(async ({ name, provider }) => { providersUsed.add(name); return provider.search(query); }));
+      const settled = await Promise.allSettled(activePrimary.map(async ({ name, provider }) => { providersUsed.add(name); noteCommerceCall(name); return provider.search(query); }));
       timing.provider_retrieval_ms += Date.now() - retrievalStarted;
       const products: ProductCandidate[] = []; const failedProviders = new Set<string>();
       settled.forEach((result, index) => {
@@ -253,6 +264,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       const retrievalStarted = Date.now();
       try {
         providersUsed.add('brave');
+        noteCommerceCall('brave');
         result = await braveProvider.provider.search(query);
         braveTelemetry.success = true;
       } catch (error) {
@@ -290,6 +302,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
         const retrievalStarted = Date.now();
         try {
           providersUsed.add('serpapi');
+          noteCommerceCall('serpapi');
           result = await serpapiProvider.provider.search(query);
           serpapiTelemetry.success = true;
         } catch (error) {
