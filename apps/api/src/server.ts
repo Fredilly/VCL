@@ -178,12 +178,10 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     providers_used: [...providersUsed], attempts, verification, timing, serpapi: serpapiTelemetry, brave: braveTelemetry };
   };
 
-  // Candidate-image comparison remains bounded to the provider's top 24. Every
+  // Candidate-image comparison is bounded to the provider's top 8. Every
   // returned candidate still passes the same image/identity/relevance gates.
-  // The verifier performs its independent six-image batches concurrently, rather
-  // than serially delaying a complete evidence set.
   const verifyFresh = async (products: ProductCandidate[]) => {
-    const fresh = products.slice(0, 24).filter((product) => {
+    const fresh = products.slice(0, 8).filter((product) => {
       const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
     });
     verification.retrieved += fresh.length;
