@@ -174,13 +174,19 @@ try {
         height: Math.max(1, rect.height * box.height),
       };
       const targetImage = await screenshotDataUrl(page, targetClip);
-      const analysis = await postJson('analyze-selection', { dataUrl: targetImage, timestamp: Number(testCase.timestamp_s) });
+      // Omit timestamp here so the API returns the raw provider usage snapshot directly.
+      // Timestamp does not affect model token usage for this single-frame cost measurement.
+      const analysis = await postJson('analyze-selection', { dataUrl: targetImage });
       const title = await page.eval(`document.title.replace(/\\s*-\\s*YouTube\\s*$/i,'').trim()`);
       const commerce = await postJson('resolve-products', {
         description: analysis,
         context: { platform: 'youtube', title: title || null, url: testCase.source },
         source_image: targetImage,
       });
+
+      if (!analysis?.provider_usage && !commerce?.cost_usage) {
+        throw new Error('Spike 7 telemetry is missing from the deployed API. Redeploy the current spike-7-cost-measurement branch before rerunning.');
+      }
 
       const latencyMs = Date.now() - started;
       runs.push({
@@ -210,6 +216,7 @@ try {
         provider_blocked: error.status === 429 || error.status === 503,
         notes: `runner/api failure: ${error.message}`,
       });
+      if (String(error.message).includes('telemetry is missing')) break;
     }
     await sleep(400);
   }
