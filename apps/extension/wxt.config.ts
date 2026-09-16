@@ -14,5 +14,14 @@ export default defineConfig({
     action: {
       default_title: 'Select product',
     },
+    commands: {
+      'toggle-scoop': {
+        suggested_key: {
+          default: 'Ctrl+Shift+S',
+          mac: 'Command+Shift+S',
+        },
+        description: 'Open Scoop product selection',
+      },
+    },
   },
 });
