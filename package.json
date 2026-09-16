@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "pnpm --filter @vcl/extension dev",
     "dev:api": "pnpm --filter @vcl/api dev",
+    "deploy:api": "pnpm --filter @vcl/api run deploy",
     "build": "pnpm -r build",
     "check": "pnpm -r check",
     "test": "pnpm --filter @vcl/api build && node --test apps/api/tests/*.test.mjs apps/extension/tests/*.test.mjs tests/benchmark/spike-4f/*.test.mjs tests/manual/spike-5/*.test.mjs",
