@@ -3,18 +3,22 @@ import { existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 
-const port = Number(process.env.VCL_CDP_PORT ?? 9334);
+let port = Number(process.env.VCL_CDP_PORT ?? 9334);
 const apiOrigin = 'https://api.vcl.article6.org';
 const casesPath = process.env.VCL_COST_CASES ?? 'tests/manual/spike-5/cases.json';
 const outputPath = process.env.VCL_COST_OUTPUT ?? 'tests/cost/run.json';
 const extensionPath = resolve(process.env.VCL_EXTENSION_PATH ?? 'apps/extension/.output/chrome-mv3');
-const profilePath = resolve(process.env.VCL_COST_PROFILE ?? '.tmp/vcl-cost-browser');
+const baseProfilePath = resolve(process.env.VCL_COST_PROFILE ?? '.tmp/vcl-cost-browser');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function targets() {
-  try { return await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); }
+async function targets(candidatePort = port) {
+  try { return await (await fetch(`http://127.0.0.1:${candidatePort}/json/list`)).json(); }
   catch { return null; }
+}
+
+function scoopWorker(list) {
+  return list?.find((target) => target.type === 'service_worker' && target.url.startsWith('chrome-extension://') && target.url.endsWith('/background.js')) ?? null;
 }
 
 function braveExecutable() {
@@ -29,27 +33,43 @@ function braveExecutable() {
   return candidates.find(existsSync);
 }
 
-async function ensureBrowser() {
-  let list = await targets();
-  if (list) return { list, launched: false };
+async function findFreePort(start = 9340) {
+  for (let candidate = start; candidate < start + 20; candidate++) {
+    if (!(await targets(candidate))) return candidate;
+  }
+  throw new Error('Could not find a free local CDP port for the Scoop cost browser.');
+}
+
+async function launchControlledBrowser() {
   const executable = braveExecutable();
-  if (!executable) throw new Error(`No CDP browser on port ${port}, and Brave was not found. Start Brave with --remote-debugging-port=${port}.`);
+  if (!executable) throw new Error('Brave was not found. Install Brave or set VCL_CDP_PORT to a compatible running Chromium browser.');
   if (!existsSync(extensionPath)) throw new Error(`Extension build not found at ${extensionPath}. Run: pnpm --filter @vcl/extension build`);
+  if (await targets(port)) port = await findFreePort();
+  const profilePath = process.env.VCL_COST_PROFILE ? baseProfilePath : `${baseProfilePath}-${port}`;
   spawn(executable, [
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${profilePath}`,
+    `--disable-extensions-except=${extensionPath}`,
     `--load-extension=${extensionPath}`,
     '--no-first-run',
     '--no-default-browser-check',
     '--autoplay-policy=no-user-gesture-required',
     'about:blank',
   ], { detached: true, stdio: 'ignore' }).unref();
-  for (let i = 0; i < 40; i++) {
+
+  let list = null;
+  for (let i = 0; i < 80; i++) {
     await sleep(250);
     list = await targets();
-    if (list) return { list, launched: true };
+    if (list && scoopWorker(list)) return { list, launched: true };
   }
-  throw new Error('Brave started but CDP did not become ready.');
+  throw new Error(`Brave started on CDP port ${port}, but Scoop's extension service worker did not start.`);
+}
+
+async function ensureBrowser() {
+  const list = await targets();
+  if (list && scoopWorker(list)) return { list, launched: false };
+  return launchControlledBrowser();
 }
 
 class Cdp {
@@ -105,15 +125,6 @@ async function waitFor(predicate, timeoutMs, message) {
     await sleep(250);
   }
   throw new Error(message);
-}
-
-function endpoint(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.origin !== apiOrigin) return null;
-    if (['/locate-selection', '/analyze-selection', '/resolve-products'].includes(parsed.pathname)) return parsed.pathname.slice(1);
-  } catch {}
-  return null;
 }
 
 async function collectApiResponses(worker, runAction) {
@@ -188,8 +199,8 @@ try {
     await sleep(700);
 
     list = await targets();
-    const workerTarget = list.find((target) => target.type === 'service_worker' && target.url.startsWith('chrome-extension://') && target.url.endsWith('/background.js'));
-    if (!workerTarget) throw new Error('Scoop extension service worker not found. Reload the extension build and retry.');
+    const workerTarget = scoopWorker(list);
+    if (!workerTarget) throw new Error(`Scoop extension service worker disappeared on CDP port ${port}. Retry the run once; the dedicated browser will be relaunched if needed.`);
     const worker = await new Cdp(workerTarget.webSocketDebuggerUrl).open();
     await worker.send('Runtime.enable');
 
@@ -234,6 +245,7 @@ const record = {
   run_date: new Date().toISOString(),
   pricing_snapshot_date: '2026-09-16',
   browser_launched_by_runner: launched,
+  cdp_port: port,
   runs,
   summary: { sample_size: runs.length },
 };
