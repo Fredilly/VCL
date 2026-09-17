@@ -611,7 +611,7 @@ test('provider failures remain isolated: Brave failure does not affect SerpAPI',
   assert.equal(result.serpapi.invoked, true);
   assert.equal(result.brave.invoked, true);
   assert.equal(result.brave.timeout_or_failure, true);
-  assert.equal(result.state, 'TEMPORARILY_UNAVAILABLE');
+  assert.equal(result.state, 'NO_RESULTS');
 });
 
 // ── Fallback guard: sufficient primaries skip Brave/SerpAPI ──
