@@ -216,6 +216,12 @@ export async function compareCandidateImages(
       failures += images.length;
     }
   };
-  for (const batch of batches) await run(batch);
+  // Run up to two batches concurrently: image fetches are independent and
+  // two batches keep thumbnail fetches within twelve concurrent connections,
+  // well inside the Workers outbound limit while halving serial model-wait time.
+  for (let i = 0; i < batches.length; i += 2) {
+    const chunk = batches.slice(i, i + 2);
+    await Promise.all(chunk.map((batch) => run(batch)));
+  }
   return { comparisons, failures, compared: comparisons.size, failure_reasons, usage };
 }

@@ -94,7 +94,7 @@ test('image subrequest budget is shared across broadening and leaves room for re
   assert.equal(requests, 42); assert.equal(modelCalls, 6); assert.equal(budget.remaining, 0);
 });
 
-test('verification batches run sequentially: second batch starts only after first completes', async () => {
+test('verification batches run up to two concurrently for faster processing', async () => {
   const { candidate, description, comparison } = example(apparelCases[0]);
   let concurrent = 0, maxConcurrent = 0, modelCalls = 0;
   const { compareCandidateImages } = loadModule(filename, { fetch: async (url, options) => {
@@ -114,5 +114,5 @@ test('verification batches run sequentially: second batch starts only after firs
   const result = await compareCandidateImages('key', 'model', image, description, products);
   assert.equal(result.compared, 12);
   assert.equal(modelCalls, 2);
-  assert.equal(maxConcurrent, 1);
+  assert.equal(maxConcurrent, 2);
 });
