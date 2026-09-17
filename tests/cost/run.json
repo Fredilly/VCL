@@ -1,0 +1,487 @@
+{
+  "schema_version": 1,
+  "spike": "7",
+  "run_date": "2026-09-17T13:52:34.087Z",
+  "pricing_snapshot_date": "2026-09-16",
+  "browser_launched_by_runner": false,
+  "runner_mode": "direct-api-with-cdp-frame-capture",
+  "runs": [
+    {
+      "case_id": "s5-01",
+      "selected_item": "Patagonia Better Sweater fleece jacket",
+      "failed": false,
+      "localization_usage": null,
+      "localization_failure": null,
+      "vision_usage": null,
+      "analysis": {
+        "category": "Apparel",
+        "subcategory": "Jacket",
+        "brand": "Patagonia",
+        "model": "Better Sweater",
+        "color": "Brown, Grey"
+      },
+      "commerce_query": {
+        "query": "sweater Brown, Grey",
+        "category": "Apparel",
+        "subcategory": "Jacket",
+        "brand": "Patagonia",
+        "model": "Better Sweater",
+        "attributes": [
+          "sweater",
+          "Brown, Grey",
+          "Fleece",
+          "Patagonia text and mountain range logo patch",
+          "vertical zippered chest pocket",
+          "melange fleece texture",
+          "zipper",
+          "stand-up collar",
+          "full zip jacket silhouette",
+          "long sleeve",
+          "mock neck",
+          "full zip",
+          "melange knit"
+        ]
+      },
+      "verification_usage": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "requests": 5,
+        "prompt_tokens": 28553,
+        "completion_tokens": 9234,
+        "total_tokens": 37787
+      },
+      "verification": {
+        "retrieved": 41,
+        "compared": 17,
+        "image_failures": 24,
+        "image_failure_reasons": {
+          "image_missing": 24
+        },
+        "rejected": 40,
+        "contradictions": {
+          "subtype contradiction": 19,
+          "insufficient positive relevance evidence": 18,
+          "color contradiction": 3
+        }
+      },
+      "commerce_calls": {
+        "ebay": 3,
+        "etsy": 3,
+        "brave": 3,
+        "serpapi": 1
+      },
+      "latency_ms": 79052,
+      "provider_blocked": false,
+      "providers_used": [
+        "ebay",
+        "etsy",
+        "brave",
+        "serpapi"
+      ],
+      "serpapi": {
+        "invoked": true,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "quota_exhausted": true,
+        "skip_reason": "quota_exhausted",
+        "remaining_quota": 0
+      },
+      "brave": {
+        "invoked": true,
+        "skipped": false,
+        "success": true,
+        "no_result": false,
+        "timeout_or_failure": false
+      },
+      "notes": "state=RESULTS; products=1"
+    },
+    {
+      "case_id": "s5-02",
+      "selected_item": "Patagonia Better Sweater fleece jacket detail",
+      "failed": false,
+      "localization_usage": null,
+      "localization_failure": "uncertain_target",
+      "vision_usage": null,
+      "analysis": {
+        "category": "Apparel",
+        "subcategory": "Jacket",
+        "brand": "Patagonia",
+        "model": "Better Sweater",
+        "color": "Gray"
+      },
+      "commerce_query": {
+        "query": "sweater Gray",
+        "category": "Apparel",
+        "subcategory": "Jacket",
+        "brand": "Patagonia",
+        "model": "Better Sweater",
+        "attributes": [
+          "sweater",
+          "Gray",
+          "Fleece",
+          "Patagonia logo patch on left chest",
+          "heathered knit texture",
+          "zippered chest pocket",
+          "zippered hand pockets",
+          "trim binding along zipper and pockets",
+          "front zipper",
+          "chest pocket zipper",
+          "hand pocket zippers",
+          "regular fit",
+          "straight hem",
+          "stand-up collar",
+          "long sleeves",
+          "long sleeve",
+          "full zip",
+          "stand collar",
+          "casual",
+          "outdoor"
+        ]
+      },
+      "verification_usage": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "requests": 6,
+        "prompt_tokens": 38547,
+        "completion_tokens": 12786,
+        "total_tokens": 51333
+      },
+      "verification": {
+        "retrieved": 48,
+        "compared": 24,
+        "image_failures": 24,
+        "image_failure_reasons": {
+          "image_missing": 24
+        },
+        "rejected": 48,
+        "contradictions": {
+          "color contradiction": 6,
+          "subtype contradiction": 29,
+          "insufficient positive relevance evidence": 13
+        }
+      },
+      "commerce_calls": {
+        "ebay": 3,
+        "etsy": 3,
+        "brave": 3,
+        "serpapi": 1
+      },
+      "latency_ms": 53586,
+      "provider_blocked": false,
+      "providers_used": [
+        "ebay",
+        "etsy",
+        "brave",
+        "serpapi"
+      ],
+      "serpapi": {
+        "invoked": true,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "quota_exhausted": true,
+        "skip_reason": "quota_exhausted",
+        "remaining_quota": 0
+      },
+      "brave": {
+        "invoked": true,
+        "skipped": false,
+        "success": true,
+        "no_result": false,
+        "timeout_or_failure": false
+      },
+      "notes": "state=NO_RESULTS; products=0; localization=fallback"
+    },
+    {
+      "case_id": "s5-03",
+      "selected_item": "Seiko SKX007 diver watch",
+      "failed": false,
+      "localization_usage": null,
+      "localization_failure": null,
+      "vision_usage": null,
+      "analysis": {
+        "category": "Accessories",
+        "subcategory": "Wristwatch",
+        "brand": "Seiko",
+        "model": "SKX007",
+        "color": "Black and Silver"
+      },
+      "commerce_query": {
+        "query": "watch Black and Silver",
+        "category": "Accessories",
+        "subcategory": "Wristwatch",
+        "brand": "Seiko",
+        "model": "SKX007",
+        "attributes": [
+          "watch",
+          "Black and Silver",
+          "Stainless Steel and Rubber",
+          "SEIKO",
+          "AUTOMATIC",
+          "DIVER'S 200m",
+          "JUE 2",
+          "10",
+          "20",
+          "30",
+          "40",
+          "Seiko logo on dial",
+          "Automatic text on dial",
+          "Diver's 200m text on dial",
+          "Rotating bezel with minute markers",
+          "Day-date window at 3 o'clock",
+          "Arrow and sword hands with luminescent fill",
+          "Circular and rectangular luminescent hour markers",
+          "Textured black rubber strap",
+          "Crown at 4 o'clock position",
+          "Rotating bezel with coin edge",
+          "Stainless steel case",
+          "Round watch case",
+          "Cushion-style case profile",
+          "Diver",
+          "Sport",
+          "Automatic"
+        ]
+      },
+      "verification_usage": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "requests": 5,
+        "prompt_tokens": 32638,
+        "completion_tokens": 10651,
+        "total_tokens": 43289
+      },
+      "verification": {
+        "retrieved": 20,
+        "compared": 20,
+        "image_failures": 0,
+        "image_failure_reasons": {},
+        "rejected": 12,
+        "contradictions": {
+          "color contradiction": 8,
+          "insufficient visual agreement": 2,
+          "brand contradiction": 2
+        }
+      },
+      "commerce_calls": {
+        "ebay": 3,
+        "etsy": 3
+      },
+      "latency_ms": 66630,
+      "provider_blocked": false,
+      "providers_used": [
+        "ebay",
+        "etsy"
+      ],
+      "serpapi": {
+        "invoked": false,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "quota_exhausted": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "brave": {
+        "invoked": false,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "notes": "state=RESULTS; products=8"
+    },
+    {
+      "case_id": "s5-04",
+      "selected_item": "Seiko SKX007 bezel and dial",
+      "failed": false,
+      "localization_usage": null,
+      "localization_failure": "localization_unavailable",
+      "vision_usage": null,
+      "analysis": {
+        "category": "Accessories",
+        "subcategory": "Wristwatch",
+        "brand": "Seiko",
+        "model": "SKX007",
+        "color": "black and silver"
+      },
+      "commerce_query": {
+        "query": "watch black and silver",
+        "category": "Accessories",
+        "subcategory": "Wristwatch",
+        "brand": "Seiko",
+        "model": "SKX007",
+        "attributes": [
+          "watch",
+          "black and silver",
+          "stainless steel, rubber",
+          "SEIKO",
+          "AUTOMATIC",
+          "20",
+          "30",
+          "40",
+          "50",
+          "Seiko logo on dial",
+          "round black dial with circular hour markers",
+          "rotating bezel with numeric scale",
+          "day-date window at 3 o'clock",
+          "ribbed rubber strap",
+          "crown at 4 o'clock",
+          "rotating bezel",
+          "stainless steel case",
+          "round case",
+          "round dial",
+          "dive watch",
+          "sporty",
+          "analog"
+        ]
+      },
+      "verification_usage": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "requests": 5,
+        "prompt_tokens": 33626,
+        "completion_tokens": 11030,
+        "total_tokens": 44656
+      },
+      "verification": {
+        "retrieved": 21,
+        "compared": 21,
+        "image_failures": 0,
+        "image_failure_reasons": {},
+        "rejected": 10,
+        "contradictions": {
+          "color contradiction": 7,
+          "insufficient visual agreement": 2,
+          "brand contradiction": 1
+        }
+      },
+      "commerce_calls": {
+        "ebay": 3,
+        "etsy": 3
+      },
+      "latency_ms": 61946,
+      "provider_blocked": false,
+      "providers_used": [
+        "ebay",
+        "etsy"
+      ],
+      "serpapi": {
+        "invoked": false,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "quota_exhausted": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "brave": {
+        "invoked": false,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "notes": "state=RESULTS; products=8; localization=fallback"
+    },
+    {
+      "case_id": "s5-05",
+      "selected_item": "vintage Coach leather bag",
+      "failed": false,
+      "localization_usage": null,
+      "localization_failure": null,
+      "vision_usage": null,
+      "analysis": {
+        "category": "Bags",
+        "subcategory": "Top Handle Bag",
+        "brand": "Coach",
+        "model": null,
+        "color": "red"
+      },
+      "commerce_query": {
+        "query": "Top Handle Bag red",
+        "category": "Bags",
+        "subcategory": "Top Handle Bag",
+        "brand": "Coach",
+        "model": null,
+        "attributes": [
+          "Top Handle Bag",
+          "red",
+          "leather",
+          "turnlock closure characteristic of Coach bags",
+          "large floral or pansy charm hanging from the handle ring",
+          "brass tone turnlock closure",
+          "brass tone key ring and clasp for charm",
+          "metal handle attachment rings",
+          "trapezoidal structured body",
+          "curved flap",
+          "single top handle",
+          "structured",
+          "flap top",
+          "top handle"
+        ]
+      },
+      "verification_usage": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "requests": 4,
+        "prompt_tokens": 25589,
+        "completion_tokens": 8317,
+        "total_tokens": 33906
+      },
+      "verification": {
+        "retrieved": 24,
+        "compared": 16,
+        "image_failures": 8,
+        "image_failure_reasons": {
+          "image_missing": 8
+        },
+        "rejected": 16,
+        "contradictions": {
+          "color contradiction": 8,
+          "insufficient visual agreement": 8
+        }
+      },
+      "commerce_calls": {
+        "ebay": 3,
+        "etsy": 3,
+        "brave": 1
+      },
+      "latency_ms": 76438,
+      "provider_blocked": false,
+      "providers_used": [
+        "ebay",
+        "etsy",
+        "brave"
+      ],
+      "serpapi": {
+        "invoked": false,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "quota_exhausted": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "brave": {
+        "invoked": true,
+        "skipped": true,
+        "success": true,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "notes": "state=RESULTS; products=8"
+    }
+  ],
+  "failed_runs": [],
+  "summary": {
+    "sample_size": 5,
+    "attempted": 5,
+    "failed": 0
+  }
+}
