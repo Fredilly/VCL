@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "name": "Spike 5 fixed end-to-end manual selections — corrected 2026-09-17",
+  "frozen_at": "2026-09-15T00:00:00Z",
+  "corrected_at": "2026-09-17T00:00:00Z",
+  "rules": [
+    "These ten selections were fixed before VCL classification outcomes were collected.",
+    "A commercially useful result or a truthful SIMILAR/no-useful-result state passes a session.",
+    "The cases and expected objects must not be edited in response to an outcome.",
+    "s5-05 coordinates corrected from (0.5,0.5) to (0.3,0.4): original was annotation-error, bag is left-of-center in frame at 30s."
+  ],
+  "cases": [
+    { "id": "s5-01", "category": "apparel", "source": "https://www.youtube.com/watch?v=pth0QO0txGo", "timestamp_s": 35, "selected_item": "Patagonia Better Sweater fleece jacket", "selection": { "x": 0.5, "y": 0.5 }, "multi_frame": false },
+    { "id": "s5-02", "category": "apparel", "source": "https://www.youtube.com/watch?v=pth0QO0txGo", "timestamp_s": 50, "selected_item": "Patagonia Better Sweater fleece jacket detail", "selection": { "x": 0.5, "y": 0.5 }, "multi_frame": false },
+    { "id": "s5-03", "category": "watches", "source": "https://www.youtube.com/watch?v=BwQQtj-H3Nk", "timestamp_s": 117, "selected_item": "Seiko SKX007 diver watch", "selection": { "x": 0.5, "y": 0.5 }, "multi_frame": true },
+    { "id": "s5-04", "category": "watches", "source": "https://www.youtube.com/watch?v=BwQQtj-H3Nk", "timestamp_s": 210, "selected_item": "Seiko SKX007 bezel and dial", "selection": { "x": 0.5, "y": 0.5 }, "multi_frame": false },
+    { "id": "s5-05", "category": "bags", "source": "https://www.youtube.com/watch?v=uf1rqnBQEBY", "timestamp_s": 30, "selected_item": "vintage Coach leather bag", "selection": { "x": 0.3, "y": 0.4 }, "multi_frame": false, "corrected": true, "correction_note": "Original (0.5,0.5) pointed at presenter face; bag is left-of-center at 30s" },
+    { "id": "s5-06", "category": "bags", "source": "https://www.youtube.com/watch?v=uf1rqnBQEBY", "timestamp_s": 60, "selected_item": "vintage Coach leather bag hardware/detail", "selection": { "x": 0.5, "y": 0.5 }, "multi_frame": false },
+    { "id": "s5-07", "category": "shoes", "source": "https://www.youtube.com/watch?v=NM_mH3o8K9I", "timestamp_s": 30, "selected_item": "Adidas Samba OG sneaker", "selection": { "x": 0.5, "y": 0.5 }, "multi_frame": false },
+    { "id": "s5-08", "category": "shoes", "source": "https://www.youtube.com/watch?v=NM_mH3o8K9I", "timestamp_s": 80, "selected_item": "Adidas Samba OG sneaker side detail", "selection": { "x": 0.5, "y": 0.5 }, "multi_frame": false },
+    { "id": "s5-09", "category": "other", "source": "https://www.youtube.com/watch?v=1n7fIrSwcKg", "timestamp_s": 30, "selected_item": "Anglepoise Type 75 desk lamp", "selection": { "x": 0.5, "y": 0.5 }, "multi_frame": false },
+    { "id": "s5-10", "category": "other / ambiguous", "source": "https://www.youtube.com/watch?v=1n7fIrSwcKg", "timestamp_s": 60, "selected_item": "partially visible desk-lamp component", "selection": { "x": 0.5, "y": 0.5 }, "multi_frame": true }
+  ]
+}
