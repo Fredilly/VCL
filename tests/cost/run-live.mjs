@@ -8,6 +8,7 @@ const apiOrigin = 'https://api.vcl.article6.org';
 const casesPath = process.env.VCL_COST_CASES ?? 'tests/manual/spike-5/cases.json';
 const outputPath = process.env.VCL_COST_OUTPUT ?? 'tests/cost/run.json';
 const profilePath = resolve(process.env.VCL_COST_PROFILE ?? '.tmp/vcl-cost-browser');
+const caseLimit = Math.max(1, Number(process.env.VCL_COST_LIMIT ?? 10));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function targets() {
@@ -144,7 +145,7 @@ const fixture = JSON.parse(await readFile(casesPath, 'utf8'));
 const runs = [];
 
 try {
-  for (const testCase of fixture.cases.slice(0, 10)) {
+  for (const testCase of fixture.cases.slice(0, caseLimit)) {
     console.error(`Spike 7: ${testCase.id} — ${testCase.selected_item}`);
     const started = Date.now();
     try {
@@ -174,8 +175,6 @@ try {
         height: Math.max(1, rect.height * box.height),
       };
       const targetImage = await screenshotDataUrl(page, targetClip);
-      // Omit timestamp here so the API returns the raw provider usage snapshot directly.
-      // Timestamp does not affect model token usage for this single-frame cost measurement.
       const analysis = await postJson('analyze-selection', { dataUrl: targetImage });
       const title = await page.eval(`document.title.replace(/\\s*-\\s*YouTube\\s*$/i,'').trim()`);
       const commerce = await postJson('resolve-products', {
@@ -189,18 +188,25 @@ try {
       }
 
       const latencyMs = Date.now() - started;
-      runs.push({
+      const degraded = commerce?.state === 'TEMPORARILY_UNAVAILABLE';
+      const run = {
         case_id: testCase.id,
         selected_item: testCase.selected_item,
+        failed: degraded,
+        failure_class: degraded ? 'PROVIDER_BLOCKED' : undefined,
         localization_usage: localization?.provider_usage ?? null,
         vision_usage: analysis?.provider_usage ?? null,
         verification_usage: commerce?.cost_usage?.verification_usage ?? null,
         commerce_calls: commerce?.cost_usage?.commerce_calls ?? {},
         latency_ms: latencyMs,
-        provider_blocked: commerce?.state === 'TEMPORARILY_UNAVAILABLE',
+        provider_blocked: degraded,
+        providers_used: commerce?.providers_used ?? [],
+        serpapi: commerce?.serpapi ?? null,
+        brave: commerce?.brave ?? null,
         notes: `state=${commerce?.state ?? 'unknown'}; products=${commerce?.products?.length ?? 0}${box.fallback ? '; localization=fallback' : ''}`,
-      });
-      console.error(`  ${latencyMs}ms · ${commerce?.state ?? 'unknown'} · ${commerce?.products?.length ?? 0} products`);
+      };
+      runs.push(run);
+      console.error(`  ${latencyMs}ms · ${commerce?.state ?? 'unknown'} · ${commerce?.products?.length ?? 0} products · providers=${run.providers_used.join(',') || 'none'}`);
     } catch (error) {
       const latencyMs = Date.now() - started;
       console.error(`  FAILED after ${latencyMs}ms · ${error.message}`);
@@ -208,6 +214,7 @@ try {
         case_id: testCase.id,
         selected_item: testCase.selected_item,
         failed: true,
+        failure_class: error.status === 429 || error.status === 503 ? 'PROVIDER_BLOCKED' : 'RUNNER_OR_API_FAILURE',
         localization_usage: null,
         vision_usage: null,
         verification_usage: null,
@@ -238,7 +245,7 @@ const record = {
 };
 await writeFile(outputPath, JSON.stringify(record, null, 2) + '\n');
 console.log(`Wrote ${successful.length}/${runs.length} successful runs to ${outputPath}`);
-if (successful.length < 8) {
+if (successful.length < Math.min(8, caseLimit)) {
   console.error('Too few successful runs for a useful Spike 7 cost estimate.');
   process.exitCode = 1;
 } else {
