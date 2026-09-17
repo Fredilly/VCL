@@ -9,6 +9,8 @@ const casesPath = process.env.VCL_COST_CASES ?? 'tests/manual/spike-5/cases.json
 const outputPath = process.env.VCL_COST_OUTPUT ?? 'tests/cost/run.json';
 const profilePath = resolve(process.env.VCL_COST_PROFILE ?? '.tmp/vcl-cost-browser');
 const caseLimit = Math.max(1, Number(process.env.VCL_COST_LIMIT ?? 10));
+const caseOffset = Math.max(0, Number(process.env.VCL_COST_OFFSET ?? 0));
+const caseIdFilter = process.env.VCL_COST_CASE_ID ?? null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function targets() {
@@ -115,18 +117,22 @@ async function postJson(path, body) {
 
 async function videoRect(page) {
   const rect = await page.eval(`(() => {
-    const r = document.querySelector('video')?.getBoundingClientRect();
-    return r && r.width > 0 && r.height > 0
-      ? {
-          x: r.x + window.scrollX,
-          y: r.y + window.scrollY,
-          width: r.width,
-          height: r.height
-        }
-      : null;
+    const player = document.querySelector('.html5-video-player');
+    if (!player) return null;
+    const r = player.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) return null;
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
   })()`);
-  if (!rect) throw new Error('Video has no visible rectangle');
-  return rect;
+  if (!rect) throw new Error('Video player has no visible rectangle');
+  const layout = await page.send('Page.getLayoutMetrics');
+  const scrollX = layout.cssLayoutViewport.pageX;
+  const scrollY = layout.cssLayoutViewport.pageY;
+  return {
+    x: rect.x + scrollX,
+    y: rect.y + scrollY,
+    width: rect.width,
+    height: rect.height,
+  };
 }
 
 async function assertPlayableVideo(page) {
@@ -153,7 +159,7 @@ async function assertPlayableVideo(page) {
 }
 
 async function screenshotDataUrl(page, clip) {
-  const shot = await page.send('Page.captureScreenshot', { format: 'jpeg', quality: 82, fromSurface: true, clip: { ...clip, scale: 1 } });
+  const shot = await page.send('Page.captureScreenshot', { format: 'jpeg', quality: 82, clip: { ...clip, scale: 1 } });
   return `data:image/jpeg;base64,${shot.data}`;
 }
 
@@ -188,10 +194,15 @@ await page.send('Runtime.enable');
 await page.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
 
 const fixture = JSON.parse(await readFile(casesPath, 'utf8'));
+const allCases = fixture.cases;
+const targetCases = caseIdFilter
+  ? allCases.filter((c) => c.id === caseIdFilter)
+  : allCases.slice(caseOffset, caseOffset + caseLimit);
+if (targetCases.length === 0) throw new Error(`No cases matched offset=${caseOffset} limit=${caseLimit} id=${caseIdFilter}`);
 const runs = [];
 
 try {
-  for (const testCase of fixture.cases.slice(0, caseLimit)) {
+  for (const testCase of targetCases) {
     console.error(`Spike 7: ${testCase.id} — ${testCase.selected_item}`);
     const started = Date.now();
     try {
@@ -200,6 +211,7 @@ try {
       const targetVideoId = new URL(testCase.source).searchParams.get('v');
       if (currentVideoId !== targetVideoId) {
         await page.send('Page.navigate', { url: testCase.source });
+        await page.send('Runtime.evaluate', { expression: 'window.scrollTo(0, 0)', returnByValue: true });
       }
       await waitFor(async () => await page.eval(`(() => {
         const v = document.querySelector('video');
@@ -219,6 +231,8 @@ try {
       await waitFor(async () => await page.eval(`Math.abs((document.querySelector('video')?.currentTime ?? 0)-${Number(testCase.timestamp_s)}) < 1`), 12000, 'Could not seek video');
       await sleep(700);
       await assertPlayableVideo(page);
+      await page.send('Runtime.evaluate', { expression: 'window.scrollTo(0, 0)', returnByValue: true });
+      await sleep(200);
 
       const rect = await videoRect(page);
       const frame = await screenshotDataUrl(page, rect);
@@ -228,7 +242,7 @@ try {
           'tests/cost/debug-frame.jpg',
           Buffer.from(frame.split(',')[1], 'base64')
         );
-        console.error(`  DEBUG frame rect=${JSON.stringify(rect)}`);
+        console.error(`  DEBUG videoRect=${JSON.stringify(rect)}`);
         console.error('  Wrote tests/cost/debug-frame.jpg — no model calls made.');
         break;
       }
@@ -340,7 +354,7 @@ const record = {
 };
 await writeFile(outputPath, JSON.stringify(record, null, 2) + '\n');
 console.log(`Wrote ${successful.length}/${runs.length} successful runs to ${outputPath}`);
-if (successful.length < Math.min(8, caseLimit)) {
+if (successful.length < Math.min(8, targetCases.length)) {
   console.error('Too few successful runs for a useful Spike 7 cost estimate.');
   process.exitCode = 1;
 } else {
