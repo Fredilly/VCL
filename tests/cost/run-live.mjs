@@ -107,6 +107,7 @@ async function postJson(path, body) {
   if (!response.ok) {
     const error = new Error(payload?.error ?? `${path} failed with HTTP ${response.status}`);
     error.status = response.status;
+    error.reason = payload?.reason;
     throw error;
   }
   return payload;
@@ -131,6 +132,20 @@ function safeTargetBox(target) {
   const width = Math.max(0.01, Math.min(1 - x, target.width));
   const height = Math.max(0.01, Math.min(1 - y, target.height));
   return { x, y, width, height };
+}
+
+function focusClip(rect, point) {
+  // Match the extension's 24% focus box around the click. The localization prompt
+  // explicitly expects IMAGE 2 to be a magnified local view, not a duplicate frame.
+  const size = 0.24;
+  const x = Math.max(0, Math.min(1 - size, point.x - size / 2));
+  const y = Math.max(0, Math.min(1 - size, point.y - size / 2));
+  return {
+    x: rect.x + rect.width * x,
+    y: rect.y + rect.height * y,
+    width: Math.max(1, rect.width * size),
+    height: Math.max(1, rect.height * size),
+  };
 }
 
 const { list: initialTargets, launched } = await ensureBrowser();
@@ -160,12 +175,15 @@ try {
       const point = { x: Number(testCase.selection?.x ?? 0.5), y: Number(testCase.selection?.y ?? 0.5) };
 
       let localization = null;
+      let localizationFailure = null;
       let box = { x: 0, y: 0, width: 1, height: 1, fallback: true };
       try {
-        localization = await postJson('locate-selection', { dataUrl: frame, focusDataUrl: frame, point });
+        const focusDataUrl = await screenshotDataUrl(page, focusClip(rect, point));
+        localization = await postJson('locate-selection', { dataUrl: frame, focusDataUrl, point });
         box = safeTargetBox(localization);
       } catch (error) {
-        console.error(`  localization fallback: ${error.message}`);
+        localizationFailure = error.reason ?? error.message;
+        console.error(`  localization fallback: ${error.message}${error.reason ? ` (${error.reason})` : ''}`);
       }
 
       const targetClip = {
@@ -195,6 +213,7 @@ try {
         failed: degraded,
         failure_class: degraded ? 'PROVIDER_BLOCKED' : undefined,
         localization_usage: localization?.provider_usage ?? null,
+        localization_failure: localizationFailure,
         vision_usage: analysis?.provider_usage ?? null,
         verification_usage: commerce?.cost_usage?.verification_usage ?? null,
         verification: commerce?.verification ?? null,
@@ -204,12 +223,11 @@ try {
         providers_used: commerce?.providers_used ?? [],
         serpapi: commerce?.serpapi ?? null,
         brave: commerce?.brave ?? null,
-        state: commerce?.state ?? 'unknown',
-        product_count: commerce?.products?.length ?? 0,
         notes: `state=${commerce?.state ?? 'unknown'}; products=${commerce?.products?.length ?? 0}${box.fallback ? '; localization=fallback' : ''}`,
       };
       runs.push(run);
       console.error(`  ${latencyMs}ms · ${commerce?.state ?? 'unknown'} · ${commerce?.products?.length ?? 0} products · providers=${run.providers_used.join(',') || 'none'}`);
+      console.error(`  localization=${box.fallback ? `fallback:${localizationFailure ?? 'unknown'}` : 'ok'}`);
       if (run.verification) console.error(`  verification=${JSON.stringify(run.verification)}`);
     } catch (error) {
       const latencyMs = Date.now() - started;
