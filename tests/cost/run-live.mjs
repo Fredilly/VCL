@@ -119,6 +119,17 @@ async function videoRect(page) {
   return rect;
 }
 
+async function assertPlayableVideo(page) {
+  const unavailable = await page.eval(`(() => {
+    const text = (document.body?.innerText ?? '').toLowerCase();
+    const playerError = document.querySelector('.ytp-error, .ytp-error-content-wrap, #error-screen');
+    return Boolean(playerError) || text.includes('video unavailable');
+  })()`);
+  if (unavailable) {
+    throw new Error('YouTube reports Video unavailable in the CDP browser profile. No model or commerce calls were made.');
+  }
+}
+
 async function screenshotDataUrl(page, clip) {
   const shot = await page.send('Page.captureScreenshot', { format: 'jpeg', quality: 82, fromSurface: true, clip: { ...clip, scale: 1 } });
   return `data:image/jpeg;base64,${shot.data}`;
@@ -135,8 +146,6 @@ function safeTargetBox(target) {
 }
 
 function focusClip(rect, point) {
-  // Match the extension's 24% focus box around the click. The localization prompt
-  // explicitly expects IMAGE 2 to be a magnified local view, not a duplicate frame.
   const size = 0.24;
   const x = Math.max(0, Math.min(1 - size, point.x - size / 2));
   const y = Math.max(0, Math.min(1 - size, point.y - size / 2));
@@ -166,9 +175,11 @@ try {
     try {
       await page.send('Page.navigate', { url: testCase.source });
       await waitFor(async () => await page.eval(`document.readyState === 'complete' && !!document.querySelector('video')`), 30000, 'YouTube video did not become ready');
+      await assertPlayableVideo(page);
       await page.eval(`(() => { const v=document.querySelector('video'); v.pause(); v.currentTime=${Number(testCase.timestamp_s)}; return true; })()`);
       await waitFor(async () => await page.eval(`Math.abs((document.querySelector('video')?.currentTime ?? 0)-${Number(testCase.timestamp_s)}) < 1`), 12000, 'Could not seek video');
       await sleep(700);
+      await assertPlayableVideo(page);
 
       const rect = await videoRect(page);
       const frame = await screenshotDataUrl(page, rect);
