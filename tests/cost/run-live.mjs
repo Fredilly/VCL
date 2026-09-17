@@ -163,6 +163,31 @@ async function screenshotDataUrl(page, clip) {
   return `data:image/jpeg;base64,${shot.data}`;
 }
 
+async function hideOverlays(page) {
+  await page.eval(`(() => {
+    const selectors = [
+      '.ytp-large-play-button',
+      '.ytp-chrome-top',
+      '.ytp-chrome-bottom',
+      '.ytp-gradient-top',
+      '.ytp-gradient-bottom',
+      '.ytp-pause-overlay',
+      '.ytp-cued-thumbnail-overlay',
+      '.ytp.endscreen',
+    ];
+    for (const sel of selectors) {
+      for (const el of document.querySelectorAll(sel)) {
+        el.style.setProperty('display', 'none', 'important');
+        el.style.setProperty('visibility', 'hidden', 'important');
+        el.style.setProperty('opacity', '0', 'important');
+        el.style.setProperty('pointer-events', 'none', 'important');
+      }
+    }
+    const player = document.querySelector('.html5-video-player');
+    if (player) player.classList.remove('ytp-autohide');
+  })()`);
+}
+
 function safeTargetBox(target) {
   const finite = (value) => typeof value === 'number' && Number.isFinite(value);
   if (!target || ![target.x, target.y, target.width, target.height].every(finite)) return { x: 0, y: 0, width: 1, height: 1, fallback: true };
@@ -211,6 +236,10 @@ try {
       const targetVideoId = new URL(testCase.source).searchParams.get('v');
       if (currentVideoId !== targetVideoId) {
         await page.send('Page.navigate', { url: testCase.source });
+        await waitFor(async () => {
+          const url = await page.eval(`location.href`);
+          return new URL(url).searchParams.get('v') === targetVideoId;
+        }, 30000, `SPA navigation did not settle to video ${targetVideoId}`);
         await page.send('Runtime.evaluate', { expression: 'window.scrollTo(0, 0)', returnByValue: true });
       }
       await waitFor(async () => await page.eval(`(() => {
@@ -227,12 +256,36 @@ try {
           && v.duration > ${Number(testCase.timestamp_s) + 1};
       })()`), 60000, 'Actual YouTube video did not become ready or an ad is still playing');
       await assertPlayableVideo(page);
-      await page.eval(`(() => { const v=document.querySelector('video'); v.pause(); v.currentTime=${Number(testCase.timestamp_s)}; return true; })()`);
-      await waitFor(async () => await page.eval(`Math.abs((document.querySelector('video')?.currentTime ?? 0)-${Number(testCase.timestamp_s)}) < 1`), 12000, 'Could not seek video');
-      await sleep(700);
+      const loadedVideoId = await page.eval(`new URL(location.href).searchParams.get('v')`);
+      if (loadedVideoId !== targetVideoId) {
+        throw new Error(`Video ID mismatch: loaded=${loadedVideoId} expected=${targetVideoId}`);
+      }
+      const targetTs = Number(testCase.timestamp_s);
+      await page.eval(`(() => { const v=document.querySelector('video'); v.currentTime=${targetTs}; v.pause(); return true; })()`);
+      await waitFor(async () => await page.eval(`Math.abs((document.querySelector('video')?.currentTime ?? 0)-${targetTs}) < 1`), 12000, 'Could not seek video');
+      await waitFor(async () => await page.eval(`(() => {
+        const v = document.querySelector('video');
+        if (!v || v.readyState < 2) return false;
+        const t = ${targetTs};
+        for (let i = 0; i < v.buffered.length; i++) {
+          if (v.buffered.start(i) <= t && v.buffered.end(i) > t) return true;
+        }
+        return false;
+      })()`), 20000, 'Video buffer did not reach target timestamp');
+      await page.eval(`(() => { const v=document.querySelector('video'); v.play().catch(()=>{}); return true; })()`);
+      await sleep(1500);
+      await page.eval(`(() => { const v=document.querySelector('video'); v.pause(); v.currentTime=${targetTs}; return true; })()`);
+      await waitFor(async () => await page.eval(`Math.abs((document.querySelector('video')?.currentTime ?? 0)-${targetTs}) < 1`), 5000, 'Could not re-seek after play burst');
+      await sleep(500);
       await assertPlayableVideo(page);
+      const finalTime = await page.eval(`document.querySelector('video')?.currentTime ?? -1`);
+      if (Math.abs(finalTime - targetTs) >= 1) {
+        throw new Error(`Seek drifted: current=${finalTime} target=${targetTs}`);
+      }
+      await hideOverlays(page);
       await page.send('Runtime.evaluate', { expression: 'window.scrollTo(0, 0)', returnByValue: true });
-      await sleep(200);
+      await sleep(100);
+      await hideOverlays(page);
 
       const rect = await videoRect(page);
       const frame = await screenshotDataUrl(page, rect);
