@@ -10,7 +10,15 @@ function reserve(budget: ImageRequestBudget): boolean {
   if (budget.remaining <= 0) return false;
   budget.remaining--; return true;
 }
-export type ImageVerification = { comparisons: Map<string, ImageComparison>; failures: number; compared: number; failure_reasons?: Record<string, number> };
+export type GeminiVerificationUsage = {
+  provider: 'gemini';
+  model: string;
+  requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+};
+export type ImageVerification = { comparisons: Map<string, ImageComparison>; failures: number; compared: number; failure_reasons?: Record<string, number>; usage: GeminiVerificationUsage };
 const MAX_BYTES = 2_000_000;
 const MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
@@ -148,6 +156,10 @@ export function candidateKey(product: ProductCandidate): string {
   return JSON.stringify([product.provenance, product.id, product.title, product.image_reference, product.metadata]);
 }
 
+function usageNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
 export async function compareCandidateImages(
   apiKey: string, model: string, source: Image, description: ObjectDescription,
   products: ProductCandidate[], context?: ProductContext, budget = imageRequestBudget(),
@@ -155,6 +167,7 @@ export async function compareCandidateImages(
   const comparisons = new Map<string, ImageComparison>();
   let failures = 0;
   const failure_reasons: Record<string, number> = {};
+  const usage: GeminiVerificationUsage = { provider: 'gemini', model, requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   const failure = (reason: string, count = 1) => { failure_reasons[reason] = (failure_reasons[reason] ?? 0) + count; };
   // Six thumbnails + one source stay under the inline payload limit, even at MAX_BYTES.
   // One batch at a time also keeps thumbnail fetches within six concurrent connections.
@@ -177,6 +190,7 @@ export async function compareCandidateImages(
       { text: JSON.stringify({ index, title: product.title.slice(0, 500), metadata: product.metadata ?? {} }) }, { inlineData: image },
     ));
     try {
+      usage.requests++;
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
         // A verifier result is useful only while the interaction is still live.
         // Keep this bounded below the former 25s serial-batch stall; failure
@@ -185,7 +199,13 @@ export async function compareCandidateImages(
         body: JSON.stringify({ systemInstruction: { parts: [{ text: INSTRUCTIONS }] }, contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', responseSchema, temperature: 0, maxOutputTokens: 12000 } }),
       });
       if (!response.ok) { failure(`model_http_${response.status}`, images.length); await response.body?.cancel(); failures += images.length; return; }
-      const payload = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+      const payload = await response.json() as {
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+        usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
+      };
+      usage.prompt_tokens += usageNumber(payload.usageMetadata?.promptTokenCount);
+      usage.completion_tokens += usageNumber(payload.usageMetadata?.candidatesTokenCount);
+      usage.total_tokens += usageNumber(payload.usageMetadata?.totalTokenCount);
       const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('');
       const parsed = parseComparisons(text ? JSON.parse(text) : null, images.length);
       failures += images.length - parsed.size;
@@ -197,5 +217,5 @@ export async function compareCandidateImages(
     }
   };
   for (const batch of batches) await run(batch);
-  return { comparisons, failures, compared: comparisons.size, failure_reasons };
+  return { comparisons, failures, compared: comparisons.size, failure_reasons, usage };
 }

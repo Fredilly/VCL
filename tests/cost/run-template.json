@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "spike": "7",
+  "run_date": null,
+  "pricing_snapshot_date": "2026-09-16",
+  "runs": [
+    {
+      "case_id": "example-remove-before-final",
+      "localization_usage": {
+        "provider": "groq",
+        "model": "qwen/qwen3.6-27b",
+        "requests": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "vision_usage": {
+        "provider": "groq",
+        "model": "qwen/qwen3.6-27b",
+        "requests": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "verification_usage": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "requests": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "commerce_calls": {
+        "ebay": 0,
+        "etsy": 0,
+        "brave": 0,
+        "serpapi": 0
+      },
+      "latency_ms": 0,
+      "provider_blocked": false,
+      "notes": ""
+    }
+  ],
+  "summary": {
+    "sample_size": 0,
+    "mean_cost_usd": null,
+    "median_cost_usd": null,
+    "p50_latency_ms": null,
+    "p95_latency_ms": null,
+    "projected_100_usd": null,
+    "projected_1000_usd": null,
+    "projected_10000_usd": null,
+    "dominant_cost_stage": null
+  }
+}

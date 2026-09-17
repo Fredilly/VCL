@@ -1,0 +1,884 @@
+{
+  "schema_version": 1,
+  "spike": "7",
+  "run_date": "2026-09-17T14:39:12.582Z",
+  "pricing_snapshot_date": "2026-09-16",
+  "browser_launched_by_runner": false,
+  "runner_mode": "direct-api-with-cdp-frame-capture",
+  "runs": [
+    {
+      "case_id": "s5-01",
+      "selected_item": "Patagonia Better Sweater fleece jacket",
+      "failed": false,
+      "localization_usage": null,
+      "localization_failure": null,
+      "vision_usage": null,
+      "analysis": {
+        "category": "Apparel",
+        "subcategory": "Jacket",
+        "brand": "Patagonia",
+        "model": null,
+        "color": "Brown"
+      },
+      "commerce_query": {
+        "query": "sweater Brown",
+        "category": "Apparel",
+        "subcategory": "Jacket",
+        "brand": "Patagonia",
+        "model": null,
+        "attributes": [
+          "sweater",
+          "Brown",
+          "Fleece",
+          "Patagonia text logo with mountain peak silhouette and multicolored sky graphic",
+          "mock neck",
+          "zippered chest pocket",
+          "heathered fabric texture",
+          "zipper",
+          "full-zip jacket with a high mock neck",
+          "casual",
+          "outdoor"
+        ]
+      },
+      "verification_usage": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "requests": 5,
+        "prompt_tokens": 28682,
+        "completion_tokens": 9143,
+        "total_tokens": 37825
+      },
+      "verification": {
+        "retrieved": 41,
+        "compared": 17,
+        "image_failures": 24,
+        "image_failure_reasons": {
+          "image_missing": 24
+        },
+        "rejected": 40,
+        "contradictions": {
+          "subtype contradiction": 30,
+          "insufficient positive relevance evidence": 8,
+          "color contradiction": 2
+        }
+      },
+      "commerce_calls": {
+        "ebay": 3,
+        "etsy": 3,
+        "brave": 3,
+        "serpapi": 1
+      },
+      "latency_ms": 98729,
+      "provider_blocked": false,
+      "providers_used": [
+        "ebay",
+        "etsy",
+        "brave",
+        "serpapi"
+      ],
+      "serpapi": {
+        "invoked": true,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "quota_exhausted": true,
+        "skip_reason": "quota_exhausted",
+        "remaining_quota": 0
+      },
+      "brave": {
+        "invoked": true,
+        "skipped": false,
+        "success": true,
+        "no_result": false,
+        "timeout_or_failure": false
+      },
+      "notes": "state=RESULTS; products=1"
+    },
+    {
+      "case_id": "s5-02",
+      "selected_item": "Patagonia Better Sweater fleece jacket detail",
+      "failed": false,
+      "localization_usage": null,
+      "localization_failure": null,
+      "vision_usage": null,
+      "analysis": {
+        "category": "Apparel",
+        "subcategory": "Jacket",
+        "brand": null,
+        "model": null,
+        "color": "grey"
+      },
+      "commerce_query": {
+        "query": "Jacket grey",
+        "category": "Apparel",
+        "subcategory": "Jacket",
+        "brand": null,
+        "model": null,
+        "attributes": [
+          "Jacket",
+          "grey",
+          "fleece",
+          "melange fleece texture",
+          "hooded",
+          "zippered front",
+          "zippered pockets",
+          "zipper",
+          "casual",
+          "outdoor"
+        ]
+      },
+      "verification_usage": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "requests": 2,
+        "prompt_tokens": 12716,
+        "completion_tokens": 4199,
+        "total_tokens": 16915
+      },
+      "verification": {
+        "retrieved": 19,
+        "compared": 8,
+        "image_failures": 11,
+        "image_failure_reasons": {
+          "image_missing": 11
+        },
+        "rejected": 12,
+        "contradictions": {
+          "subtype contradiction": 1,
+          "insufficient visual agreement": 2,
+          "color contradiction": 3,
+          "insufficient positive relevance evidence": 6
+        }
+      },
+      "commerce_calls": {
+        "ebay": 2,
+        "etsy": 3
+      },
+      "latency_ms": 31923,
+      "provider_blocked": false,
+      "providers_used": [
+        "ebay",
+        "etsy"
+      ],
+      "serpapi": {
+        "invoked": false,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "quota_exhausted": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "brave": {
+        "invoked": false,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "notes": "state=RESULTS; products=7"
+    },
+    {
+      "case_id": "s5-03",
+      "selected_item": "Seiko SKX007 diver watch",
+      "failed": false,
+      "localization_usage": null,
+      "localization_failure": null,
+      "vision_usage": null,
+      "analysis": {
+        "category": "Accessories",
+        "subcategory": "Wristwatch",
+        "brand": "Seiko",
+        "model": "SKX007",
+        "color": "black, silver"
+      },
+      "commerce_query": {
+        "query": "watch black, silver",
+        "category": "Accessories",
+        "subcategory": "Wristwatch",
+        "brand": "Seiko",
+        "model": "SKX007",
+        "attributes": [
+          "watch",
+          "black, silver",
+          "stainless steel, rubber",
+          "Seiko logo on dial",
+          "rotating bezel with minute markings",
+          "day-date window at 3 o'clock",
+          "screw-down crown at 4 o'clock",
+          "luminous hour markers and hands",
+          "crown at 4 o'clock",
+          "rotating bezel",
+          "buckle clasp on strap",
+          "round case",
+          "curved lugs",
+          "ridged strap",
+          "dive watch",
+          "sporty",
+          "analog",
+          "casual"
+        ]
+      },
+      "verification_usage": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "requests": 5,
+        "prompt_tokens": 32409,
+        "completion_tokens": 10614,
+        "total_tokens": 43023
+      },
+      "verification": {
+        "retrieved": 20,
+        "compared": 20,
+        "image_failures": 0,
+        "image_failure_reasons": {},
+        "rejected": 9,
+        "contradictions": {
+          "color contradiction": 4,
+          "insufficient visual agreement": 1,
+          "brand contradiction": 4
+        }
+      },
+      "commerce_calls": {
+        "ebay": 3,
+        "etsy": 3
+      },
+      "latency_ms": 76904,
+      "provider_blocked": false,
+      "providers_used": [
+        "ebay",
+        "etsy"
+      ],
+      "serpapi": {
+        "invoked": false,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "quota_exhausted": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "brave": {
+        "invoked": false,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "notes": "state=RESULTS; products=8"
+    },
+    {
+      "case_id": "s5-04",
+      "selected_item": "Seiko SKX007 bezel and dial",
+      "failed": false,
+      "localization_usage": null,
+      "localization_failure": null,
+      "vision_usage": null,
+      "analysis": {
+        "category": "Accessories",
+        "subcategory": "Wristwatch",
+        "brand": "Seiko",
+        "model": "SKX007",
+        "color": "black"
+      },
+      "commerce_query": {
+        "query": "watch black",
+        "category": "Accessories",
+        "subcategory": "Wristwatch",
+        "brand": "Seiko",
+        "model": "SKX007",
+        "attributes": [
+          "watch",
+          "black",
+          "stainless steel, rubber",
+          "Seiko logo on dial",
+          "rotating bezel with dive scale",
+          "luminous hour markers and hands",
+          "day-date window at 3 o'clock",
+          "ridged rubber dive strap",
+          "crown at 4 o'clock position",
+          "rotating bezel",
+          "round case",
+          "round dial",
+          "dive watch",
+          "sporty",
+          "analog"
+        ]
+      },
+      "verification_usage": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "requests": 5,
+        "prompt_tokens": 33536,
+        "completion_tokens": 11493,
+        "total_tokens": 45029
+      },
+      "verification": {
+        "retrieved": 21,
+        "compared": 21,
+        "image_failures": 0,
+        "image_failure_reasons": {},
+        "rejected": 10,
+        "contradictions": {
+          "color contradiction": 4,
+          "insufficient visual agreement": 1,
+          "brand contradiction": 5
+        }
+      },
+      "commerce_calls": {
+        "ebay": 3,
+        "etsy": 3
+      },
+      "latency_ms": 53248,
+      "provider_blocked": false,
+      "providers_used": [
+        "ebay",
+        "etsy"
+      ],
+      "serpapi": {
+        "invoked": false,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "quota_exhausted": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "brave": {
+        "invoked": false,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "notes": "state=RESULTS; products=8"
+    },
+    {
+      "case_id": "s5-05",
+      "selected_item": "vintage Coach leather bag",
+      "failed": false,
+      "localization_usage": null,
+      "localization_failure": null,
+      "vision_usage": null,
+      "analysis": {
+        "category": "Apparel",
+        "subcategory": "Hoodie",
+        "brand": null,
+        "model": null,
+        "color": "black"
+      },
+      "commerce_query": {
+        "query": "Hoodie black",
+        "category": "Apparel",
+        "subcategory": "Hoodie",
+        "brand": null,
+        "model": null,
+        "attributes": [
+          "Hoodie",
+          "black",
+          "cotton blend",
+          "end of the video I'm going",
+          "what fits",
+          "red graphic text lettering across the chest",
+          "hood with drawstrings",
+          "red text/graphic logo on front",
+          "metal grommets and aglets on drawstrings",
+          "relaxed fit",
+          "pullover",
+          "hooded sweatshirt silhouette",
+          "casual",
+          "athletic",
+          "long sleeve",
+          "hooded",
+          "drawstring"
+        ]
+      },
+      "verification_usage": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "requests": 4,
+        "prompt_tokens": 25539,
+        "completion_tokens": 8543,
+        "total_tokens": 34082
+      },
+      "verification": {
+        "retrieved": 24,
+        "compared": 16,
+        "image_failures": 8,
+        "image_failure_reasons": {
+          "image_missing": 8
+        },
+        "rejected": 12,
+        "contradictions": {
+          "insufficient positive relevance evidence": 5,
+          "color contradiction": 4,
+          "insufficient visual agreement": 3
+        }
+      },
+      "commerce_calls": {
+        "ebay": 3,
+        "etsy": 3,
+        "brave": 1
+      },
+      "latency_ms": 89649,
+      "provider_blocked": false,
+      "providers_used": [
+        "ebay",
+        "etsy",
+        "brave"
+      ],
+      "serpapi": {
+        "invoked": false,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "quota_exhausted": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "brave": {
+        "invoked": true,
+        "skipped": true,
+        "success": true,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "notes": "state=RESULTS; products=8"
+    },
+    {
+      "case_id": "s5-06",
+      "selected_item": "vintage Coach leather bag hardware/detail",
+      "failed": false,
+      "localization_usage": null,
+      "localization_failure": null,
+      "vision_usage": null,
+      "analysis": {
+        "category": "Accessories",
+        "subcategory": "Pendant",
+        "brand": null,
+        "model": null,
+        "color": "multicolor"
+      },
+      "commerce_query": {
+        "query": "bag multicolor",
+        "category": "Accessories",
+        "subcategory": "Pendant",
+        "brand": null,
+        "model": null,
+        "attributes": [
+          "bag",
+          "multicolor",
+          "flower shaped design with pink center and yellow-white petals",
+          "floral motif",
+          "charming"
+        ]
+      },
+      "verification_usage": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "requests": 5,
+        "prompt_tokens": 31785,
+        "completion_tokens": 9959,
+        "total_tokens": 41744
+      },
+      "verification": {
+        "retrieved": 44,
+        "compared": 2,
+        "image_failures": 42,
+        "image_failure_reasons": {
+          "model_schema": 18,
+          "image_missing": 24
+        },
+        "rejected": 44,
+        "contradictions": {
+          "insufficient positive relevance evidence": 42,
+          "insufficient visual agreement": 2
+        }
+      },
+      "commerce_calls": {
+        "ebay": 3,
+        "etsy": 3,
+        "brave": 3,
+        "serpapi": 1
+      },
+      "latency_ms": 60936,
+      "provider_blocked": false,
+      "providers_used": [
+        "ebay",
+        "etsy",
+        "brave",
+        "serpapi"
+      ],
+      "serpapi": {
+        "invoked": true,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "quota_exhausted": true,
+        "skip_reason": "quota_exhausted",
+        "remaining_quota": 0
+      },
+      "brave": {
+        "invoked": true,
+        "skipped": false,
+        "success": true,
+        "no_result": false,
+        "timeout_or_failure": false
+      },
+      "notes": "state=NO_RESULTS; products=0"
+    },
+    {
+      "case_id": "s5-07",
+      "selected_item": "Adidas Samba OG sneaker",
+      "failed": false,
+      "localization_usage": null,
+      "localization_failure": null,
+      "vision_usage": null,
+      "analysis": {
+        "category": "Shoes",
+        "subcategory": "Sneakers",
+        "brand": "Adidas",
+        "model": "Samba",
+        "color": "White, Black, Gum Brown"
+      },
+      "commerce_query": {
+        "query": "Sneakers White, Black, Gum Brown",
+        "category": "Shoes",
+        "subcategory": "Sneakers",
+        "brand": "Adidas",
+        "model": "Samba",
+        "attributes": [
+          "Sneakers",
+          "White, Black, Gum Brown",
+          "Leather, Suede, Rubber",
+          "SAMBA",
+          "Three black serrated stripes on the side",
+          "Suede T-toe overlay",
+          "Gold foil 'SAMBA' lettering next to stripes",
+          "Dark gum rubber midsole/outsole with textured pattern",
+          "White laces",
+          "Lace eyelets",
+          "Low-top sneaker",
+          "Slim profile",
+          "Athletic",
+          "Casual",
+          "Low-top",
+          "Retro"
+        ]
+      },
+      "verification_usage": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "requests": 6,
+        "prompt_tokens": 38457,
+        "completion_tokens": 12687,
+        "total_tokens": 51144
+      },
+      "verification": {
+        "retrieved": 24,
+        "compared": 24,
+        "image_failures": 0,
+        "image_failure_reasons": {},
+        "rejected": 14,
+        "contradictions": {
+          "color contradiction": 12,
+          "brand contradiction": 2
+        }
+      },
+      "commerce_calls": {
+        "ebay": 3,
+        "etsy": 3
+      },
+      "latency_ms": 116882,
+      "provider_blocked": false,
+      "providers_used": [
+        "ebay",
+        "etsy"
+      ],
+      "serpapi": {
+        "invoked": false,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "quota_exhausted": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "brave": {
+        "invoked": false,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "notes": "state=RESULTS; products=8"
+    },
+    {
+      "case_id": "s5-08",
+      "selected_item": "Adidas Samba OG sneaker side detail",
+      "failed": false,
+      "localization_usage": null,
+      "localization_failure": null,
+      "vision_usage": null,
+      "analysis": {
+        "category": "Graphic art",
+        "subcategory": "Illustration",
+        "brand": null,
+        "model": null,
+        "color": "orange, white, black, green"
+      },
+      "commerce_query": {
+        "query": "Illustration orange, white, black, green",
+        "category": "Graphic art",
+        "subcategory": "Illustration",
+        "brand": null,
+        "model": null,
+        "attributes": [
+          "orange, white, black, green",
+          "paper",
+          "white 'X' symbol inside a green circle on the rocket",
+          "black 'X' symbol on the side of the box",
+          "depicts a rocket launching next to an orange shipping box marked with an X",
+          "illustrated",
+          "cartoon style"
+        ]
+      },
+      "verification_usage": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "requests": 2,
+        "prompt_tokens": 12749,
+        "completion_tokens": 3978,
+        "total_tokens": 16727
+      },
+      "verification": {
+        "retrieved": 24,
+        "compared": 8,
+        "image_failures": 16,
+        "image_failure_reasons": {
+          "image_missing": 16
+        },
+        "rejected": 24,
+        "contradictions": {
+          "insufficient positive relevance evidence": 16,
+          "insufficient visual agreement": 6,
+          "color contradiction": 2
+        }
+      },
+      "commerce_calls": {
+        "ebay": 2,
+        "brave": 2,
+        "serpapi": 1
+      },
+      "latency_ms": 37309,
+      "provider_blocked": false,
+      "providers_used": [
+        "ebay",
+        "brave",
+        "serpapi"
+      ],
+      "serpapi": {
+        "invoked": true,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "quota_exhausted": true,
+        "skip_reason": "quota_exhausted",
+        "remaining_quota": 0
+      },
+      "brave": {
+        "invoked": true,
+        "skipped": false,
+        "success": true,
+        "no_result": false,
+        "timeout_or_failure": false
+      },
+      "notes": "state=NO_RESULTS; products=0"
+    },
+    {
+      "case_id": "s5-09",
+      "selected_item": "Anglepoise Type 75 desk lamp",
+      "failed": false,
+      "localization_usage": null,
+      "localization_failure": null,
+      "vision_usage": null,
+      "analysis": {
+        "category": "Home Decor",
+        "subcategory": "Storage Box",
+        "brand": null,
+        "model": null,
+        "color": "brown"
+      },
+      "commerce_query": {
+        "query": "Storage Box brown",
+        "category": "Home Decor",
+        "subcategory": "Storage Box",
+        "brand": null,
+        "model": null,
+        "attributes": [
+          "brown",
+          "cardboard",
+          "large number 75 graphic with integrated lamp silhouette",
+          "large '75' graphic printed across the front",
+          "integrated lamp illustration within the graphic",
+          "carrying handle",
+          "graphic",
+          "number print"
+        ]
+      },
+      "verification_usage": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "requests": 2,
+        "prompt_tokens": 12746,
+        "completion_tokens": 4040,
+        "total_tokens": 16786
+      },
+      "verification": {
+        "retrieved": 24,
+        "compared": 8,
+        "image_failures": 16,
+        "image_failure_reasons": {
+          "image_missing": 16
+        },
+        "rejected": 24,
+        "contradictions": {
+          "insufficient positive relevance evidence": 17,
+          "insufficient visual agreement": 6,
+          "color contradiction": 1
+        }
+      },
+      "commerce_calls": {
+        "ebay": 2,
+        "brave": 2,
+        "serpapi": 1
+      },
+      "latency_ms": 61538,
+      "provider_blocked": false,
+      "providers_used": [
+        "ebay",
+        "brave",
+        "serpapi"
+      ],
+      "serpapi": {
+        "invoked": true,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "quota_exhausted": true,
+        "skip_reason": "quota_exhausted",
+        "remaining_quota": 0
+      },
+      "brave": {
+        "invoked": true,
+        "skipped": false,
+        "success": true,
+        "no_result": false,
+        "timeout_or_failure": false
+      },
+      "notes": "state=NO_RESULTS; products=0"
+    },
+    {
+      "case_id": "s5-10",
+      "selected_item": "partially visible desk-lamp component",
+      "failed": false,
+      "localization_usage": null,
+      "localization_failure": null,
+      "vision_usage": null,
+      "analysis": {
+        "category": "Apparel",
+        "subcategory": "Polo",
+        "brand": null,
+        "model": null,
+        "color": "dark grey"
+      },
+      "commerce_query": {
+        "query": "Polo dark grey",
+        "category": "Apparel",
+        "subcategory": "Polo",
+        "brand": null,
+        "model": null,
+        "attributes": [
+          "Polo",
+          "dark grey",
+          "cotton blend",
+          "short sleeves",
+          "folded collar",
+          "placket neckline",
+          "casual",
+          "short sleeve",
+          "collared"
+        ]
+      },
+      "verification_usage": {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash-lite",
+        "requests": 5,
+        "prompt_tokens": 30466,
+        "completion_tokens": 10118,
+        "total_tokens": 40584
+      },
+      "verification": {
+        "retrieved": 27,
+        "compared": 19,
+        "image_failures": 8,
+        "image_failure_reasons": {
+          "image_missing": 8
+        },
+        "rejected": 17,
+        "contradictions": {
+          "insufficient visual agreement": 2,
+          "insufficient positive relevance evidence": 5,
+          "subtype contradiction": 2,
+          "color contradiction": 7,
+          "sleeve contradiction": 1
+        }
+      },
+      "commerce_calls": {
+        "ebay": 3,
+        "etsy": 3,
+        "brave": 1
+      },
+      "latency_ms": 50137,
+      "provider_blocked": false,
+      "providers_used": [
+        "ebay",
+        "etsy",
+        "brave"
+      ],
+      "serpapi": {
+        "invoked": false,
+        "skipped": true,
+        "success": false,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "quota_exhausted": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "brave": {
+        "invoked": true,
+        "skipped": true,
+        "success": true,
+        "no_result": false,
+        "timeout_or_failure": false,
+        "skip_reason": "upstream_sufficient"
+      },
+      "notes": "state=RESULTS; products=8"
+    }
+  ],
+  "failed_runs": [],
+  "summary": {
+    "sample_size": 10,
+    "attempted": 10,
+    "failed": 0
+  }
+}

@@ -13,7 +13,7 @@ import { EbayCommerceProvider } from './ebay-commerce.js';
 import { resolveEbayCredentials, type EbayCredentials } from './ebay-credentials.js';
 import { EtsyCommerceProvider } from './etsy-commerce.js';
 import { resolveEtsyCredentials, type EtsyCredentials } from './etsy-credentials.js';
-import { SerpApiCommerceProvider, type SerpApiQuotaInfo } from './serpapi-commerce.js';
+import { SerpApiCommerceProvider } from './serpapi-commerce.js';
 import { BraveCommerceProvider } from './brave-commerce.js';
 import { resolveBraveCredentials } from './brave-credentials.js';
 
@@ -44,8 +44,6 @@ const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringif
 function logSafeError(error: unknown) { console.error('VCL API error', error instanceof Error ? { name: error.name, message: error.message } : { name: typeof error, message: String(error) }); }
 
 async function readAnalysisBody(request: Request): Promise<unknown> {
-  // Three <=2 MB crops as base64 plus bounded metadata. Check actual streamed bytes,
-  // not just Content-Length; image requests must never be cached or logged.
   const limit = 8_500_000;
   if (Number(request.headers.get('content-length')) > limit || !request.body) throw new Error('Invalid analysis body');
   const reader = request.body.getReader();
@@ -81,89 +79,70 @@ function makeEbayAuth(creds: EbayCredentials): EbayAuth {
 
 function commerceProviders(env: Env): NamedCommerceProvider[] {
   let serpapi: NamedCommerceProvider | null = null;
-  if (env.SERPAPI_API_KEY) {
-    serpapi = { name: 'serpapi', provider: new SerpApiCommerceProvider(env.SERPAPI_API_KEY), tier: 'fallback' };
-  }
+  if (env.SERPAPI_API_KEY) serpapi = { name: 'serpapi', provider: new SerpApiCommerceProvider(env.SERPAPI_API_KEY), tier: 'fallback' };
 
   let ebay: NamedCommerceProvider | null = null;
   const ebayCreds = resolveEbayCredentials(env);
-  if (ebayCreds) {
-    ebay = { name: 'ebay', provider: new EbayCommerceProvider(makeEbayAuth(ebayCreds)), tier: 'primary' };
-  }
+  if (ebayCreds) ebay = { name: 'ebay', provider: new EbayCommerceProvider(makeEbayAuth(ebayCreds)), tier: 'primary' };
 
   let etsy: NamedCommerceProvider | null = null;
   const etsyCreds = resolveEtsyCredentials(env);
-  if (etsyCreds) {
-    etsy = { name: 'etsy', provider: new EtsyCommerceProvider(etsyCreds), tier: 'primary' };
-  }
+  if (etsyCreds) etsy = { name: 'etsy', provider: new EtsyCommerceProvider(etsyCreds), tier: 'primary' };
 
   let brave: NamedCommerceProvider | null = null;
   const braveCreds = resolveBraveCredentials(env);
-  if (braveCreds) {
-    brave = { name: 'brave', provider: new BraveCommerceProvider(braveCreds.apiKey), tier: 'fallback' };
-  }
+  if (braveCreds) brave = { name: 'brave', provider: new BraveCommerceProvider(braveCreds.apiKey), tier: 'fallback' };
 
   if (env.COMMERCE_PROVIDER === 'serpapi') return serpapi ? [serpapi] : [];
   if (env.COMMERCE_PROVIDER === 'ebay') return ebay ? [ebay] : [];
   if (env.COMMERCE_PROVIDER === 'etsy') return etsy ? [etsy] : [];
   if (env.COMMERCE_PROVIDER === 'brave') return brave ? [brave] : [];
-
   return [ebay, etsy, serpapi, brave].filter((entry): entry is NamedCommerceProvider => Boolean(entry));
 }
 
-const ETSY_ELIGIBLE_CATEGORIES = new Set([
-  'apparel', 'fashion', 'shoes', 'watches', 'bags', 'jewelry', 'accessories',
-  'vintage', 'handmade',
-]);
+const ETSY_ELIGIBLE_CATEGORIES = new Set(['apparel', 'fashion', 'shoes', 'watches', 'bags', 'jewelry', 'accessories', 'vintage', 'handmade']);
 
 function isEtsyEligible(query: ProductQuery): boolean {
   const category = (query.category ?? '').toLowerCase();
   const subcategory = (query.subcategory ?? '').toLowerCase();
-  if (ETSY_ELIGIBLE_CATEGORIES.has(category)) return true;
-  if (ETSY_ELIGIBLE_CATEGORIES.has(subcategory)) return true;
-  // Model descriptions also use singular/product-type taxonomy (watch, bag, boots).
-  // Reuse the verification taxonomy so these supported categories retain their providers.
+  if (ETSY_ELIGIBLE_CATEGORIES.has(category) || ETSY_ELIGIBLE_CATEGORIES.has(subcategory)) return true;
   const normalized = [canonical('category', category), canonical('category', subcategory)];
   if (normalized.some(value => value && ['apparel', 'shoes', 'watch', 'bag'].includes(value))) return true;
   const text = `${category} ${subcategory} ${query.query}`.toLowerCase();
-  for (const eligible of ETSY_ELIGIBLE_CATEGORIES) {
-    if (text.includes(eligible)) return true;
-  }
+  for (const eligible of ETSY_ELIGIBLE_CATEGORIES) if (text.includes(eligible)) return true;
   return false;
 }
 
 function filterByCategory(providers: NamedCommerceProvider[], query: ProductQuery): NamedCommerceProvider[] {
-  return providers.filter((p) => {
-    if (p.name === 'etsy') return isEtsyEligible(query);
-    return true;
-  });
+  return providers.filter((p) => p.name !== 'etsy' || isEtsyEligible(query));
 }
 
 const LIKELY_CANDIDATE_THRESHOLD = 3;
 const SUFFICIENT_CANDIDATE_THRESHOLD = 3;
 
 export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages) {
-  let attempts = 0; let sawProviderFailure = false; let activeProviders = [...providers]; const providersUsed = new Set<string>();
+  let attempts = 0;
+  let sawProviderFailure = false;
+  let completedProviderAttempt = false;
+  let activeProviders = [...providers];
+  const providersUsed = new Set<string>();
   const accepted: ProductCandidate[] = [];
   const seen = new Set<string>();
   const imageEvidence = new Map<string, ImageComparison>();
   const imageBudget = imageRequestBudget();
   const verification = { retrieved: 0, compared: 0, image_failures: 0, image_failure_reasons: {} as Record<string, number>, rejected: 0, contradictions: {} as Record<string, number> };
   const timing = { provider_retrieval_ms: 0, candidate_verification_ms: 0 };
+  const commerceCalls: Record<string, number> = {};
+  const verificationUsage = { provider: 'gemini', model: env.GEMINI_MODEL || 'gemini-3.5-flash-lite', requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+  const noteCommerceCall = (name: string) => { commerceCalls[name] = (commerceCalls[name] ?? 0) + 1; };
 
   const serpapiProvider = providers.find((p) => p.name === 'serpapi') ?? null;
   const braveProvider = providers.find((p) => p.name === 'brave') ?? null;
   let skipSerpApi = false;
-  let skipBrave = false;
-  const serpapiTelemetry: { invoked: boolean; skipped: boolean; skip_reason?: string; success: boolean; no_result: boolean; timeout_or_failure: boolean; quota_exhausted: boolean; remaining_quota?: number } = {
-    invoked: false, skipped: false, success: false, no_result: false, timeout_or_failure: false, quota_exhausted: false,
-  };
-  const braveTelemetry: { invoked: boolean; skipped: boolean; skip_reason?: string; success: boolean; no_result: boolean; timeout_or_failure: boolean } = {
-    invoked: false, skipped: false, success: false, no_result: false, timeout_or_failure: false,
-  };
+  const serpapiTelemetry: { invoked: boolean; skipped: boolean; skip_reason?: string; success: boolean; no_result: boolean; timeout_or_failure: boolean; quota_exhausted: boolean; remaining_quota?: number } = { invoked: false, skipped: false, success: false, no_result: false, timeout_or_failure: false, quota_exhausted: false };
+  const braveTelemetry: { invoked: boolean; skipped: boolean; skip_reason?: string; success: boolean; no_result: boolean; timeout_or_failure: boolean } = { invoked: false, skipped: false, success: false, no_result: false, timeout_or_failure: false };
 
   const respond = (query: ProductQuery) => {
-    // Capture SerpAPI quota info for telemetry if available.
     if (serpapiProvider && serpapiProvider.provider instanceof SerpApiCommerceProvider) {
       const quota = serpapiProvider.provider.getQuotaInfo();
       serpapiTelemetry.remaining_quota = quota.total_searches_left;
@@ -173,13 +152,28 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
         serpapiTelemetry.skip_reason = 'quota_exhausted';
       }
     }
-    return { query, products: dedupeProducts(rankVerified(accepted)),
-    state: accepted.length ? 'RESULTS' as const : sawProviderFailure ? 'TEMPORARILY_UNAVAILABLE' as const : 'NO_RESULTS' as const,
-    providers_used: [...providersUsed], attempts, verification, timing, serpapi: serpapiTelemetry, brave: braveTelemetry };
+    const state = accepted.length
+      ? 'RESULTS' as const
+      : completedProviderAttempt
+        ? 'NO_RESULTS' as const
+        : sawProviderFailure
+          ? 'TEMPORARILY_UNAVAILABLE' as const
+          : 'NO_RESULTS' as const;
+    return {
+      query,
+      products: dedupeProducts(rankVerified(accepted)),
+      state,
+      providers_configured: providers.map((p) => p.name),
+      providers_used: [...providersUsed],
+      attempts,
+      verification,
+      timing,
+      serpapi: serpapiTelemetry,
+      brave: braveTelemetry,
+      cost_usage: { commerce_calls: { ...commerceCalls }, verification_usage: { ...verificationUsage } },
+    };
   };
 
-  // Candidate-image comparison is bounded to the provider's top 8. Every
-  // returned candidate still passes the same image/identity/relevance gates.
   const verifyFresh = async (products: ProductCandidate[]) => {
     const fresh = products.slice(0, 8).filter((product) => {
       const key = candidateKey(product); if (seen.has(key)) return false; seen.add(key); return true;
@@ -190,6 +184,10 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
       verification.compared += images.compared;
       verification.image_failures += images.failures;
+      verificationUsage.requests += images.usage?.requests ?? 0;
+      verificationUsage.prompt_tokens += images.usage?.prompt_tokens ?? 0;
+      verificationUsage.completion_tokens += images.usage?.completion_tokens ?? 0;
+      verificationUsage.total_tokens += images.usage?.total_tokens ?? 0;
       for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
       for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
     }
@@ -204,115 +202,118 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     }
     timing.candidate_verification_ms += Date.now() - verificationStarted;
   };
+
   for (const query of queries) {
     if (!activeProviders.length) break;
     attempts++;
-
-    // --- Filter providers by query category ---
     const eligibleProviders = filterByCategory(activeProviders, query);
-    const primaryProviders = eligibleProviders.filter((p) => p.tier === 'primary');
+    const activePrimary = eligibleProviders.filter((p) => p.tier === 'primary');
 
-    // --- Tier 1: Run primary providers ---
-    const activePrimary = primaryProviders.filter((p) => eligibleProviders.some((a) => a.name === p.name));
     if (activePrimary.length) {
       const retrievalStarted = Date.now();
-      const settled = await Promise.allSettled(activePrimary.map(async ({ name, provider }) => { providersUsed.add(name); return provider.search(query); }));
+      const settled = await Promise.allSettled(activePrimary.map(async ({ name, provider }) => { providersUsed.add(name); noteCommerceCall(name); return provider.search(query); }));
       timing.provider_retrieval_ms += Date.now() - retrievalStarted;
-      const products: ProductCandidate[] = []; const failedProviders = new Set<string>();
+      const products: ProductCandidate[] = [];
+      const failedProviders = new Set<string>();
       settled.forEach((result, index) => {
         const providerName = activePrimary[index].name;
-        if (result.status === 'fulfilled') { products.push(...result.value); return; }
-        if (result.reason instanceof CommerceNoResultsError) return;
-        sawProviderFailure = true; failedProviders.add(providerName); logSafeError(result.reason);
+        if (result.status === 'fulfilled') {
+          completedProviderAttempt = true;
+          products.push(...result.value);
+          return;
+        }
+        if (result.reason instanceof CommerceNoResultsError) {
+          completedProviderAttempt = true;
+          return;
+        }
+        sawProviderFailure = true;
+        failedProviders.add(providerName);
+        logSafeError(result.reason);
       });
       if (failedProviders.size) activeProviders = activeProviders.filter(({ name }) => !failedProviders.has(name));
-
       await verifyFresh(products);
     }
 
-    // --- Sufficiency checks (after verification) ---
-    const shouldSkipBrave = skipBrave || accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD;
-
-    if (shouldSkipBrave && !braveTelemetry.skip_reason) {
+    if (accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD) {
       braveTelemetry.skipped = true;
-      braveTelemetry.skip_reason = accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD ? 'upstream_sufficient' : 'already_skipped';
-    }
-
-    if (!skipSerpApi && accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD) {
+      braveTelemetry.skip_reason ??= 'upstream_sufficient';
       serpapiTelemetry.skipped = true;
-      serpapiTelemetry.skip_reason = 'upstream_sufficient';
+      serpapiTelemetry.skip_reason ??= 'upstream_sufficient';
       skipSerpApi = true;
     }
 
-    // Early exit if we already have enough LIKELY candidates from primary providers.
     if (accepted.filter((product) => product.result_class === 'LIKELY').length >= LIKELY_CANDIDATE_THRESHOLD) return respond(query);
 
+    const shouldSkipBrave = accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD;
     if (!shouldSkipBrave && braveProvider && eligibleProviders.some((a) => a.name === 'brave')) {
       braveTelemetry.invoked = true;
       let result;
       const retrievalStarted = Date.now();
       try {
         providersUsed.add('brave');
+        noteCommerceCall('brave');
         result = await braveProvider.provider.search(query);
+        completedProviderAttempt = true;
         braveTelemetry.success = true;
       } catch (error) {
-        if (error instanceof CommerceNoResultsError) { braveTelemetry.no_result = true; }
-        else {
+        if (error instanceof CommerceNoResultsError) {
+          completedProviderAttempt = true;
+          braveTelemetry.no_result = true;
+        } else {
           sawProviderFailure = true;
           braveTelemetry.timeout_or_failure = true;
           logSafeError(error);
           activeProviders = activeProviders.filter(({ name }) => name !== 'brave');
         }
       } finally { timing.provider_retrieval_ms += Date.now() - retrievalStarted; }
-      if (result) {
-        await verifyFresh(result);
-      }
+      if (result) await verifyFresh(result);
+    } else if (!braveProvider && !braveTelemetry.skip_reason) {
+      braveTelemetry.skipped = true;
+      braveTelemetry.skip_reason = 'not_configured';
     }
 
-    // --- Tier 3: Run SerpAPI fallback only when Brave is exhausted/failed/insufficient ---
     const shouldSkipSerpApi = skipSerpApi || accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD;
-
     if (shouldSkipSerpApi && !serpapiTelemetry.skip_reason) {
       serpapiTelemetry.skipped = true;
-      serpapiTelemetry.skip_reason = braveTelemetry.invoked && braveTelemetry.success ? 'brave_sufficient' : 'upstream_sufficient';
+      serpapiTelemetry.skip_reason = 'upstream_sufficient';
     }
 
     if (!shouldSkipSerpApi && serpapiProvider && eligibleProviders.some((a) => a.name === 'serpapi')) {
-      // Only invoke SerpAPI if Brave was skipped, exhausted, failed, or returned insufficient results.
-      const braveInsufficient = braveTelemetry.skipped || braveTelemetry.no_result || braveTelemetry.timeout_or_failure || !braveProvider || accepted.length < SUFFICIENT_CANDIDATE_THRESHOLD;
-      if (!braveInsufficient && braveTelemetry.invoked && braveTelemetry.success) {
-        // Brave ran successfully and produced results — do not invoke SerpAPI.
-        serpapiTelemetry.skipped = true;
-        serpapiTelemetry.skip_reason = 'brave_sufficient';
-      } else {
-        serpapiTelemetry.invoked = true;
-        let result;
-        const retrievalStarted = Date.now();
-        try {
-          providersUsed.add('serpapi');
-          result = await serpapiProvider.provider.search(query);
-          serpapiTelemetry.success = true;
-        } catch (error) {
-          if (error instanceof CommerceNoResultsError) { serpapiTelemetry.no_result = true; }
-          else {
+      serpapiTelemetry.invoked = true;
+      let result;
+      const retrievalStarted = Date.now();
+      try {
+        providersUsed.add('serpapi');
+        noteCommerceCall('serpapi');
+        result = await serpapiProvider.provider.search(query);
+        completedProviderAttempt = true;
+        serpapiTelemetry.success = true;
+      } catch (error) {
+        if (error instanceof CommerceNoResultsError) {
+          completedProviderAttempt = true;
+          serpapiTelemetry.no_result = true;
+        } else {
+          const msg = error instanceof Error ? error.message : '';
+          const quotaExhausted = msg.includes('quota exhausted') || msg.includes('HTTP 429');
+          serpapiTelemetry.timeout_or_failure = !quotaExhausted;
+          if (quotaExhausted) {
+            serpapiTelemetry.quota_exhausted = true;
+            serpapiTelemetry.skipped = true;
+            serpapiTelemetry.skip_reason = 'quota_exhausted';
+            skipSerpApi = true;
+          } else {
             sawProviderFailure = true;
-            serpapiTelemetry.timeout_or_failure = true;
-            const msg = error instanceof Error ? error.message : '';
-            if (msg.includes('quota exhausted') || msg.includes('HTTP 429')) {
-              serpapiTelemetry.quota_exhausted = true;
-              skipSerpApi = true;
-            }
-            logSafeError(error);
-            activeProviders = activeProviders.filter(({ name }) => name !== 'serpapi');
           }
-        } finally { timing.provider_retrieval_ms += Date.now() - retrievalStarted; }
-        if (result) {
-          await verifyFresh(result);
+          logSafeError(error);
+          activeProviders = activeProviders.filter(({ name }) => name !== 'serpapi');
         }
-      }
+      } finally { timing.provider_retrieval_ms += Date.now() - retrievalStarted; }
+      if (result) await verifyFresh(result);
+    } else if (!serpapiProvider && !serpapiTelemetry.skip_reason) {
+      serpapiTelemetry.skipped = true;
+      serpapiTelemetry.skip_reason = 'not_configured';
     }
 
-    // A weak first page must not suppress the broader searches. No merchant/price ordering here.
     if (accepted.filter((product) => product.result_class === 'LIKELY').length >= 3) return respond(query);
   }
 
@@ -349,14 +350,14 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
           primary = normalizeObjectDescription(record.primary_description);
         } catch { return jsonResponse({ error: 'Invalid multi-frame evidence request' }, 400); }
       }
-      const useGemini = env.VISION_PROVIDER === 'gemini'; const apiKey = useGemini ? env.GEMINI_API_KEY : env.GROQ_API_KEY;
+      const useGemini = env.VISION_PROVIDER === 'gemini';
+      const apiKey = useGemini ? env.GEMINI_API_KEY : env.GROQ_API_KEY;
       if (!apiKey) return jsonResponse({ error: `Missing ${useGemini ? 'GEMINI_API_KEY' : 'GROQ_API_KEY'}` }, 500);
       const provider = useGemini ? new GeminiVisionProvider(apiKey, env.GEMINI_MODEL) : new GroqVisionProvider(apiKey);
       if (point && path === '/locate-selection') {
         try { return jsonResponse(await provider.locateSelection(dataUrl, record.focusDataUrl as string, point)); }
         catch (error) {
-          return jsonResponse({ error: 'Could not isolate the clicked object. Adjust the crop and try again.',
-            reason: error instanceof TargetLocalizationError ? error.reason : 'localization_unavailable' }, 422);
+          return jsonResponse({ error: 'Could not isolate the clicked object. Adjust the crop and try again.', reason: error instanceof TargetLocalizationError ? error.reason : 'localization_unavailable' }, 422);
         }
       }
       if (nearby && primary && typeof timestamp === 'number') return jsonResponse(await analyzeWithNearbyFrames(provider, dataUrl, primary, timestamp, nearby, point));
@@ -371,12 +372,19 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const record = wrapped ? parsed as { description: unknown; context?: unknown; source_image?: unknown } : { description: parsed, context: undefined, source_image: undefined };
       const sourceImage = parseSourceImage(record.source_image);
       if (record.source_image != null && !sourceImage) return jsonResponse({ error: 'source_image must be a base64 JPEG, PNG, WebP or GIF crop under 2 MB' }, 400);
-      const description = normalizeObjectDescription(record.description); const context = normalizeContext(record.context);
-      const providers = commerceProviders(env); if (!providers.length) return jsonResponse({ error: 'No configured commerce provider' }, 503);
-      const queries = buildProductQueryVariants(description, context); const started = Date.now(); const resolved = await resolveProducts(providers, queries, description, env, context, sourceImage);
+      const description = normalizeObjectDescription(record.description);
+      const context = normalizeContext(record.context);
+      const providers = commerceProviders(env);
+      if (!providers.length) return jsonResponse({ error: 'No configured commerce provider' }, 503);
+      const queries = buildProductQueryVariants(description, context);
+      const started = Date.now();
+      const resolved = await resolveProducts(providers, queries, description, env, context, sourceImage);
       const total_ms = Date.now() - started;
       return jsonResponse({ ...resolved, latency_ms: total_ms, timing: { ...resolved.timing, total_ms } });
     }
     return jsonResponse({ error: 'Not found' }, 404);
-  } catch (error) { logSafeError(error); return jsonResponse({ error: error instanceof Error ? error.message : 'Unknown API error' }, 500); }
+  } catch (error) {
+    logSafeError(error);
+    return jsonResponse({ error: error instanceof Error ? error.message : 'Unknown API error' }, 500);
+  }
 } };

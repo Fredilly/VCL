@@ -19,7 +19,7 @@ async function run({ visionStatus = 200, visionPayload = description, commerceSt
   const element = () => ({ style: {}, children: [], listeners: new Map(), appendChild(child) { this.children.push(child); if (child.id) nodes.set(child.id, child); },
     append(...children) { for (const child of children) this.appendChild(child); },
     get firstElementChild() { return this.children[0]; }, addEventListener(type, fn) { this.listeners.set(type, fn); }, remove() { nodes.delete(this.id); } });
-  const browser = { action: { onClicked: { addListener() {} } }, runtime: {
+  const browser = { action: { onClicked: { addListener() {} } }, commands: { onCommand: { addListener() {} } }, tabs: { query: async () => [], sendMessage: async () => undefined }, runtime: {
     onMessage: { addListener(fn) { listener = fn; } },
     async sendMessage(message) {
       return await new Promise((resolve, reject) => {
@@ -77,15 +77,17 @@ test('click point and focus reach localization; only the isolated target reaches
   assert.equal(requestBodies[2].source_image, 'target-pixels');
 });
 
-test('ambiguous localization never falls back to identifying the larger surrounding crop', async () => {
-  const { requests, panel } = await run({ targeted: true, locateFails: true });
-  assert.equal(requests, 1);
-  assert.ok(panel.children.some(child => child.textContent === 'Adjust the crop'));
+test('failed localization falls back non-blockingly and continues analysis', async () => {
+  const { requests, requestBodies, panel } = await run({ targeted: true, locateFails: true });
+  assert.equal(requests, 3);
+  assert.equal(requestBodies[1].dataUrl, 'target-pixels');
+  assert.equal(requestBodies[2].source_image, 'target-pixels');
+  assert.equal(panel.firstElementChild.textContent, 'VCL object understanding: success');
 });
 
 test('background listener delivers callback response and returns true to keep channel open', async () => {
   let listener;
-  const browser = { action: { onClicked: { addListener() {} } }, runtime: { onMessage: { addListener(fn) { listener = fn; } } } };
+  const browser = { action: { onClicked: { addListener() {} } }, commands: { onCommand: { addListener() {} } }, tabs: { query: async () => [], sendMessage: async () => undefined }, runtime: { onMessage: { addListener(fn) { listener = fn; } } } };
   const context = vm.createContext({ exports: {}, browser, defineBackground: fn => fn(), console,
     fetch: async () => Response.json(description) });
   vm.runInContext(compile(background), context);
@@ -96,16 +98,16 @@ test('background listener delivers callback response and returns true to keep ch
   assert.deepEqual(response, description);
 });
 
-test('vision upstream error crosses promise boundary', async () => {
+test('vision upstream error crosses promise boundary as friendly UI copy', async () => {
   const { panel, requests } = await run({ visionStatus: 500, visionPayload: { error: 'Provider unavailable' } });
-  assert.ok(panel.children.some(child => child.textContent === 'Provider unavailable'));
+  assert.ok(panel.children.some(child => child.textContent === 'Something went wrong. Try again.'));
   assert.equal(requests, 1);
 });
 
 test('commerce error does not erase successful object understanding', async () => {
   const { panel, requests } = await run({ commerceStatus: 503, commercePayload: { error: 'Missing EBAY_ACCESS_TOKEN' } });
   assert.equal(panel.firstElementChild.textContent, 'VCL object understanding: success');
-  assert.ok(panel.children.some(child => child.textContent === 'Missing EBAY_ACCESS_TOKEN'));
+  assert.ok(panel.children.some(child => child.textContent === 'Scoop is temporarily busy. Try again in a moment.'));
   assert.equal(requests, 2);
 });
 
