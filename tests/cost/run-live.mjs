@@ -207,6 +207,13 @@ try {
 
       const latencyMs = Date.now() - started;
       const degraded = commerce?.state === 'TEMPORARILY_UNAVAILABLE';
+      const analysisSummary = {
+        category: analysis?.category ?? null,
+        subcategory: analysis?.subcategory ?? null,
+        brand: analysis?.brand_candidate ?? null,
+        model: analysis?.model_candidate ?? null,
+        color: analysis?.color ?? null,
+      };
       const run = {
         case_id: testCase.id,
         selected_item: testCase.selected_item,
@@ -215,6 +222,8 @@ try {
         localization_usage: localization?.provider_usage ?? null,
         localization_failure: localizationFailure,
         vision_usage: analysis?.provider_usage ?? null,
+        analysis: analysisSummary,
+        commerce_query: commerce?.query ?? null,
         verification_usage: commerce?.cost_usage?.verification_usage ?? null,
         verification: commerce?.verification ?? null,
         commerce_calls: commerce?.cost_usage?.commerce_calls ?? {},
@@ -228,6 +237,8 @@ try {
       runs.push(run);
       console.error(`  ${latencyMs}ms · ${commerce?.state ?? 'unknown'} · ${commerce?.products?.length ?? 0} products · providers=${run.providers_used.join(',') || 'none'}`);
       console.error(`  localization=${box.fallback ? `fallback:${localizationFailure ?? 'unknown'}` : 'ok'}`);
+      console.error(`  analysis=${JSON.stringify(analysisSummary)}`);
+      console.error(`  commerce_query=${JSON.stringify(commerce?.query ?? null)}`);
       if (run.verification) console.error(`  verification=${JSON.stringify(run.verification)}`);
     } catch (error) {
       const latencyMs = Date.now() - started;
