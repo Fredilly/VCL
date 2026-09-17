@@ -124,6 +124,23 @@ Track:
 
 Do not hard-code planning assumptions about quotas without re-checking current provider documentation.
 
+### D-017 — Apple on-device AI is a future execution target, not a dependency
+After desktop validation, evaluate Apple on-device segmentation, OCR, and local visual reasoning as an optional preprocessing layer.
+
+Reason:
+it may reduce cloud inference cost, upload volume, latency, and privacy exposure while improving object isolation.
+
+Guardrails:
+- do not interrupt Spike 4e/4f or the desktop MVP,
+- keep Apple-specific APIs behind Scoop-owned interfaces,
+- maintain a non-Apple path,
+- do not treat local-model confidence as exact product identity,
+- do not assume arbitrary screen/Siri context or protected-video access,
+- verify current Apple APIs and platform rules before implementation.
+
+Detailed future plan:
+`13_APPLE_ON_DEVICE_AI_FUTURE.md`.
+
 ## Commerce redundancy implementation queue
 
 Implement as six bounded PRs:
@@ -182,7 +199,7 @@ Each PR must pass:
 - Do not build "works on every video" marketing.
 - Do not bypass DRM.
 - Do not scrape Amazon.
-- Do not rely solely on Amazon, eBay, YouTube, Google, SerpAPI, or one AI vendor.
+- Do not rely solely on Amazon, eBay, YouTube, Google, SerpAPI, one AI vendor, or Apple.
 - Do not query every commerce provider on every request.
 - Do not burn fallback quota when primary results are already sufficient.
 - Do not treat search-engine rank as product identity evidence.
@@ -195,6 +212,8 @@ Each PR must pass:
 - Do not build creator dashboards before the consumer interaction works.
 - Do not build an ad marketplace before useful intent volume exists.
 - Do not build mobile before desktop interaction is validated.
+- Do not start Apple-specific implementation before the Apple future-track entry conditions are met.
+- Do not assume Apple system context is exposed to third-party apps.
 - Do not store raw video.
 - Do not continuously collect frames.
 - Do not add microservices.
@@ -215,7 +234,9 @@ Re-check provider/platform terms before:
 - adding protected-media support,
 - adding a new capture mechanism,
 - storing third-party product images/data,
-- using third-party data for training.
+- using third-party data for training,
+- adding an Apple native/Safari execution path,
+- relying on Apple Vision, local foundation-model, App Intents, Siri, or system-context capabilities.
 
 ## External constraints verified 2026-09-11
 
@@ -240,4 +261,7 @@ https://developers.etsy.com/
 Brave Search API:
 https://brave.com/search/api/
 
-These references and provider quotas can change. Treat the verification date as part of the decision record.
+Apple developer capabilities:
+https://developer.apple.com/
+
+These references and provider quotas/capabilities can change. Treat the verification date as part of the decision record.
