@@ -114,19 +114,41 @@ async function postJson(path, body) {
 }
 
 async function videoRect(page) {
-  const rect = await page.eval(`(() => { const r=document.querySelector('video')?.getBoundingClientRect(); return r && r.width>0 && r.height>0 ? {x:r.x,y:r.y,width:r.width,height:r.height} : null; })()`);
+  const rect = await page.eval(`(() => {
+    const r = document.querySelector('video')?.getBoundingClientRect();
+    return r && r.width > 0 && r.height > 0
+      ? {
+          x: r.x + window.scrollX,
+          y: r.y + window.scrollY,
+          width: r.width,
+          height: r.height
+        }
+      : null;
+  })()`);
   if (!rect) throw new Error('Video has no visible rectangle');
   return rect;
 }
 
 async function assertPlayableVideo(page) {
-  const unavailable = await page.eval(`(() => {
-    const text = (document.body?.innerText ?? '').toLowerCase();
-    const playerError = document.querySelector('.ytp-error, .ytp-error-content-wrap, #error-screen');
-    return Boolean(playerError) || text.includes('video unavailable');
+  const status = await page.eval(`(() => {
+    const v = document.querySelector('video');
+    const visibleError = [...document.querySelectorAll('.ytp-error, .ytp-error-content-wrap, #error-screen')]
+      .some(el => {
+        const r = el.getBoundingClientRect();
+        const s = getComputedStyle(el);
+        return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+      });
+    return {
+      hasVideo: Boolean(v),
+      visibleError,
+      mediaError: v?.error?.code ?? null,
+      currentSrc: v?.currentSrc ?? '',
+      readyState: v?.readyState ?? 0
+    };
   })()`);
-  if (unavailable) {
-    throw new Error('YouTube reports Video unavailable in the CDP browser profile. No model or commerce calls were made.');
+
+  if (!status.hasVideo || status.visibleError || status.mediaError || !status.currentSrc) {
+    throw new Error(`YouTube video is not playable in the CDP browser: ${JSON.stringify(status)}. No model or commerce calls were made.`);
   }
 }
 
@@ -173,8 +195,25 @@ try {
     console.error(`Spike 7: ${testCase.id} — ${testCase.selected_item}`);
     const started = Date.now();
     try {
-      await page.send('Page.navigate', { url: testCase.source });
-      await waitFor(async () => await page.eval(`document.readyState === 'complete' && !!document.querySelector('video')`), 30000, 'YouTube video did not become ready');
+      const currentUrl = await page.eval(`location.href`);
+      const currentVideoId = new URL(currentUrl).searchParams.get('v');
+      const targetVideoId = new URL(testCase.source).searchParams.get('v');
+      if (currentVideoId !== targetVideoId) {
+        await page.send('Page.navigate', { url: testCase.source });
+      }
+      await waitFor(async () => await page.eval(`(() => {
+        const v = document.querySelector('video');
+        const adShowing = document.querySelector('.html5-video-player')?.classList.contains('ad-showing');
+        return document.readyState === 'complete'
+          && !!v
+          && !adShowing
+          && !!v.currentSrc
+          && v.readyState >= 2
+          && v.videoWidth > 0
+          && v.videoHeight > 0
+          && Number.isFinite(v.duration)
+          && v.duration > ${Number(testCase.timestamp_s) + 1};
+      })()`), 60000, 'Actual YouTube video did not become ready or an ad is still playing');
       await assertPlayableVideo(page);
       await page.eval(`(() => { const v=document.querySelector('video'); v.pause(); v.currentTime=${Number(testCase.timestamp_s)}; return true; })()`);
       await waitFor(async () => await page.eval(`Math.abs((document.querySelector('video')?.currentTime ?? 0)-${Number(testCase.timestamp_s)}) < 1`), 12000, 'Could not seek video');
@@ -183,6 +222,17 @@ try {
 
       const rect = await videoRect(page);
       const frame = await screenshotDataUrl(page, rect);
+
+      if (process.env.VCL_COST_DEBUG_FRAME === '1') {
+        await writeFile(
+          'tests/cost/debug-frame.jpg',
+          Buffer.from(frame.split(',')[1], 'base64')
+        );
+        console.error(`  DEBUG frame rect=${JSON.stringify(rect)}`);
+        console.error('  Wrote tests/cost/debug-frame.jpg — no model calls made.');
+        break;
+      }
+
       const point = { x: Number(testCase.selection?.x ?? 0.5), y: Number(testCase.selection?.y ?? 0.5) };
 
       let localization = null;
