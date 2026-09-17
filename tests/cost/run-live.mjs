@@ -197,16 +197,20 @@ try {
         localization_usage: localization?.provider_usage ?? null,
         vision_usage: analysis?.provider_usage ?? null,
         verification_usage: commerce?.cost_usage?.verification_usage ?? null,
+        verification: commerce?.verification ?? null,
         commerce_calls: commerce?.cost_usage?.commerce_calls ?? {},
         latency_ms: latencyMs,
         provider_blocked: degraded,
         providers_used: commerce?.providers_used ?? [],
         serpapi: commerce?.serpapi ?? null,
         brave: commerce?.brave ?? null,
+        state: commerce?.state ?? 'unknown',
+        product_count: commerce?.products?.length ?? 0,
         notes: `state=${commerce?.state ?? 'unknown'}; products=${commerce?.products?.length ?? 0}${box.fallback ? '; localization=fallback' : ''}`,
       };
       runs.push(run);
       console.error(`  ${latencyMs}ms · ${commerce?.state ?? 'unknown'} · ${commerce?.products?.length ?? 0} products · providers=${run.providers_used.join(',') || 'none'}`);
+      if (run.verification) console.error(`  verification=${JSON.stringify(run.verification)}`);
     } catch (error) {
       const latencyMs = Date.now() - started;
       console.error(`  FAILED after ${latencyMs}ms · ${error.message}`);
@@ -218,6 +222,7 @@ try {
         localization_usage: null,
         vision_usage: null,
         verification_usage: null,
+        verification: null,
         commerce_calls: {},
         latency_ms: latencyMs,
         provider_blocked: error.status === 429 || error.status === 503,
