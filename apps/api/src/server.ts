@@ -16,6 +16,8 @@ import { resolveEtsyCredentials, type EtsyCredentials } from './etsy-credentials
 import { SerpApiCommerceProvider } from './serpapi-commerce.js';
 import { BraveCommerceProvider } from './brave-commerce.js';
 import { resolveBraveCredentials } from './brave-credentials.js';
+import { JevJudgmentProvider, type WorkersAiBinding } from './jev.js';
+import { applyJevSemanticGate } from './jev-semantic-gate.js';
 
 export interface Env {
   GEMINI_API_KEY?: string;
@@ -36,6 +38,8 @@ export interface Env {
   ETSY_KEYSTRING?: string;
   ETSY_SHARED_SECRET?: string;
   BRAVE_SEARCH_API_KEY?: string;
+  JEV_SEMANTIC_GATE?: string;
+  AI?: WorkersAiBinding;
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
@@ -131,6 +135,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
   const imageEvidence = new Map<string, ImageComparison>();
   const imageBudget = imageRequestBudget();
   const verification = { retrieved: 0, compared: 0, image_failures: 0, image_failure_reasons: {} as Record<string, number>, rejected: 0, contradictions: {} as Record<string, number> };
+  const jev = { enabled: env.JEV_SEMANTIC_GATE === 'true' && Boolean(env.AI), calls: 0, candidates_before: 0, candidates_after: 0, rejected: 0, failures: 0, latency_ms: 0, input_tokens: 0, output_tokens: 0 };
   const timing = {
     provider_retrieval_ms: 0,
     candidate_verification_ms: 0,
@@ -184,7 +189,8 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       timing,
       serpapi: serpapiTelemetry,
       brave: braveTelemetry,
-      cost_usage: { commerce_calls: { ...commerceCalls }, verification_usage: { ...verificationUsage } },
+      jev,
+      cost_usage: { commerce_calls: { ...commerceCalls }, verification_usage: { ...verificationUsage }, jev_usage: { model: JevJudgmentProvider.model, calls: jev.calls, input_tokens: jev.input_tokens, output_tokens: jev.output_tokens } },
     };
   };
 
@@ -194,8 +200,25 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     });
     verification.retrieved += fresh.length;
     const verificationStarted = Date.now();
-    if (sourceImage && env.GEMINI_API_KEY && fresh.length) {
-      const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
+    let candidatesForVerification = fresh;
+    if (jev.enabled && env.AI && fresh.length) {
+      const gate = await applyJevSemanticGate(new JevJudgmentProvider(env.AI), description, fresh);
+      candidatesForVerification = gate.candidates;
+      jev.calls += gate.telemetry.calls;
+      jev.candidates_before += gate.telemetry.candidates_before;
+      jev.candidates_after += gate.telemetry.candidates_after;
+      jev.rejected += gate.telemetry.rejected;
+      jev.failures += gate.telemetry.failed ? 1 : 0;
+      jev.latency_ms += gate.telemetry.latency_ms;
+      jev.input_tokens += gate.telemetry.input_tokens;
+      jev.output_tokens += gate.telemetry.output_tokens;
+      if (gate.telemetry.rejected) {
+        verification.rejected += gate.telemetry.rejected;
+        verification.contradictions.jev_semantic = (verification.contradictions.jev_semantic ?? 0) + gate.telemetry.rejected;
+      }
+    }
+    if (sourceImage && env.GEMINI_API_KEY && candidatesForVerification.length) {
+      const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, candidatesForVerification, context, imageBudget);
       verification.compared += images.compared;
       verification.image_failures += images.failures;
       verificationUsage.requests += images.usage?.requests ?? 0;
@@ -208,7 +231,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
       for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
     }
-    for (const product of fresh) {
+    for (const product of candidatesForVerification) {
       const decision = verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context);
       if (decision.product) accepted.push(decision.product);
       else {
