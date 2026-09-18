@@ -131,7 +131,21 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
   const imageEvidence = new Map<string, ImageComparison>();
   const imageBudget = imageRequestBudget();
   const verification = { retrieved: 0, compared: 0, image_failures: 0, image_failure_reasons: {} as Record<string, number>, rejected: 0, contradictions: {} as Record<string, number> };
-  const timing = { provider_retrieval_ms: 0, candidate_verification_ms: 0 };
+  const timing = {
+    provider_retrieval_ms: 0,
+    candidate_verification_ms: 0,
+    candidate_image_fetch_ms: 0,
+    candidate_model_verification_ms: 0,
+    verification_batches: [] as Array<{
+      batch_index: number;
+      candidates: number;
+      images_loaded: number;
+      comparisons: number;
+      image_fetch_ms: number;
+      model_ms: number;
+      total_ms: number;
+    }>,
+  };
   const commerceCalls: Record<string, number> = {};
   const verificationUsage = { provider: 'gemini', model: env.GEMINI_MODEL || 'gemini-3.5-flash-lite', requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   const noteCommerceCall = (name: string) => { commerceCalls[name] = (commerceCalls[name] ?? 0) + 1; };
@@ -188,6 +202,9 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       verificationUsage.prompt_tokens += images.usage?.prompt_tokens ?? 0;
       verificationUsage.completion_tokens += images.usage?.completion_tokens ?? 0;
       verificationUsage.total_tokens += images.usage?.total_tokens ?? 0;
+      timing.candidate_image_fetch_ms += images.timing?.image_fetch_ms ?? 0;
+      timing.candidate_model_verification_ms += images.timing?.model_ms ?? 0;
+      timing.verification_batches.push(...(images.timing?.batches ?? []));
       for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
       for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
     }

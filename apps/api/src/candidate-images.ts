@@ -18,7 +18,28 @@ export type GeminiVerificationUsage = {
   completion_tokens: number;
   total_tokens: number;
 };
-export type ImageVerification = { comparisons: Map<string, ImageComparison>; failures: number; compared: number; failure_reasons?: Record<string, number>; usage: GeminiVerificationUsage };
+export type VerificationBatchTiming = {
+  batch_index: number;
+  candidates: number;
+  images_loaded: number;
+  comparisons: number;
+  image_fetch_ms: number;
+  model_ms: number;
+  total_ms: number;
+};
+export type ImageVerification = {
+  comparisons: Map<string, ImageComparison>;
+  failures: number;
+  compared: number;
+  failure_reasons?: Record<string, number>;
+  usage: GeminiVerificationUsage;
+  timing: {
+    image_fetch_ms: number;
+    model_ms: number;
+    total_ms: number;
+    batches: VerificationBatchTiming[];
+  };
+};
 const MAX_BYTES = 2_000_000;
 const MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
@@ -168,20 +189,47 @@ export async function compareCandidateImages(
   let failures = 0;
   const failure_reasons: Record<string, number> = {};
   const usage: GeminiVerificationUsage = { provider: 'gemini', model, requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+  const timingStarted = Date.now();
+  const timing: ImageVerification['timing'] = { image_fetch_ms: 0, model_ms: 0, total_ms: 0, batches: [] };
   const failure = (reason: string, count = 1) => { failure_reasons[reason] = (failure_reasons[reason] ?? 0) + count; };
   // Six thumbnails + one source stay under the inline payload limit, even at MAX_BYTES.
   // One batch at a time also keeps thumbnail fetches within six concurrent connections.
   const batches = Array.from({ length: Math.ceil(products.length / 6) }, (_, i) => products.slice(i * 6, i * 6 + 6));
-  const run = async (batch: ProductCandidate[]) => {
+  const run = async (batch: ProductCandidate[], batchIndex: number) => {
+    const batchStarted = Date.now();
+    const batchTiming: VerificationBatchTiming = {
+      batch_index: batchIndex,
+      candidates: batch.length,
+      images_loaded: 0,
+      comparisons: 0,
+      image_fetch_ms: 0,
+      model_ms: 0,
+      total_ms: 0,
+    };
     // Reserve the model call before downloading images so they can actually be compared.
-    if (!reserve(budget)) { failures += batch.length; failure('image_budget', batch.length); return; }
+    if (!reserve(budget)) {
+      failures += batch.length;
+      failure('image_budget', batch.length);
+      batchTiming.total_ms = Date.now() - batchStarted;
+      timing.batches.push(batchTiming);
+      return;
+    }
+    const imageFetchStarted = Date.now();
     const loaded = await Promise.all(batch.map(async (product) => {
       if (!product.image_reference) failure('image_missing');
       return { product, image: product.image_reference ? await fetchImage(product.image_reference, failure, budget) : null };
     }));
+    batchTiming.image_fetch_ms = Date.now() - imageFetchStarted;
+    timing.image_fetch_ms += batchTiming.image_fetch_ms;
     const images = loaded.filter((item): item is { product: ProductCandidate; image: Image } => Boolean(item.image));
+    batchTiming.images_loaded = images.length;
     failures += batch.length - images.length;
-    if (!images.length) { budget.remaining++; return; }
+    if (!images.length) {
+      budget.remaining++;
+      batchTiming.total_ms = Date.now() - batchStarted;
+      timing.batches.push(batchTiming);
+      return;
+    }
     const parts: Array<{ text: string } | { inlineData: Image }> = [
       { text: 'SELECTED OBJECT CROP' }, { inlineData: source },
       { text: JSON.stringify({ source_description: description, surface_context: context ?? null }) },
@@ -189,6 +237,7 @@ export async function compareCandidateImages(
     images.forEach(({ product, image }, index) => parts.push(
       { text: JSON.stringify({ index, title: product.title.slice(0, 500), metadata: product.metadata ?? {} }) }, { inlineData: image },
     ));
+    const modelStarted = Date.now();
     try {
       usage.requests++;
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
@@ -214,8 +263,15 @@ export async function compareCandidateImages(
     } catch (error) {
       failure(error instanceof SyntaxError ? 'model_json' : error instanceof Error && error.name === 'TimeoutError' ? 'model_timeout' : 'model_fetch', images.length);
       failures += images.length;
+    } finally {
+      batchTiming.model_ms = Date.now() - modelStarted;
+      timing.model_ms += batchTiming.model_ms;
+      batchTiming.comparisons = images.filter(({ product }) => comparisons.has(candidateKey(product))).length;
+      batchTiming.total_ms = Date.now() - batchStarted;
+      timing.batches.push(batchTiming);
     }
   };
-  for (const batch of batches) await run(batch);
-  return { comparisons, failures, compared: comparisons.size, failure_reasons, usage };
+  for (let index = 0; index < batches.length; index++) await run(batches[index], index);
+  timing.total_ms = Date.now() - timingStarted;
+  return { comparisons, failures, compared: comparisons.size, failure_reasons, usage, timing };
 }
