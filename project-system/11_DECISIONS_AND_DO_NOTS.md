@@ -265,3 +265,34 @@ Apple developer capabilities:
 https://developer.apple.com/
 
 These references and provider quotas/capabilities can change. Treat the verification date as part of the decision record.
+
+
+## Decision: rejected Brave retrieval overlap experiment
+
+Status: Rejected experiment
+
+Context:
+Brave retrieval overlap was tested as a latency optimization after PR #52.
+
+Results:
+- p50 latency improved: 49.3s → 46.8s
+- p95 latency improved: 70.7s → 62.3s
+
+Decision:
+Do not merge this optimization.
+
+Reason:
+The latency improvement came with unacceptable tradeoffs:
+- useful rate decreased: 70% → 60%
+- cost per useful result increased: +28%
+- commerce cost increased significantly
+
+Principle:
+Latency optimizations must preserve:
+- useful results
+- truthful no-result behavior
+- false EXACT = 0
+- unsupported LIKELY = 0
+
+Future consideration:
+Provider overlap may be revisited only with stronger eligibility gates that avoid unnecessary commerce retrieval.

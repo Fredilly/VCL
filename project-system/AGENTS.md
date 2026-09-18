@@ -70,3 +70,26 @@ A user on a supported non-protected video can:
 7. complete the flow without the extension misleading them.
 
 The MVP is not complete merely because a vision model can describe an object.
+
+## Golden regression gate
+
+The permanent regression suite lives under `tests/golden/`.
+
+Before merging changes that affect capture, selection, localization, vision, prompts, product retrieval, verification, ranking, or commerce behavior:
+
+1. Read `tests/golden/README.md`.
+2. Run the frozen Golden cases using their recorded URL, frame, target, and click point.
+3. Record a new immutable run under `tests/golden/runs/`.
+4. Compare pass rate, failure class, confidence, and latency against prior baselines.
+5. Do not change a Golden case to make a regression pass.
+6. Track `PROVIDER_BLOCKED` separately from product or system regression.
+
+Golden tests are smoke/regression evidence, not the full benchmark. Do not expand scope or build later-phase features to compensate for a failed Golden gate.
+
+
+## Spike discipline update
+
+Latency optimization follows an evidence-first process:
+- Benchmark before changing architecture.
+- Preserve trust metrics while optimizing speed.
+- Record rejected experiments as learning artifacts.

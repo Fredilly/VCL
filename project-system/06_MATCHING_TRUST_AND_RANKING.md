@@ -237,3 +237,8 @@ Allow user feedback:
 Corrections become valuable proprietary supervision data.
 
 Do not train on user feedback without a documented privacy/consent policy.
+
+
+## Commerce eligibility gate principle
+
+Before product retrieval, Scoop should consider whether an identified object is likely to represent a purchasable item. Preserve truthful no-result behavior.

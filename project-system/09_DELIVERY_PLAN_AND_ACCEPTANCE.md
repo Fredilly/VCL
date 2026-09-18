@@ -138,3 +138,8 @@ Never build Phase N+1 to compensate for a failed Phase N.
 Example:
 Do not create creator dashboards because product resolution is weak.
 Fix product resolution first.
+
+
+## Spike 7B — Commerce Eligibility Gate Before Retrieval
+
+Goal: Reduce wasted commerce retrieval and verification caused by poor object understanding.

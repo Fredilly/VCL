@@ -118,3 +118,13 @@ Track concentration from day one.
 If a single provider becomes >50% of a critical dependency, create a mitigation plan before scaling further.
 
 This is a management guardrail, not a claim that 50% is universally optimal.
+
+
+## Additional optimization metrics
+
+Latency experiments should track:
+- useful rate
+- cost per useful result
+- commerce calls per event
+- verification calls per event
+- provider calls per event
