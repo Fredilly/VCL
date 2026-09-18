@@ -22,7 +22,7 @@ Missing identity caps an otherwise eligible candidate at SIMILAR. The existing v
 
 Corpus SHA-256: `10b66d88d3d3f5c3392ce2e34308ce27c10eecd4fe86d0c251de9a0a1eea2d4d`.
 
-`corpus.mjs`, candidate truth labels, `metrics.mjs`, and `run.mjs` are unchanged from `891e05d`. The original [FAIL recording](../tests/benchmark/spike-4f/results/recording.json) remains intact. New [recording](../tests/benchmark/spike-4f/results/classification-fix/recording.json), [JSON report](../tests/benchmark/spike-4f/results/classification-fix/report.json), and [human report](../tests/benchmark/spike-4f/results/classification-fix/report.md) use the same runner.
+`corpus.mjs`, candidate truth labels, `metrics.mjs`, and `run.mjs` are unchanged from `891e05d`. The original [FAIL recording](../../tests/benchmark/spike-4f/results/recording.json) remains intact. New [recording](../../tests/benchmark/spike-4f/results/classification-fix/recording.json), [JSON report](../../tests/benchmark/spike-4f/results/classification-fix/report.json), and [human report](../../tests/benchmark/spike-4f/results/classification-fix/report.md) use the same runner.
 
 | Metric | Before | After |
 | --- | --- | --- |
@@ -51,6 +51,6 @@ Deployed backend commit `f70601f` to `vcl-api` / `api.vcl.article6.org`, Worker 
 - Repeated singular `bag` metadata request: eBay + Etsy invoked; eight SIMILAR results, no LIKELY/EXACT; 3,407 ms resolver latency. All survivors expose the new readable-identity requirement.
 - Existing `adidas-hoodie` catalog-image probe: 72 retrieved, 36 compared, 47 rejected; eight SIMILAR survivors (seven multimodal, one metadata-only), retaining eBay/Etsy provenance. No LIKELY/EXACT, and all survivors expose the new identity requirement. Resolver latency 53,578 ms; total probe 58,423 ms. Comparison coverage was limited by 24 missing images and 12 image-budget omissions; these existing limits were not changed or hidden.
 
-The probe supplies brand/type but no readable source model text, so a familiar logo/title/geometry cannot promote its alternatives. The positive readable-model HTTP regression and all ten preserved true LIKELY benchmark controls establish retention separately. Live probes are operational verification, not a newly scored accuracy corpus. The [derived deployment receipt](../tests/benchmark/spike-4f/results/classification-fix/deployment-validation.json) stores counts/provenance only, without product listings or image data.
+The probe supplies brand/type but no readable source model text, so a familiar logo/title/geometry cannot promote its alternatives. The positive readable-model HTTP regression and all ten preserved true LIKELY benchmark controls establish retention separately. Live probes are operational verification, not a newly scored accuracy corpus. The [derived deployment receipt](../../tests/benchmark/spike-4f/results/classification-fix/deployment-validation.json) stores counts/provenance only, without product listings or image data.
 
 **Merge recommendation:** the unchanged static Spike 4f gate now passes and is ready for review. Keep PR #27 unmerged until reviewed; no automatic merge. Independent real-video calibration and the existing live latency/image-coverage limitations remain outside this bounded passing result.

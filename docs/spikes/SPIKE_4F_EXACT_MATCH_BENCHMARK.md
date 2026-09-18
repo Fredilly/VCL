@@ -1,10 +1,10 @@
 # Spike 4f exact-match benchmark
 
-**Current decision: PASS for the unchanged static benchmark after the general identity gate fix.** False LIKELY fell from four to zero; all ten true LIKELY results remain. Useful results stay 24/30 and no-results 6/30. EXACT precision remains N/A with zero claims. See the [classification fix and new verification](SPIKE_4F_CLASSIFICATION_FIX.md) and [new measured report](../tests/benchmark/spike-4f/results/classification-fix/report.md).
+**Current decision: PASS for the unchanged static benchmark after the general identity gate fix.** False LIKELY fell from four to zero; all ten true LIKELY results remain. Useful results stay 24/30 and no-results 6/30. EXACT precision remains N/A with zero claims. See the [classification fix and new verification](SPIKE_4F_CLASSIFICATION_FIX.md) and [new measured report](../../tests/benchmark/spike-4f/results/classification-fix/report.md).
 
 The sections below preserve the **initial FAIL and category-routing investigation**, before the subsequent classification fix. Original recordings remain unchanged.
 
-The [benchmark README](../tests/benchmark/spike-4f/README.md) defines the protocol and commands. [Machine-readable results](../tests/benchmark/spike-4f/results/report.json), the [per-selection report](../tests/benchmark/spike-4f/results/report.md), and the [pre-fix baseline](../tests/benchmark/spike-4f/results/baseline/report.json) are committed.
+The [benchmark README](../../tests/benchmark/spike-4f/README.md) defines the protocol and commands. [Machine-readable results](../../tests/benchmark/spike-4f/results/report.json), the [per-selection report](../../tests/benchmark/spike-4f/results/report.md), and the [pre-fix baseline](../../tests/benchmark/spike-4f/results/baseline/report.json) are committed.
 
 ## Measured static results
 
@@ -32,7 +32,7 @@ Five intentionally wrong-color controls correctly return no result. The sixth no
 
 ## Video evidence, separately
 
-The [five-case validation subset](../tests/benchmark/spike-4f/video-validation.json) reuses Spike 4e acceptance artifacts: one real YouTube watch case and four local synthetic cases. It proves prior capture/evidence behavior only. No new live-video accuracy or P50/P95 measurement is claimed, and these cases are excluded from static metrics. No video corpus or third-party imagery was archived.
+The [five-case validation subset](../../tests/benchmark/spike-4f/video-validation.json) reuses Spike 4e acceptance artifacts: one real YouTube watch case and four local synthetic cases. It proves prior capture/evidence behavior only. No new live-video accuracy or P50/P95 measurement is claimed, and these cases are excluded from static metrics. No video corpus or third-party imagery was archived.
 
 ## Verification and deployment
 
@@ -40,6 +40,6 @@ The [five-case validation subset](../tests/benchmark/spike-4f/video-validation.j
 
 Deployed code: `d476e84`; Worker `vcl-api` at `api.vcl.article6.org`; version **`19cb1c02-b062-4ce7-8aa7-15961c96a674`**. Deployment preserved the inspected binding names, `EBAY_ENVIRONMENT=production`, and the Gemini provider/model settings. Existing WXT missing-version and macOS/Wrangler warnings did not fail validation.
 
-One fresh metadata-only `bag` request verified the deployed routing fix: eBay and Etsy were invoked, eight eBay-provenance SIMILAR results returned, and Brave/SerpAPI were skipped as upstream sufficient. Resolver latency was 3,955 ms. This smoke request used no image and is neither a video case nor part of the static metrics; it proves provider invocation, not Etsy survivor quality or primary-provider reliability. See the [deployment receipt](../tests/benchmark/spike-4f/deployment-validation.json).
+One fresh metadata-only `bag` request verified the deployed routing fix: eBay and Etsy were invoked, eight eBay-provenance SIMILAR results returned, and Brave/SerpAPI were skipped as upstream sufficient. Resolver latency was 3,955 ms. This smoke request used no image and is neither a video case nor part of the static metrics; it proves provider invocation, not Etsy survivor quality or primary-provider reliability. See the [deployment receipt](../../tests/benchmark/spike-4f/deployment-validation.json).
 
 The Spike 4f PR remains unmerged. Further product work should address independent identity evidence/calibration before claiming exact-match capability.

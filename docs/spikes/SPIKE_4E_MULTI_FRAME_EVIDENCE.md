@@ -35,7 +35,7 @@ The final provenance reports `frames_used: 3`, `changed_fields: ["visible_text"]
 
 Observed seek/presentation sequence: **454.5 → 455.5 → 455.0 seconds**. Every seeking/seeked event reported `paused: true`; no play event occurred. Each target timestamp received a presentation callback. Final timestamp 455.0 and paused state exactly match the starting state.
 
-The derived [manual evidence receipt](../tests/manual/spike-4e-youtube-evidence.json) contains before/after provenance and playback events. It contains no images, media URLs, cookies or credentials. An initial localization failure was retried using the same click; targeting code was not changed. Dedicated browser processes were closed after the successful verification.
+The derived [manual evidence receipt](../../tests/manual/spike-4e-youtube-evidence.json) contains before/after provenance and playback events. It contains no images, media URLs, cookies or credentials. An initial localization failure was retried using the same click; targeting code was not changed. Dedicated browser processes were closed after the successful verification.
 
 ## Final validation and Worker
 
