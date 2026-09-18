@@ -160,8 +160,9 @@ test('deterministic budget: budget only sufficient for first batch leaves second
 
 test('deterministic budget: budget partially sufficient for second batch verifies some candidates', async () => {
   const { candidate, description, comparison } = example(apparelCases[0]);
-  let modelCalls = 0;
+  let modelCalls = 0, totalRequests = 0;
   const { compareCandidateImages, imageRequestBudget } = loadModule(filename, { fetch: async (url, options) => {
+    totalRequests++;
     if (String(url).includes('generativelanguage')) {
       modelCalls++;
       const count = JSON.parse(options.body).contents[0].parts.filter((p) => p.inlineData).length - 1;
@@ -176,30 +177,55 @@ test('deterministic budget: budget partially sufficient for second batch verifie
   const products = Array.from({ length: 12 }, (_, i) => ({ ...candidate, id: String(i) }));
   const result = await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
   assert.equal(modelCalls, 2);
-  assert.ok(result.compared >= 6);
-  assert.ok(budget.remaining >= 0);
+  assert.equal(result.compared, 9);
+  assert.ok(totalRequests <= 11, `spent ${totalRequests} requests from an 11-slot budget`);
+  assert.equal(budget.remaining, 0);
 });
 
-test('deterministic budget: redirect consumption near budget exhaustion does not go negative', async () => {
+test('deterministic budget: redirect headroom is preserved without exceeding the shared budget', async () => {
   const { candidate, description, comparison } = example(apparelCases[0]);
-  let fetchCalls = 0;
+  let imageFetches = 0, modelCalls = 0;
   const { compareCandidateImages, imageRequestBudget } = loadModule(filename, { fetch: async (url) => {
-    fetchCalls++;
     if (String(url).includes('generativelanguage')) {
-      const count = 1;
+      modelCalls++;
       return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: comparison.source,
         candidates: [{ index: 0, attributes: comparison.candidate, ...comparison }] }) }] } }] });
     }
-    // Redirect to another URL (consumes extra budget)
-    if (fetchCalls <= 3) return new Response(null, { status: 302, headers: { location: 'https://cdn.shopify.com/redirect.png' } });
+    imageFetches++;
+    if (imageFetches < 3) {
+      return new Response(null, { status: 302, headers: { location: `https://cdn.shopify.com/redirect-${imageFetches}.png` } });
+    }
     return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
   } });
   const budget = imageRequestBudget();
-  budget.remaining = 4; // tight: 1 model + 1 image + 1 redirect = 3 minimum
+  budget.remaining = 4; // 1 model + initial fetch + 2 redirects
   const products = [{ ...candidate, id: '0' }];
   const result = await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
-  assert.ok(budget.remaining >= 0);
-  assert.ok(result.failures >= 0);
+  assert.equal(result.compared, 1);
+  assert.equal(modelCalls, 1);
+  assert.equal(imageFetches, 3);
+  assert.equal(budget.remaining, 0);
+});
+
+test('deterministic budget: partial allocation never creates more request capacity than reserved', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  let totalRequests = 0;
+  const { compareCandidateImages, imageRequestBudget } = loadModule(filename, { fetch: async (url, options) => {
+    totalRequests++;
+    if (String(url).includes('generativelanguage')) {
+      const count = JSON.parse(options.body).contents[0].parts.filter((p) => p.inlineData).length - 1;
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: comparison.source,
+        candidates: Array.from({ length: count }, (_, index) => ({ index, attributes: comparison.candidate, ...comparison })) }) }] } }] });
+    }
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+  } });
+  const initialBudget = 11;
+  const budget = imageRequestBudget();
+  budget.remaining = initialBudget;
+  const products = Array.from({ length: 12 }, (_, i) => ({ ...candidate, id: String(i) }));
+  await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
+  assert.ok(totalRequests <= initialBudget);
+  assert.equal(totalRequests + budget.remaining, initialBudget);
 });
 
 test('deterministic budget: repeated runs produce identical candidate verification order', async () => {
