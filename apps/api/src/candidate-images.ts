@@ -199,12 +199,31 @@ export async function compareCandidateImages(
   // returns unused budget it goes back to the shared pool for later batches, but
   // the reservation order is fixed so concurrent scheduling cannot change which
   // candidates get multimodal verification.
-  const batchBudgets: ImageRequestBudget[] = [];
-  for (const batch of batches) {
-    const imageCount = batch.filter((p) => p.image_reference).length;
-    if (!reserve(budget)) { batchBudgets.push({ remaining: 0 }); continue; }
-    for (let i = 0; i < imageCount; i++) reserve(budget);
-    batchBudgets.push({ remaining: 1 + imageCount });
+  const batchBudgets: ImageRequestBudget[] = batches.map(() => ({ remaining: 0 }));
+  const imageCounts = batches.map((batch) => batch.filter((p) => p.image_reference).length);
+
+  // First reserve the minimum useful work in deterministic batch order:
+  // one model slot plus one initial fetch slot per candidate image. Count only
+  // successful reservations so local batch budgets can never mint capacity.
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+    if (!reserve(budget)) continue;
+    batchBudgets[batchIndex].remaining++;
+    for (let i = 0; i < imageCounts[batchIndex]; i++) {
+      if (!reserve(budget)) break;
+      batchBudgets[batchIndex].remaining++;
+    }
+  }
+
+  // Then reserve redirect headroom from what remains. fetchImage follows at
+  // most two redirects, so each image can need two additional fetch slots.
+  // Allocating this only after every batch gets its base share preserves
+  // deterministic candidate priority without starving later batches.
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+    if (batchBudgets[batchIndex].remaining <= 0) continue;
+    for (let i = 0; i < imageCounts[batchIndex] * 2; i++) {
+      if (!reserve(budget)) break;
+      batchBudgets[batchIndex].remaining++;
+    }
   }
   const run = async (batch: ProductCandidate[], batchIndex: number, batchBudget: ImageRequestBudget) => {
     const batchStarted = Date.now();
