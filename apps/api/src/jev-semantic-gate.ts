@@ -1,6 +1,6 @@
 import type { ProductCandidate } from './commerce.js';
 import type { ObjectDescription } from './types.js';
-import type { JevJudgmentProvider } from './jev.js';
+import { JevJudgmentProvider } from './jev.js';
 
 const REJECT_THRESHOLD = 0.98;
 const HIGH_CONFIDENCE = 0.85;
