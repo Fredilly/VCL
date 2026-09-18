@@ -14,6 +14,9 @@
     "VISION_PROVIDER": "gemini",
     "GEMINI_MODEL": "gemini-3.5-flash-lite"
   },
+  "ai": {
+    "binding": "AI"
+  },
   "routes": [
     {
       "pattern": "api.vcl.article6.org",
