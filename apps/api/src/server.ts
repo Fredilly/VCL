@@ -16,6 +16,7 @@ import { resolveEtsyCredentials, type EtsyCredentials } from './etsy-credentials
 import { SerpApiCommerceProvider } from './serpapi-commerce.js';
 import { BraveCommerceProvider } from './brave-commerce.js';
 import { resolveBraveCredentials } from './brave-credentials.js';
+import { evaluateCommerceGate } from './commerce-gate.js';
 
 export interface Env {
   GEMINI_API_KEY?: string;
@@ -36,6 +37,7 @@ export interface Env {
   ETSY_KEYSTRING?: string;
   ETSY_SHARED_SECRET?: string;
   BRAVE_SEARCH_API_KEY?: string;
+  COMMERCE_ELIGIBILITY_GATE?: string;
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
@@ -121,6 +123,9 @@ const LIKELY_CANDIDATE_THRESHOLD = 3;
 const SUFFICIENT_CANDIDATE_THRESHOLD = 3;
 
 export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages) {
+  const gateEnabled = env.COMMERCE_ELIGIBILITY_GATE === '1' || env.COMMERCE_ELIGIBILITY_GATE === 'true';
+  const gateResult = evaluateCommerceGate(description);
+
   let attempts = 0;
   let sawProviderFailure = false;
   let completedProviderAttempt = false;
@@ -185,6 +190,9 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       serpapi: serpapiTelemetry,
       brave: braveTelemetry,
       cost_usage: { commerce_calls: { ...commerceCalls }, verification_usage: { ...verificationUsage } },
+      commerce_gate_decision: gateResult.decision,
+      commerce_gate_reason: gateResult.reason,
+      commerce_gate_enabled: gateEnabled,
     };
   };
 

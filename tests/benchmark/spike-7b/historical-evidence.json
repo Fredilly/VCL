@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "purpose": "Historical evidence for Spike 7B commerce eligibility analysis. Not a current Golden corpus.",
+  "source": "tests/cost/run.json",
+  "cases": [
+    {
+      "id": "s5-01",
+      "category": "Apparel",
+      "subcategory": "Jacket",
+      "brand": "Patagonia",
+      "model": null,
+      "historical_result": "RESULTS",
+      "commerce_calls": 10,
+      "verification_calls": 5,
+      "latency_ms": 98729,
+      "expected_gate": "ALLOW"
+    },
+    {
+      "id": "s5-02",
+      "category": "Apparel",
+      "subcategory": "Jacket",
+      "brand": null,
+      "model": null,
+      "historical_result": "RESULTS",
+      "commerce_calls": 5,
+      "verification_calls": 2,
+      "latency_ms": 31923,
+      "expected_gate": "RESTRICT"
+    },
+    {
+      "id": "s5-03",
+      "category": "Accessories",
+      "subcategory": "Wristwatch",
+      "brand": "Seiko",
+      "model": "SKX007",
+      "historical_result": "RESULTS",
+      "commerce_calls": 6,
+      "verification_calls": 5,
+      "latency_ms": 76904,
+      "expected_gate": "ALLOW"
+    },
+    {
+      "id": "s5-04",
+      "category": "Accessories",
+      "subcategory": "Wristwatch",
+      "brand": "Seiko",
+      "model": "SKX007",
+      "historical_result": "RESULTS",
+      "commerce_calls": 6,
+      "verification_calls": 5,
+      "latency_ms": 53248,
+      "expected_gate": "ALLOW"
+    },
+    {
+      "id": "s5-05",
+      "category": "Apparel",
+      "subcategory": "Hoodie",
+      "brand": null,
+      "model": null,
+      "historical_result": "RESULTS",
+      "commerce_calls": 7,
+      "verification_calls": 4,
+      "latency_ms": 89649,
+      "expected_gate": "RESTRICT",
+      "note": "Historical object understanding did not match selected bag."
+    },
+    {
+      "id": "s5-06",
+      "category": "Accessories",
+      "subcategory": "Pendant",
+      "brand": null,
+      "model": null,
+      "historical_result": "NO_RESULTS",
+      "commerce_calls": 10,
+      "verification_calls": 5,
+      "latency_ms": 60936,
+      "expected_gate": "RESTRICT",
+      "note": "Likely localization/object-understanding failure; do not hard reject solely from this example."
+    },
+    {
+      "id": "s5-07",
+      "category": "Shoes",
+      "subcategory": "Sneakers",
+      "brand": "Adidas",
+      "model": "Samba",
+      "historical_result": "RESULTS",
+      "commerce_calls": 6,
+      "verification_calls": 6,
+      "latency_ms": 116882,
+      "expected_gate": "ALLOW"
+    },
+    {
+      "id": "s5-08-historical",
+      "category": "Graphic art",
+      "subcategory": "Illustration",
+      "brand": null,
+      "model": null,
+      "historical_result": "NO_RESULTS",
+      "commerce_calls": 5,
+      "verification_calls": 2,
+      "latency_ms": 37309,
+      "expected_gate": "REJECT",
+      "excluded_from_current_golden": true,
+      "attributes": [
+        "paper",
+        "illustrated",
+        "cartoon style",
+        "rocket",
+        "shipping box"
+      ]
+    },
+    {
+      "id": "s5-09-historical",
+      "category": "Home Decor",
+      "subcategory": "Storage Box",
+      "brand": null,
+      "model": null,
+      "historical_result": "NO_RESULTS",
+      "commerce_calls": 5,
+      "verification_calls": 2,
+      "latency_ms": 61538,
+      "expected_gate": "REJECT",
+      "excluded_from_current_golden": true,
+      "note": "Click landed on packaging/workstation.",
+      "attributes": [
+        "cardboard",
+        "carrying handle",
+        "graphic",
+        "number print",
+        "lamp illustration"
+      ]
+    }
+  ]
+}
