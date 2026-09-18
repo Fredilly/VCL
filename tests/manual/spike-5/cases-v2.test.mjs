@@ -41,6 +41,13 @@ test('s5-10 has valid=false in v2', async () => {
   assert.ok(s510.correction_note.includes('60s frame did not contain'));
 });
 
+test('s5-09 has valid=false in v2', async () => {
+  const v2 = await read('./cases-v2.json');
+  const s509 = v2.cases.find((c) => c.id === 's5-09');
+  assert.equal(s509.valid, false);
+  assert.ok(s509.correction_note.includes('packaging/workstation'));
+});
+
 test('s5-05 corrected coordinates preserved in v2', async () => {
   const v2 = await read('./cases-v2.json');
   const s505 = v2.cases.find((c) => c.id === 's5-05');
@@ -52,9 +59,10 @@ test('invalid cases are excluded from Golden pass/fail denominator', async () =>
   const v2 = await read('./cases-v2.json');
   const validCases = v2.cases.filter((c) => c.valid !== false);
   const invalidCases = v2.cases.filter((c) => c.valid === false);
-  assert.equal(validCases.length, 9);
-  assert.equal(invalidCases.length, 1);
-  assert.equal(invalidCases[0].id, 's5-10');
+  assert.equal(validCases.length, 8);
+  assert.equal(invalidCases.length, 2);
+  const invalidIds = invalidCases.map((c) => c.id).sort();
+  assert.deepEqual(invalidIds, ['s5-09', 's5-10']);
 });
 
 test('no false EXACT / unsupported LIKELY remains a hard failure rule', async () => {
@@ -71,8 +79,9 @@ test('no false EXACT / unsupported LIKELY remains a hard failure rule', async ()
 test('useful SIMILAR or truthful NO_RESULT remains acceptable', async () => {
   const v2 = await read('./cases-v2.json');
   const validCases = v2.cases.filter((c) => c.valid !== false);
-  assert.equal(validCases.length, 9, '9 valid cases for Golden gate');
+  assert.equal(validCases.length, 8, '8 valid cases for Golden gate');
   const ids = validCases.map((c) => c.id);
   assert.ok(ids.includes('s5-08'), 's5-08 (corrected to 90s) is valid');
+  assert.ok(!ids.includes('s5-09'), 's5-09 is excluded as invalid');
   assert.ok(!ids.includes('s5-10'), 's5-10 is excluded as invalid');
 });

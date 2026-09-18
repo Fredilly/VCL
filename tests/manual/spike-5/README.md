@@ -12,7 +12,13 @@
 
 - **s5-05**: Keeps corrected coordinates from cases-corrected.json (0.3, 0.4).
 - **s5-08**: Timestamp corrected from 80s to 90s. The original 80s frame showed a sponsor segment, not the Adidas Samba target. 90s was manually verified on 2026-09-18.
+- **s5-09**: Marked `valid: false`. The original 30s click lands on product packaging/workstation, not the Anglepoise lamp. Manual verification on 2026-09-18.
 - **s5-10**: Marked `valid: false`. The original 60s frame does not contain a usable desk-lamp component. Pending a separately verified replacement timestamp.
+
+### Valid/invalid summary
+
+- **8 valid cases**: s5-01, s5-02, s5-03, s5-04, s5-05, s5-06, s5-07, s5-08
+- **2 invalid fixtures**: s5-09, s5-10 — excluded from Golden denominator
 
 ### Rules for corpus changes
 
@@ -23,10 +29,10 @@
 
 ## Running the Golden gate
 
-Run only **valid v2 cases**. Invalid cases (e.g., s5-10) must be reported as `INVALID_FIXTURE`, not PASS or FAIL.
+Run only **valid v2 cases** (8 cases). Invalid cases (s5-09, s5-10) must be reported as `INVALID_FIXTURE`, not PASS or FAIL.
 
 ```
-Golden gate = valid cases attempted / valid cases total
+Golden gate = valid cases attempted / 8 valid cases total
 ```
 
 A case passes if it produces a commercially useful result or a truthful low-confidence/no-result state. A case fails only on false `EXACT`, unsupported `LIKELY`, or a regression attributable to the code change under test.
