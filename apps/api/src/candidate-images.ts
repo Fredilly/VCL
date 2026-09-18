@@ -193,9 +193,20 @@ export async function compareCandidateImages(
   const timing: ImageVerification['timing'] = { image_fetch_ms: 0, model_ms: 0, total_ms: 0, batches: [] };
   const failure = (reason: string, count = 1) => { failure_reasons[reason] = (failure_reasons[reason] ?? 0) + count; };
   // Six thumbnails + one source stay under the inline payload limit, even at MAX_BYTES.
-  // One batch at a time also keeps thumbnail fetches within six concurrent connections.
   const batches = Array.from({ length: Math.ceil(products.length / 6) }, (_, i) => products.slice(i * 6, i * 6 + 6));
-  const run = async (batch: ProductCandidate[], batchIndex: number) => {
+  // Pre-allocate budget in deterministic batch order before any concurrent work.
+  // Earlier batches always receive verification slots first; if a batch fails and
+  // returns unused budget it goes back to the shared pool for later batches, but
+  // the reservation order is fixed so concurrent scheduling cannot change which
+  // candidates get multimodal verification.
+  const batchBudgets: ImageRequestBudget[] = [];
+  for (const batch of batches) {
+    const imageCount = batch.filter((p) => p.image_reference).length;
+    if (!reserve(budget)) { batchBudgets.push({ remaining: 0 }); continue; }
+    for (let i = 0; i < imageCount; i++) reserve(budget);
+    batchBudgets.push({ remaining: 1 + imageCount });
+  }
+  const run = async (batch: ProductCandidate[], batchIndex: number, batchBudget: ImageRequestBudget) => {
     const batchStarted = Date.now();
     const batchTiming: VerificationBatchTiming = {
       batch_index: batchIndex,
@@ -206,72 +217,80 @@ export async function compareCandidateImages(
       model_ms: 0,
       total_ms: 0,
     };
-    // Reserve the model call before downloading images so they can actually be compared.
-    if (!reserve(budget)) {
+    // Budget for this batch was pre-reserved in deterministic order above.
+    if (batchBudget.remaining <= 0) {
       failures += batch.length;
       failure('image_budget', batch.length);
+      budget.remaining += batchBudget.remaining; // return unused budget to shared pool
+      batchBudget.remaining = 0;
       batchTiming.total_ms = Date.now() - batchStarted;
       timing.batches.push(batchTiming);
       return;
     }
-    const imageFetchStarted = Date.now();
-    const loaded = await Promise.all(batch.map(async (product) => {
-      if (!product.image_reference) failure('image_missing');
-      return { product, image: product.image_reference ? await fetchImage(product.image_reference, failure, budget) : null };
-    }));
-    batchTiming.image_fetch_ms = Date.now() - imageFetchStarted;
-    timing.image_fetch_ms += batchTiming.image_fetch_ms;
-    const images = loaded.filter((item): item is { product: ProductCandidate; image: Image } => Boolean(item.image));
-    batchTiming.images_loaded = images.length;
-    failures += batch.length - images.length;
-    if (!images.length) {
-      budget.remaining++;
-      batchTiming.total_ms = Date.now() - batchStarted;
-      timing.batches.push(batchTiming);
-      return;
-    }
-    const parts: Array<{ text: string } | { inlineData: Image }> = [
-      { text: 'SELECTED OBJECT CROP' }, { inlineData: source },
-      { text: JSON.stringify({ source_description: description, surface_context: context ?? null }) },
-    ];
-    images.forEach(({ product, image }, index) => parts.push(
-      { text: JSON.stringify({ index, title: product.title.slice(0, 500), metadata: product.metadata ?? {} }) }, { inlineData: image },
-    ));
-    const modelStarted = Date.now();
     try {
-      usage.requests++;
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-        // A verifier result is useful only while the interaction is still live.
-        // Keep this bounded below the former 25s serial-batch stall; failure
-        // remains an unknown comparison and never promotes a candidate.
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(12000),
-        body: JSON.stringify({ systemInstruction: { parts: [{ text: INSTRUCTIONS }] }, contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', responseSchema, temperature: 0, maxOutputTokens: 12000 } }),
-      });
-      if (!response.ok) { failure(`model_http_${response.status}`, images.length); await response.body?.cancel(); failures += images.length; return; }
-      const payload = await response.json() as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-        usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
-      };
-      usage.prompt_tokens += usageNumber(payload.usageMetadata?.promptTokenCount);
-      usage.completion_tokens += usageNumber(payload.usageMetadata?.candidatesTokenCount);
-      usage.total_tokens += usageNumber(payload.usageMetadata?.totalTokenCount);
-      const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('');
-      const parsed = parseComparisons(text ? JSON.parse(text) : null, images.length);
-      failures += images.length - parsed.size;
-      if (parsed.size < images.length) failure(text ? 'model_schema' : 'model_empty', images.length - parsed.size);
-      for (const [index, comparison] of parsed) comparisons.set(candidateKey(images[index].product), comparison);
-    } catch (error) {
-      failure(error instanceof SyntaxError ? 'model_json' : error instanceof Error && error.name === 'TimeoutError' ? 'model_timeout' : 'model_fetch', images.length);
-      failures += images.length;
+      batchBudget.remaining--; // model call
+      const imageFetchStarted = Date.now();
+      const loaded = await Promise.all(batch.map(async (product) => {
+        if (!product.image_reference) failure('image_missing');
+        return { product, image: product.image_reference ? await fetchImage(product.image_reference, failure, batchBudget) : null };
+      }));
+      batchTiming.image_fetch_ms = Date.now() - imageFetchStarted;
+      timing.image_fetch_ms += batchTiming.image_fetch_ms;
+      const images = loaded.filter((item): item is { product: ProductCandidate; image: Image } => Boolean(item.image));
+      batchTiming.images_loaded = images.length;
+      failures += batch.length - images.length;
+      if (!images.length) return;
+      const parts: Array<{ text: string } | { inlineData: Image }> = [
+        { text: 'SELECTED OBJECT CROP' }, { inlineData: source },
+        { text: JSON.stringify({ source_description: description, surface_context: context ?? null }) },
+      ];
+      images.forEach(({ product, image }, index) => parts.push(
+        { text: JSON.stringify({ index, title: product.title.slice(0, 500), metadata: product.metadata ?? {} }) }, { inlineData: image },
+      ));
+      const modelStarted = Date.now();
+      try {
+        usage.requests++;
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+          // A verifier result is useful only while the interaction is still live.
+          // Keep this bounded below the former 25s serial-batch stall; failure
+          // remains an unknown comparison and never promotes a candidate.
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(12000),
+          body: JSON.stringify({ systemInstruction: { parts: [{ text: INSTRUCTIONS }] }, contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', responseSchema, temperature: 0, maxOutputTokens: 12000 } }),
+        });
+        if (!response.ok) { failure(`model_http_${response.status}`, images.length); await response.body?.cancel(); failures += images.length; return; }
+        const payload = await response.json() as {
+          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+          usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
+        };
+        usage.prompt_tokens += usageNumber(payload.usageMetadata?.promptTokenCount);
+        usage.completion_tokens += usageNumber(payload.usageMetadata?.candidatesTokenCount);
+        usage.total_tokens += usageNumber(payload.usageMetadata?.totalTokenCount);
+        const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('');
+        const parsed = parseComparisons(text ? JSON.parse(text) : null, images.length);
+        failures += images.length - parsed.size;
+        if (parsed.size < images.length) failure(text ? 'model_schema' : 'model_empty', images.length - parsed.size);
+        for (const [index, comparison] of parsed) comparisons.set(candidateKey(images[index].product), comparison);
+      } catch (error) {
+        failure(error instanceof SyntaxError ? 'model_json' : error instanceof Error && error.name === 'TimeoutError' ? 'model_timeout' : 'model_fetch', images.length);
+        failures += images.length;
+      } finally {
+        batchTiming.model_ms = Date.now() - modelStarted;
+        timing.model_ms += batchTiming.model_ms;
+        batchTiming.comparisons = images.filter(({ product }) => comparisons.has(candidateKey(product))).length;
+      }
     } finally {
-      batchTiming.model_ms = Date.now() - modelStarted;
-      timing.model_ms += batchTiming.model_ms;
-      batchTiming.comparisons = images.filter(({ product }) => comparisons.has(candidateKey(product))).length;
+      budget.remaining += batchBudget.remaining; // return unused budget to shared pool
+      batchBudget.remaining = 0;
       batchTiming.total_ms = Date.now() - batchStarted;
       timing.batches.push(batchTiming);
     }
   };
-  for (let index = 0; index < batches.length; index++) await run(batches[index], index);
+  // Run up to two batches concurrently. Budget was pre-allocated in
+  // deterministic order above so candidate priority is preserved.
+  for (let i = 0; i < batches.length; i += 2) {
+    const chunk = batches.slice(i, i + 2);
+    await Promise.all(chunk.map((batch, j) => run(batch, i + j, batchBudgets[i + j])));
+  }
   timing.total_ms = Date.now() - timingStarted;
   return { comparisons, failures, compared: comparisons.size, failure_reasons, usage, timing };
 }

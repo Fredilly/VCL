@@ -94,7 +94,7 @@ test('image subrequest budget is shared across broadening and leaves room for re
   assert.equal(requests, 42); assert.equal(modelCalls, 6); assert.equal(budget.remaining, 0);
 });
 
-test('verification batches run sequentially: second batch starts only after first completes', async () => {
+test('verification batches run up to two concurrently for faster processing', async () => {
   const { candidate, description, comparison } = example(apparelCases[0]);
   let concurrent = 0, maxConcurrent = 0, modelCalls = 0;
   const { compareCandidateImages } = loadModule(filename, { fetch: async (url, options) => {
@@ -114,5 +114,156 @@ test('verification batches run sequentially: second batch starts only after firs
   const result = await compareCandidateImages('key', 'model', image, description, products);
   assert.equal(result.compared, 12);
   assert.equal(modelCalls, 2);
-  assert.equal(maxConcurrent, 1);
+  assert.equal(maxConcurrent, 2);
+});
+
+test('deterministic budget: enough budget for both batches processes all candidates', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  const { compareCandidateImages, imageRequestBudget } = loadModule(filename, { fetch: async (url) => {
+    if (String(url).includes('generativelanguage')) {
+      const count = 6;
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: comparison.source,
+        candidates: Array.from({ length: count }, (_, index) => ({ index, attributes: comparison.candidate, ...comparison })) }) }] } }] });
+    }
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+  } });
+  const budget = imageRequestBudget();
+  const products = Array.from({ length: 12 }, (_, i) => ({ ...candidate, id: String(i) }));
+  const result = await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
+  assert.equal(result.compared, 12);
+  assert.equal(result.failures, 0);
+  assert.ok(budget.remaining >= 0);
+});
+
+test('deterministic budget: budget only sufficient for first batch leaves second batch unverified', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  let modelCalls = 0;
+  const { compareCandidateImages, imageRequestBudget } = loadModule(filename, { fetch: async (url) => {
+    if (String(url).includes('generativelanguage')) {
+      modelCalls++;
+      const count = 6;
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: comparison.source,
+        candidates: Array.from({ length: count }, (_, index) => ({ index, attributes: comparison.candidate, ...comparison })) }) }] } }] });
+    }
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+  } });
+  // Budget: 1 model + 6 images = 7 per batch. Two batches need 14. Give exactly 7.
+  const budget = imageRequestBudget();
+  budget.remaining = 7;
+  const products = Array.from({ length: 12 }, (_, i) => ({ ...candidate, id: String(i) }));
+  const result = await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
+  assert.equal(result.compared, 6);
+  assert.equal(modelCalls, 1);
+  assert.equal(result.failure_reasons.image_budget, 6);
+  assert.ok(budget.remaining >= 0);
+});
+
+test('deterministic budget: budget partially sufficient for second batch verifies some candidates', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  let modelCalls = 0;
+  const { compareCandidateImages, imageRequestBudget } = loadModule(filename, { fetch: async (url, options) => {
+    if (String(url).includes('generativelanguage')) {
+      modelCalls++;
+      const count = JSON.parse(options.body).contents[0].parts.filter((p) => p.inlineData).length - 1;
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: comparison.source,
+        candidates: Array.from({ length: count }, (_, index) => ({ index, attributes: comparison.candidate, ...comparison })) }) }] } }] });
+    }
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+  } });
+  // Budget: 7 for batch1 + 4 for batch2 = 11 (batch2 gets model + 3 images)
+  const budget = imageRequestBudget();
+  budget.remaining = 11;
+  const products = Array.from({ length: 12 }, (_, i) => ({ ...candidate, id: String(i) }));
+  const result = await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
+  assert.equal(modelCalls, 2);
+  assert.ok(result.compared >= 6);
+  assert.ok(budget.remaining >= 0);
+});
+
+test('deterministic budget: redirect consumption near budget exhaustion does not go negative', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  let fetchCalls = 0;
+  const { compareCandidateImages, imageRequestBudget } = loadModule(filename, { fetch: async (url) => {
+    fetchCalls++;
+    if (String(url).includes('generativelanguage')) {
+      const count = 1;
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: comparison.source,
+        candidates: [{ index: 0, attributes: comparison.candidate, ...comparison }] }) }] } }] });
+    }
+    // Redirect to another URL (consumes extra budget)
+    if (fetchCalls <= 3) return new Response(null, { status: 302, headers: { location: 'https://cdn.shopify.com/redirect.png' } });
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+  } });
+  const budget = imageRequestBudget();
+  budget.remaining = 4; // tight: 1 model + 1 image + 1 redirect = 3 minimum
+  const products = [{ ...candidate, id: '0' }];
+  const result = await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
+  assert.ok(budget.remaining >= 0);
+  assert.ok(result.failures >= 0);
+});
+
+test('deterministic budget: repeated runs produce identical candidate verification order', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  const verifiedSets = [];
+  const { compareCandidateImages, imageRequestBudget } = loadModule(filename, { fetch: async (url, options) => {
+    if (String(url).includes('generativelanguage')) {
+      const body = JSON.parse(options.body);
+      const titles = body.contents[0].parts.filter((p) => p.text?.includes('"title"')).map((p) => JSON.parse(p.text).title);
+      verifiedSets.push(titles);
+      const count = titles.length;
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: comparison.source,
+        candidates: Array.from({ length: count }, (_, index) => ({ index, attributes: comparison.candidate, ...comparison })) }) }] } }] });
+    }
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+  } });
+  const products = Array.from({ length: 12 }, (_, i) => ({ ...candidate, id: String(i), title: `Product ${i}` }));
+  // Run twice with identical budget states; both runs must verify the same candidate sets
+  const runSets = [];
+  for (let run = 0; run < 2; run++) {
+    const budget = imageRequestBudget();
+    verifiedSets.length = 0;
+    await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
+    // Collect all verified titles as a sorted set (order of model calls is non-deterministic)
+    const allTitles = verifiedSets.flat().sort();
+    runSets.push(allTitles);
+  }
+  assert.deepEqual(runSets[0], runSets[1]);
+  // First batch (products 0-5) must always be verified
+  assert.ok(runSets[0].includes('Product 0'));
+  assert.ok(runSets[0].includes('Product 5'));
+});
+
+test('deterministic budget: no negative remaining budget under any failure pattern', async () => {
+  const { candidate, description } = example(apparelCases[0]);
+  const { compareCandidateImages, imageRequestBudget } = loadModule(filename, { fetch: async () => {
+    return new Response('error', { status: 500 });
+  } });
+  const budget = imageRequestBudget();
+  const products = Array.from({ length: 18 }, (_, i) => ({ ...candidate, id: String(i) }));
+  await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
+  assert.ok(budget.remaining >= 0, `budget.remaining went negative: ${budget.remaining}`);
+});
+
+test('deterministic budget: first batch always gets priority when budget is tight', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  const verifiedTitles = [];
+  const { compareCandidateImages, imageRequestBudget } = loadModule(filename, { fetch: async (url, options) => {
+    if (String(url).includes('generativelanguage')) {
+      const body = JSON.parse(options.body);
+      const titles = body.contents[0].parts.filter((p) => p.text?.includes('"title"')).map((p) => JSON.parse(p.text).title);
+      verifiedTitles.push(...titles);
+      const count = titles.length;
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: comparison.source,
+        candidates: Array.from({ length: count }, (_, index) => ({ index, attributes: comparison.candidate, ...comparison })) }) }] } }] });
+    }
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+  } });
+  // Budget for exactly one batch (7 = 1 model + 6 images)
+  const budget = imageRequestBudget();
+  budget.remaining = 7;
+  const products = Array.from({ length: 12 }, (_, i) => ({ ...candidate, id: String(i), title: `Product ${i}` }));
+  await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
+  // First batch (products 0-5) should always be verified, second batch (6-11) never
+  const sorted = verifiedTitles.sort();
+  assert.deepEqual(sorted, products.slice(0, 6).map((p) => p.title).sort());
 });
