@@ -5,6 +5,28 @@ import { TARGET_BOX_SCHEMA, clickedObjectPrompt, normalizeTargetBox, selectionTa
 const PROMPT = 'Analyze only the selected object crop. Return JSON only with exactly these fields: category, subcategory, brand_candidate, model_candidate, color, material, style_attributes, visible_text, logos_markings, distinctive_features, hardware_details, shape_silhouette, search_terms, confidence, identity_confidence. Extract only visually supported evidence. category should be broad, but subcategory must be the most specific visible product type you can support. For apparel, do not use generic labels such as Tops when a more specific visible garment type is supported. Prefer concrete subcategories such as Sweater, Jumper, Pullover, Polo, T-shirt, Shirt, Jacket, Coat, Hoodie, Dress, Trousers, Jeans, Shorts, or Cardigan. Use cut, sleeve length, neckline, collar, knit construction, closures, silhouette, and other visible structural cues to choose the specific garment type. visible_text should contain readable words/letters/numbers actually visible. logos_markings should describe visible logos, emblems, monograms, patches, labels, or symbols without guessing a brand unless supported. distinctive_features should capture unusual graphics, patterns, construction details, placements, trims, stitching, motifs, or design elements. hardware_details should capture buckles, clasps, buttons, zippers, fasteners, crowns, bezels, soles, laces, ports, or other product-specific hardware when relevant. shape_silhouette should capture recognizable shape, cut, proportions, collar, neckline, sleeve form, knit structure, case shape, frame, toe shape, bag profile, or other structural cues. confidence is confidence that the description is commercially searchable. identity_confidence is confidence that the proposed brand/model identity is visually supported. If brand/model evidence is weak, use null and keep identity_confidence low. Do not infer a famous brand from style alone. search_terms should be 1-4 concise purchase-search queries that use the strongest visible identity evidence first.';
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
 
+export type VisionFailureReason =
+  | 'QUOTA_EXHAUSTED'
+  | 'RATE_LIMITED'
+  | 'PROVIDER_AUTH'
+  | 'PROVIDER_5XX'
+  | 'PROVIDER_TIMEOUT'
+  | 'PROVIDER_ERROR';
+
+export class VisionProviderError extends Error {
+  constructor(readonly reason: VisionFailureReason, message: string) {
+    super(message);
+    this.name = 'VisionProviderError';
+  }
+}
+
+function classifyProviderFailure(status: number, message: string): VisionFailureReason {
+  if (status === 429) return /quota|resource exhausted/i.test(message) ? 'QUOTA_EXHAUSTED' : 'RATE_LIMITED';
+  if (status === 401 || status === 403) return 'PROVIDER_AUTH';
+  if (status >= 500) return 'PROVIDER_5XX';
+  return 'PROVIDER_ERROR';
+}
+
 function imagePart(dataUrl: string) {
   const match = /^data:([^;,]+);base64,(.+)$/s.exec(dataUrl);
   if (!match) throw new Error('dataUrl must be a base64 image data URL.');
@@ -27,11 +49,19 @@ export class GeminiVisionProvider implements VisionProvider {
   }
 
   private async generate(prompt: string, images: string[], schema?: object): Promise<unknown> {
-    const send = () => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${encodeURIComponent(this.apiKey)}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(15000),
-      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }, ...images.map((image) => ({ inlineData: imagePart(image) }))] }], generationConfig: { responseMimeType: 'application/json', ...(schema ? { responseJsonSchema: schema } : {}), temperature: 0.2 } }),
-    });
+    const send = async () => {
+      try {
+        return await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${encodeURIComponent(this.apiKey)}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(15000),
+          body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }, ...images.map((image) => ({ inlineData: imagePart(image) }))] }], generationConfig: { responseMimeType: 'application/json', ...(schema ? { responseJsonSchema: schema } : {}), temperature: 0.2 } }),
+        });
+      } catch (error) {
+        const name = error instanceof Error ? error.name : '';
+        if (name === 'TimeoutError' || name === 'AbortError') throw new VisionProviderError('PROVIDER_TIMEOUT', 'Vision provider request timed out.');
+        throw error;
+      }
+    };
     let response = await send();
     for (let retry = 0; response.status === 503 && retry < 2; retry++) {
       await response.body?.cancel();
@@ -39,7 +69,10 @@ export class GeminiVisionProvider implements VisionProvider {
       response = await send();
     }
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload?.error?.message || `Vision provider failed with HTTP ${response.status}.`);
+    if (!response.ok) {
+      const message = payload?.error?.message || `Vision provider failed with HTTP ${response.status}.`;
+      throw new VisionProviderError(classifyProviderFailure(response.status, message), message);
+    }
     const text = payload?.candidates?.[0]?.content?.parts?.find((part: any) => typeof part?.text === 'string')?.text;
     if (typeof text !== 'string') throw new Error('Model returned no text output.');
     return JSON.parse(text.trim().replace(/^```json\s*/i, '').replace(/\s*```$/, ''));
