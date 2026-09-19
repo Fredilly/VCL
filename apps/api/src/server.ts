@@ -1,4 +1,4 @@
-import { GeminiVisionProvider } from './gemini-vision.js';
+import { GeminiVisionProvider, VisionProviderError } from './gemini-vision.js';
 import { GroqVisionProvider } from './groq-vision.js';
 import { analyzeWithNearbyFrames, mergeFrameEvidence, parseEvidenceFrames } from './multi-frame-evidence.js';
 import { normalizeObjectDescription } from './types.js';
@@ -390,7 +390,10 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       if (nearby && primary && typeof timestamp === 'number') return jsonResponse(await analyzeWithNearbyFrames(provider, dataUrl, primary, timestamp, nearby, point));
       let description;
       try { description = normalizeObjectDescription(await provider.analyzeSelection(dataUrl, point)); }
-      catch { return jsonResponse({ error: 'Object analysis is temporarily unavailable' }, 502); }
+      catch (error) {
+        const reason = error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR';
+        return jsonResponse({ error: 'Object analysis is temporarily unavailable', reason }, 502);
+      }
       return jsonResponse(timestamp === undefined ? description : mergeFrameEvidence(description, timestamp as number, []));
     }
     if (path === '/resolve-products') {
