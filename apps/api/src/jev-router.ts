@@ -81,7 +81,7 @@ function parseDecision(value: unknown): JevRoutingDecision | null {
 function usage(value: unknown, key: 'input_tokens' | 'output_tokens'): number {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return 0;
   const v = value as Record<string, unknown>;
-  const n = v[key] ?? (key === 'input_tokens' ? v.prompt_tokens : v.completion_tokens);
+  const n = v[key] ?? (key === 'input_tokens' ? (v.prompt_tokens ?? v.inputTokens) : (v.completion_tokens ?? v.outputTokens));
   return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
@@ -121,9 +121,10 @@ function stringErrorField(error: unknown, keys: string[]): string | undefined {
 }
 
 export async function routeWithJev(input: JevRouterInput, ai: WorkersAiBinding, timeoutMs = 900): Promise<{ decision: JevRoutingDecision; telemetry: JevRouterTelemetry }> {
+  const provider = new JevJudgmentProvider(ai);
   const telemetry: JevRouterTelemetry = {
     enabled: true,
-    model: JevJudgmentProvider.model,
+    model: provider.model,
     calls: 1,
     latency_ms: 0,
     failed: false,
@@ -136,7 +137,7 @@ export async function routeWithJev(input: JevRouterInput, ai: WorkersAiBinding, 
   let lastResponseShape: string | undefined;
   try {
     const result = await Promise.race([
-      new JevJudgmentProvider(ai).evaluate({
+      provider.evaluate({
         state: { ...input },
         questions: {
           commerce_action: { type: 'choice', instructions: 'Choose commerce routing conservatively. SKIP only when no useful purchasable object is strongly indicated; SEARCH_BROAD only when normal evidence is insufficient.', criteria: { SKIP: 'No useful purchasable object.', SEARCH_NORMAL: 'Evidence supports a normal commerce search.', SEARCH_BROAD: 'Normal evidence is insufficient and broader search may help.' } },
