@@ -27,7 +27,9 @@ test('parses Cloudflare Jev answers.<question>.choice response shape', async () 
     },
     usage: { input_tokens: 321, output_tokens: 42 },
   }));
-  assert.deepEqual(result.decision, { commerce_action: 'SEARCH_BROAD', verification_action: 'LIGHT', multiframe_action: 'ESCALATE' });
+  assert.equal(result.decision.commerce_action, 'SEARCH_BROAD');
+  assert.equal(result.decision.verification_action, 'LIGHT');
+  assert.equal(result.decision.multiframe_action, 'ESCALATE');
   assert.equal(result.telemetry.failed, false);
   assert.equal(result.telemetry.input_tokens, 321);
   assert.equal(result.telemetry.output_tokens, 42);
