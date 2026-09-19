@@ -26,7 +26,7 @@ test('cases-v2.json has 10 entries with correct metadata', async () => {
   assert.ok(v2.rules.length >= 4);
 });
 
-test('s5-08 timestamp is exactly 90 in v2', async () => {
+test('s5-08 timestamp is exactly 93 in v2', async () => {
   const v2 = await read('./cases-v2.json');
   const s508 = v2.cases.find((c) => c.id === 's5-08');
   assert.equal(s508.timestamp_s, 90);
