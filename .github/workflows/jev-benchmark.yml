@@ -138,6 +138,12 @@ jobs:
             echo "Shared vision preparation attempt $attempt/3"
             rm -f "$VCL_PREPARED_OUTPUT"
 
+            # Each retry must start from a clean browser/CDP session. The previous
+            # attempt may have exited with a dead Chromium process or stale target.
+            pkill -f "remote-debugging-port=$VCL_CDP_PORT" 2>/dev/null || true
+            rm -rf "$VCL_COST_PROFILE"
+            sleep 1
+
             set +e
             node tests/cost/run-live.mjs
             runner_status=$?
