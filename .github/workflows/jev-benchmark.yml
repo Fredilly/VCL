@@ -95,7 +95,25 @@ jobs:
 
       - name: Freeze valid benchmark cases
         run: |
-          node --input-type=module -e "import { readFileSync, writeFileSync } from 'node:fs'; const f=JSON.parse(readFileSync('tests/manual/spike-5/cases-v2.json')); f.cases=f.cases.filter(c=>c.valid!==false); writeFileSync(process.env.RUNNER_TEMP+'/jev-cases.json',JSON.stringify(f));"
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const f = JSON.parse(readFileSync('tests/manual/spike-5/cases-v2.json', 'utf8'));
+          const identities = {
+            's5-01': { brand: 'Patagonia', model: 'Better Sweater' },
+            's5-02': { brand: 'Patagonia', model: 'Better Sweater' },
+            's5-03': { brand: 'Seiko', model: 'SKX007' },
+            's5-04': { brand: 'Seiko', model: 'SKX007' },
+            's5-05': { brand: 'Coach', model: null },
+            's5-06': { brand: 'Coach', model: null },
+            's5-07': { brand: 'Adidas', model: 'Samba OG' },
+            's5-08': { brand: 'Adidas', model: 'Samba OG' },
+          };
+          f.cases = f.cases
+            .filter((c) => c.valid !== false)
+            .map((c) => ({ ...c, expected_identity: identities[c.id] ?? null }));
+          if (f.cases.some((c) => !c.expected_identity)) throw new Error('Missing expected identity for a valid Jev benchmark case');
+          writeFileSync(process.env.RUNNER_TEMP + '/jev-cases.json', JSON.stringify(f));
+          NODE
 
       - name: Run identical OFF and ON cases
         run: |
