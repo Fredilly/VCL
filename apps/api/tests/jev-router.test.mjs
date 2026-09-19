@@ -17,6 +17,22 @@ for (const [commerce_action, verification_action, multiframe_action] of [
   assert.equal(result.telemetry.failed, false);
 });
 
+test('parses Cloudflare Jev answers.<question>.choice response shape', async () => {
+  const result = await routeWithJev(routerInput(evidence, true, 2), ai({
+    model: 'jev-1.13.0',
+    answers: {
+      commerce_action: { type: 'choice', choice: 'SEARCH_BROAD', confidence: 0.8, probabilities: {} },
+      verification_action: { type: 'choice', choice: 'LIGHT', confidence: 0.9, probabilities: {} },
+      multiframe_action: { type: 'choice', choice: 'ESCALATE', confidence: 0.7, probabilities: {} },
+    },
+    usage: { input_tokens: 321, output_tokens: 42 },
+  }));
+  assert.deepEqual(result.decision, { commerce_action: 'SEARCH_BROAD', verification_action: 'LIGHT', multiframe_action: 'ESCALATE' });
+  assert.equal(result.telemetry.failed, false);
+  assert.equal(result.telemetry.input_tokens, 321);
+  assert.equal(result.telemetry.output_tokens, 42);
+});
+
 test('malformed response fails open and cannot assign identity classes', async () => {
   const result = await routeWithJev(routerInput(evidence, false, 1), ai({ result_class: 'EXACT', commerce_action: 'SKIP' }));
   assert.equal(result.decision.commerce_action, 'SEARCH_NORMAL');
