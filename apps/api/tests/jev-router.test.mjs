@@ -15,6 +15,7 @@ for (const [commerce_action, verification_action, multiframe_action] of [
   const result = await routeWithJev(routerInput(evidence, true, 2), ai({ commerce_action, verification_action, multiframe_action }));
   assert.deepEqual(result.decision, { commerce_action, verification_action, multiframe_action });
   assert.equal(result.telemetry.failed, false);
+  assert.equal(result.telemetry.request_schema_version, 'jev-state-questions-v1');
 });
 
 test('parses Cloudflare Jev answers.<question>.choice response shape', async () => {
@@ -35,23 +36,31 @@ test('parses Cloudflare Jev answers.<question>.choice response shape', async () 
   assert.equal(result.telemetry.output_tokens, 42);
 });
 
-test('malformed response fails open and cannot assign identity classes', async () => {
+test('malformed response fails open and records sanitized response shape', async () => {
   const result = await routeWithJev(routerInput(evidence, false, 1), ai({ result_class: 'EXACT', commerce_action: 'SKIP' }));
   assert.equal(result.decision.commerce_action, 'SEARCH_NORMAL');
   assert.equal(result.decision.verification_action, 'FULL');
   assert.equal(result.decision.multiframe_action, 'NO');
   assert.equal(result.telemetry.failed, true);
+  assert.equal(result.telemetry.failure_kind, 'malformed_response');
+  assert.match(result.telemetry.response_shape ?? '', /result_class:string/);
 });
 
-test('Workers AI error fails open', async () => {
-  const result = await routeWithJev(routerInput(evidence, false, 1), ai(null, new Error('AI unavailable')));
+test('Workers AI error fails open and records upstream diagnostics', async () => {
+  const error = Object.assign(new Error('AI unavailable'), { status: 503, code: 'UPSTREAM_UNAVAILABLE' });
+  const result = await routeWithJev(routerInput(evidence, false, 1), ai(null, error));
   assert.equal(result.telemetry.failed, true);
+  assert.equal(result.telemetry.failure_kind, 'upstream_error');
+  assert.equal(result.telemetry.failure_message, 'AI unavailable');
+  assert.equal(result.telemetry.http_status, 503);
+  assert.equal(result.telemetry.error_code, 'UPSTREAM_UNAVAILABLE');
   assert.equal(result.decision.verification_action, 'FULL');
 });
 
-test('timeout fails open', async () => {
+test('timeout fails open and is classified', async () => {
   const result = await routeWithJev(routerInput(evidence, false, 1), { async run() { return new Promise(() => {}); } }, 5);
   assert.equal(result.telemetry.failed, true);
+  assert.equal(result.telemetry.failure_kind, 'timeout');
   assert.equal(result.decision.commerce_action, 'SEARCH_NORMAL');
 });
 
