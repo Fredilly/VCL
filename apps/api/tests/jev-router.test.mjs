@@ -3,6 +3,7 @@ import test from 'node:test';
 import { loadModule } from './helpers/load-ts.mjs';
 
 const { routeWithJev, routerInput } = loadModule(new URL('../src/jev-router.ts', import.meta.url).pathname);
+const { VercelJevBinding } = loadModule(new URL('../src/vercel-jev.ts', import.meta.url).pathname);
 const evidence = { category: 'watch', subcategory: 'digital watch', confidence: 0.95, identity_confidence: 0.9, visible_text: ['CASIO'], logos_markings: ['CASIO'], distinctive_features: ['black resin band'] };
 
 function ai(response, error) {
@@ -70,4 +71,29 @@ test('router input excludes identity classes and commercial/provider payout data
   assert.equal(JSON.stringify(input).includes('payout'), false);
   assert.equal(JSON.stringify(input).includes('merchant'), false);
   assert.equal(JSON.stringify(input).includes('result_class'), false);
+});
+
+
+test('Vercel Jev binding uses only the evaluation-model endpoint and expected headers', async () => {
+  let seen;
+  const binding = new VercelJevBinding('test-key', async (url, init) => {
+    seen = { url, init };
+    return new Response(JSON.stringify({
+      answers: {
+        commerce_action: { type: 'choice', choice: 'SEARCH_NORMAL' },
+        verification_action: { type: 'choice', choice: 'FULL' },
+        multiframe_action: { type: 'choice', choice: 'NO' },
+      },
+      usage: { inputTokens: 12, outputTokens: 0 },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  });
+
+  const result = await routeWithJev(routerInput(evidence, false, 2), binding);
+  assert.equal(result.telemetry.failed, false);
+  assert.equal(result.telemetry.model, 'typesafe-ai/jev');
+  assert.equal(seen.url, 'https://ai-gateway.vercel.sh/v4/ai/evaluation-model');
+  assert.equal(seen.init.method, 'POST');
+  assert.equal(seen.init.headers.Authorization, 'Bearer test-key');
+  assert.equal(seen.init.headers['ai-model-id'], 'typesafe-ai/jev');
+  assert.equal(seen.init.headers['ai-evaluation-model-specification-version'], '4');
 });
