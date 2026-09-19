@@ -161,7 +161,9 @@ export async function routeWithJev(input: JevRouterInput, ai: WorkersAiBinding, 
   } catch (error) {
     telemetry.failed = true;
     telemetry.latency_ms = Date.now() - started;
-    const message = error instanceof Error ? error.message : String(error);
+    const message = error && typeof error === 'object' && typeof (error as Record<string, unknown>).message === 'string'
+      ? String((error as Record<string, unknown>).message)
+      : String(error);
     telemetry.failure_message = message.slice(0, 240);
     telemetry.failure_kind = message === 'Jev router timeout'
       ? 'timeout'
