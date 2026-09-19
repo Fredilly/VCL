@@ -81,7 +81,7 @@ function parseDecision(value: unknown): JevRoutingDecision | null {
 function usage(value: unknown, key: 'input_tokens' | 'output_tokens'): number {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return 0;
   const v = value as Record<string, unknown>;
-  const n = v[key] ?? (key === 'input_tokens' ? v.prompt_tokens : v.completion_tokens);
+  const n = v[key] ?? (key === 'input_tokens' ? (v.prompt_tokens ?? v.inputTokens) : (v.completion_tokens ?? v.outputTokens));
   return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
