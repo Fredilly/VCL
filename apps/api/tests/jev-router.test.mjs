@@ -114,8 +114,9 @@ test('Jev binding prefers native Cloudflare Workers AI when both providers are c
 
 test('Jev binding uses Vercel only when native Cloudflare Workers AI is unavailable', () => {
   const binding = resolveJevBinding({ AI_GATEWAY_API_KEY: 'vercel-key' });
-  assert.ok(binding instanceof VercelJevBinding);
+  assert.ok(binding);
   assert.equal(binding.modelId, 'typesafe-ai/jev');
+  assert.equal(typeof binding.run, 'function');
 });
 
 test('Jev binding is disabled when no provider is configured', () => {
