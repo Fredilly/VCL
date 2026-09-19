@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const port = Number(process.env.VCL_CDP_PORT ?? 9334);
 const apiOrigin = process.env.VCL_API_ORIGIN || 'https://api.vcl.article6.org';
@@ -11,6 +12,7 @@ const profilePath = resolve(process.env.VCL_COST_PROFILE ?? '.tmp/vcl-cost-brows
 const caseLimit = Math.max(1, Number(process.env.VCL_COST_LIMIT ?? 10));
 const caseOffset = Math.max(0, Number(process.env.VCL_COST_OFFSET ?? 0));
 const caseIdFilter = process.env.VCL_COST_CASE_ID ?? null;
+const frozenFrameDir = process.env.VCL_FROZEN_FRAME_DIR ? resolve(process.env.VCL_FROZEN_FRAME_DIR) : null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const logEvent = (event, testCase, details = {}) => console.error(JSON.stringify({ event, case_id: testCase?.id ?? null, at: new Date().toISOString(), ...details }));
 
@@ -154,6 +156,37 @@ async function postJson(path, body) {
   return payload;
 }
 
+async function imageRect(page) {
+  const rect = await page.eval(`(() => {
+    const image = document.querySelector('img');
+    if (!image) return null;
+    const r = image.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) return null;
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  })()`);
+  if (!rect) throw new Error('Frozen benchmark image has no visible rectangle');
+  const layout = await page.send('Page.getLayoutMetrics');
+  return {
+    x: rect.x + layout.cssLayoutViewport.pageX,
+    y: rect.y + layout.cssLayoutViewport.pageY,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+async function frozenFrame(page, testCase) {
+  const path = resolve(frozenFrameDir, `${testCase.id}.png`);
+  if (!existsSync(path)) throw new Error(`Frozen frame missing: ${path}`);
+  const bytes = await readFile(path);
+  const frame = `data:image/png;base64,${bytes.toString('base64')}`;
+  await page.send('Page.navigate', { url: pathToFileURL(path).href });
+  await waitFor(async () => await page.eval(`(() => {
+    const img = document.querySelector('img');
+    return document.readyState === 'complete' && !!img && img.complete && img.naturalWidth > 0 && img.naturalHeight > 0;
+  })()`), 10000, `Frozen frame did not load: ${testCase.id}`);
+  return { frame, rect: await imageRect(page) };
+}
+
 async function videoRect(page) {
   const rect = await page.eval(`(() => {
     const player = document.querySelector('.html5-video-player');
@@ -271,68 +304,71 @@ try {
     logEvent('FIXTURE_OPEN', testCase, { source: testCase.source, timestamp_s: testCase.timestamp_s });
     const started = Date.now();
     try {
-      const currentUrl = await page.eval(`location.href`);
-      const currentVideoId = new URL(currentUrl).searchParams.get('v');
-      const targetVideoId = new URL(testCase.source).searchParams.get('v');
-      if (currentVideoId !== targetVideoId) {
-        await page.send('Page.navigate', { url: testCase.source });
-        await waitFor(async () => {
-          const url = await page.eval(`location.href`);
-          return new URL(url).searchParams.get('v') === targetVideoId;
-        }, 30000, `SPA navigation did not settle to video ${targetVideoId}`);
-        await page.send('Runtime.evaluate', { expression: 'window.scrollTo(0, 0)', returnByValue: true });
-      }
-      await waitFor(async () => await page.eval(`(() => {
-        const v = document.querySelector('video');
-        const adShowing = document.querySelector('.html5-video-player')?.classList.contains('ad-showing');
-        return document.readyState === 'complete'
-          && !!v
-          && !adShowing
-          && !!v.currentSrc
-          && v.readyState >= 2
-          && v.videoWidth > 0
-          && v.videoHeight > 0
-          && Number.isFinite(v.duration)
-          && v.duration > ${Number(testCase.timestamp_s) + 1};
-      })()`), 60000, 'Actual YouTube video did not become ready or an ad is still playing');
-      await assertPlayableVideo(page);
-      logEvent('VIDEO_READY', testCase, { url: await page.eval('location.href') });
-      await sleep(Number(process.env.VCL_COST_STABILIZE_MS ?? 1500));
-      const loadedVideoId = await page.eval(`new URL(location.href).searchParams.get('v')`);
-      if (loadedVideoId !== targetVideoId) {
-        throw new Error(`Video ID mismatch: loaded=${loadedVideoId} expected=${targetVideoId}`);
-      }
-      const targetTs = Number(testCase.timestamp_s);
-      await page.eval(`(() => { const v=document.querySelector('video'); v.currentTime=${targetTs}; v.pause(); return true; })()`);
-      await waitFor(async () => await page.eval(`Math.abs((document.querySelector('video')?.currentTime ?? 0)-${targetTs}) < 1`), 12000, 'Could not seek video');
-      await waitFor(async () => await page.eval(`(() => {
-        const v = document.querySelector('video');
-        if (!v || v.readyState < 2) return false;
-        const t = ${targetTs};
-        for (let i = 0; i < v.buffered.length; i++) {
-          if (v.buffered.start(i) <= t && v.buffered.end(i) > t) return true;
+      let rect;
+      let frame;
+      let finalTime = Number(testCase.timestamp_s);
+      if (frozenFrameDir) {
+        ({ rect, frame } = await frozenFrame(page, testCase));
+        logEvent('FRAME_READY', testCase, { timestamp_s: finalTime, width: rect.width, height: rect.height, source: 'frozen' });
+      } else {
+        const currentUrl = await page.eval(`location.href`);
+        const currentVideoId = new URL(currentUrl).searchParams.get('v');
+        const targetVideoId = new URL(testCase.source).searchParams.get('v');
+        if (currentVideoId !== targetVideoId) {
+          await page.send('Page.navigate', { url: testCase.source });
+          await waitFor(async () => {
+            const url = await page.eval(`location.href`);
+            return new URL(url).searchParams.get('v') === targetVideoId;
+          }, 30000, `SPA navigation did not settle to video ${targetVideoId}`);
+          await page.send('Runtime.evaluate', { expression: 'window.scrollTo(0, 0)', returnByValue: true });
         }
-        return false;
-      })()`), 20000, 'Video buffer did not reach target timestamp');
-      await page.eval(`(() => { const v=document.querySelector('video'); v.play().catch(()=>{}); return true; })()`);
-      await sleep(1500);
-      await page.eval(`(() => { const v=document.querySelector('video'); v.pause(); v.currentTime=${targetTs}; return true; })()`);
-      await waitFor(async () => await page.eval(`Math.abs((document.querySelector('video')?.currentTime ?? 0)-${targetTs}) < 1`), 5000, 'Could not re-seek after play burst');
-      await sleep(500);
-      await assertPlayableVideo(page);
-      const finalTime = await page.eval(`document.querySelector('video')?.currentTime ?? -1`);
-      if (Math.abs(finalTime - targetTs) >= 1) {
-        throw new Error(`Seek drifted: current=${finalTime} target=${targetTs}`);
+        await waitFor(async () => await page.eval(`(() => {
+          const v = document.querySelector('video');
+          const adShowing = document.querySelector('.html5-video-player')?.classList.contains('ad-showing');
+          return document.readyState === 'complete'
+            && !!v
+            && !adShowing
+            && !!v.currentSrc
+            && v.readyState >= 2
+            && v.videoWidth > 0
+            && v.videoHeight > 0
+            && Number.isFinite(v.duration)
+            && v.duration > ${Number(testCase.timestamp_s) + 1};
+        })()`), 60000, 'Actual YouTube video did not become ready or an ad is still playing');
+        await assertPlayableVideo(page);
+        logEvent('VIDEO_READY', testCase, { url: await page.eval('location.href') });
+        await sleep(Number(process.env.VCL_COST_STABILIZE_MS ?? 1500));
+        const loadedVideoId = await page.eval(`new URL(location.href).searchParams.get('v')`);
+        if (loadedVideoId !== targetVideoId) throw new Error(`Video ID mismatch: loaded=${loadedVideoId} expected=${targetVideoId}`);
+        const targetTs = Number(testCase.timestamp_s);
+        await page.eval(`(() => { const v=document.querySelector('video'); v.currentTime=${targetTs}; v.pause(); return true; })()`);
+        await waitFor(async () => await page.eval(`Math.abs((document.querySelector('video')?.currentTime ?? 0)-${targetTs}) < 1`), 12000, 'Could not seek video');
+        await waitFor(async () => await page.eval(`(() => {
+          const v = document.querySelector('video');
+          if (!v || v.readyState < 2) return false;
+          const t = ${targetTs};
+          for (let i = 0; i < v.buffered.length; i++) {
+            if (v.buffered.start(i) <= t && v.buffered.end(i) > t) return true;
+          }
+          return false;
+        })()`), 20000, 'Video buffer did not reach target timestamp');
+        await page.eval(`(() => { const v=document.querySelector('video'); v.play().catch(()=>{}); return true; })()`);
+        await sleep(1500);
+        await page.eval(`(() => { const v=document.querySelector('video'); v.pause(); v.currentTime=${targetTs}; return true; })()`);
+        await waitFor(async () => await page.eval(`Math.abs((document.querySelector('video')?.currentTime ?? 0)-${targetTs}) < 1`), 5000, 'Could not re-seek after play burst');
+        await sleep(500);
+        await assertPlayableVideo(page);
+        finalTime = await page.eval(`document.querySelector('video')?.currentTime ?? -1`);
+        if (Math.abs(finalTime - targetTs) >= 1) throw new Error(`Seek drifted: current=${finalTime} target=${targetTs}`);
+        await hideOverlays(page);
+        await page.send('Runtime.evaluate', { expression: 'window.scrollTo(0, 0)', returnByValue: true });
+        await sleep(100);
+        await hideOverlays(page);
+        rect = await videoRect(page);
+        frame = await screenshotDataUrl(page, rect);
+        if (!frame?.startsWith('data:image/')) throw new Error('Frame capture did not return an image');
+        logEvent('FRAME_READY', testCase, { timestamp_s: finalTime, width: rect.width, height: rect.height, source: 'youtube' });
       }
-      await hideOverlays(page);
-      await page.send('Runtime.evaluate', { expression: 'window.scrollTo(0, 0)', returnByValue: true });
-      await sleep(100);
-      await hideOverlays(page);
-
-      const rect = await videoRect(page);
-      const frame = await screenshotDataUrl(page, rect);
-      if (!frame?.startsWith('data:image/')) throw new Error('Frame capture did not return an image');
-      logEvent('FRAME_READY', testCase, { timestamp_s: finalTime, width: rect.width, height: rect.height });
 
       if (process.env.VCL_COST_DEBUG_FRAME === '1') {
         await writeFile(
@@ -367,7 +403,7 @@ try {
       };
       const targetImage = await screenshotDataUrl(page, targetClip);
       const analysis = await postJson('analyze-selection', { dataUrl: targetImage });
-      const title = await page.eval(`document.title.replace(/\\s*-\\s*YouTube\\s*$/i,'').trim()`);
+      const title = frozenFrameDir ? null : await page.eval(`document.title.replace(/\\s*-\\s*YouTube\\s*$/i,'').trim()`);
       const commerce = await postJson('resolve-products', {
         description: analysis,
         context: { platform: 'youtube', title: title || null, url: testCase.source },
@@ -464,7 +500,7 @@ const record = {
   run_date: new Date().toISOString(),
   pricing_snapshot_date: '2026-09-16',
   browser_launched_by_runner: launched,
-  runner_mode: 'direct-api-with-cdp-frame-capture',
+  runner_mode: frozenFrameDir ? 'direct-api-with-frozen-frames' : 'direct-api-with-cdp-frame-capture',
   runs: successful,
   failed_runs: runs.filter((run) => run.failed),
   summary: { sample_size: successful.length, attempted: runs.length, failed: runs.length - successful.length },
