@@ -20,7 +20,7 @@ export class VercelJevBinding implements WorkersAiBinding {
 
   constructor(
     private readonly apiKey: string,
-    private readonly fetchImpl: FetchLike = fetch,
+    private readonly fetchImpl: FetchLike = (input, init) => fetch(input, init),
   ) {}
 
   async run(_model: string, input: Parameters<WorkersAiBinding['run']>[1]): Promise<unknown> {
