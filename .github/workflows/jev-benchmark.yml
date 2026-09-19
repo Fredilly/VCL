@@ -131,7 +131,9 @@ jobs:
           export VCL_PREPARED_OUTPUT="$GITHUB_WORKSPACE/jev-prepared.json"
           export VCL_CDP_PORT=9334
           export VCL_COST_PROFILE="$RUNNER_TEMP/jev-browser-prep"
-          # Vision is shared by OFF and ON, so prepare it against the stable production API.\n          # Preview Workers are reserved for the commerce/Jev comparison only.\n          export VCL_API_ORIGIN="https://api.vcl.article6.org"
+          # Vision is shared by OFF and ON, so prepare it against the stable production API.
+          # Preview Workers are reserved for the commerce/Jev comparison only.
+          export VCL_API_ORIGIN="https://api.vcl.article6.org"
 
           prepared_ok=0
           for attempt in 1 2 3; do
