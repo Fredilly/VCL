@@ -75,12 +75,12 @@ async function ensureBrowser() {
     ...(process.env.VCL_HEADLESS === '1' ? ['--headless=new', '--disable-gpu', '--no-sandbox'] : []),
     'about:blank',
   ], { detached: true, stdio: 'ignore' }).unref();
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 120; i++) {
     await sleep(250);
     list = await targets();
     if (list) return { list, launched: true };
   }
-  throw new Error('Brave started but CDP did not become ready.');
+  throw new Error('Browser started but CDP did not become ready within 30s.');
 }
 
 class Cdp {
