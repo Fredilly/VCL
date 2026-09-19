@@ -13,6 +13,8 @@ const caseLimit = Math.max(1, Number(process.env.VCL_COST_LIMIT ?? 10));
 const caseOffset = Math.max(0, Number(process.env.VCL_COST_OFFSET ?? 0));
 const caseIdFilter = process.env.VCL_COST_CASE_ID ?? null;
 const frozenFrameDir = process.env.VCL_FROZEN_FRAME_DIR ? resolve(process.env.VCL_FROZEN_FRAME_DIR) : null;
+const prepareOnly = process.env.VCL_PREPARE_ONLY === '1';
+const preparedOutputPath = process.env.VCL_PREPARED_OUTPUT ?? 'tests/cost/prepared.json';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const logEvent = (event, testCase, details = {}) => console.error(JSON.stringify({ event, case_id: testCase?.id ?? null, at: new Date().toISOString(), ...details }));
 
@@ -297,6 +299,7 @@ const targetCases = caseIdFilter
   : allCases.slice(caseOffset, caseOffset + caseLimit);
 if (targetCases.length === 0) throw new Error(`No cases matched offset=${caseOffset} limit=${caseLimit} id=${caseIdFilter}`);
 const runs = [];
+const prepared = [];
 
 try {
   for (const testCase of targetCases) {
@@ -404,9 +407,29 @@ try {
       const targetImage = await screenshotDataUrl(page, targetClip);
       const analysis = await postJson('analyze-selection', { dataUrl: targetImage });
       const title = frozenFrameDir ? null : await page.eval(`document.title.replace(/\\s*-\\s*YouTube\\s*$/i,'').trim()`);
+      const context = { platform: 'youtube', title: title || null, url: testCase.source };
+
+      if (prepareOnly) {
+        prepared.push({
+          case_id: testCase.id,
+          selected_item: testCase.selected_item,
+          expected_identity: testCase.expected_identity ?? null,
+          description: analysis,
+          context,
+          source_image: targetImage,
+          preprocessing_latency_ms: Date.now() - started,
+          localization_usage: localization?.provider_usage ?? null,
+          localization_failure: localizationFailure,
+          vision_usage: analysis?.provider_usage ?? null,
+        });
+        await writeFile(preparedOutputPath, JSON.stringify({ schema_version: 1, rows: prepared }, null, 2) + '\n');
+        logEvent('PREPARED_INPUT_WRITTEN', testCase, { preparedOutputPath });
+        continue;
+      }
+
       const commerce = await postJson('resolve-products', {
         description: analysis,
-        context: { platform: 'youtube', title: title || null, url: testCase.source },
+        context,
         source_image: targetImage,
       });
 
@@ -493,23 +516,29 @@ try {
   page.close();
 }
 
-const successful = runs.filter((run) => !run.failed);
-const record = {
-  schema_version: 1,
-  spike: '7',
-  run_date: new Date().toISOString(),
-  pricing_snapshot_date: '2026-09-16',
-  browser_launched_by_runner: launched,
-  runner_mode: frozenFrameDir ? 'direct-api-with-frozen-frames' : 'direct-api-with-cdp-frame-capture',
-  runs: successful,
-  failed_runs: runs.filter((run) => run.failed),
-  summary: { sample_size: successful.length, attempted: runs.length, failed: runs.length - successful.length },
-};
-await writeFile(outputPath, JSON.stringify(record, null, 2) + '\n');
-console.log(`Wrote ${successful.length}/${runs.length} successful runs to ${outputPath}`);
-if (successful.length < Math.min(8, targetCases.length)) {
-  console.error('Too few successful runs for a useful Spike 7 cost estimate.');
-  process.exitCode = 1;
+if (prepareOnly) {
+  await writeFile(preparedOutputPath, JSON.stringify({ schema_version: 1, rows: prepared }, null, 2) + '\n');
+  console.log(`Prepared ${prepared.length}/${targetCases.length} shared vision inputs to ${preparedOutputPath}`);
+  if (prepared.length !== targetCases.length) process.exitCode = 1;
 } else {
-  console.log(`Next: pnpm cost:summary ${outputPath}`);
+  const successful = runs.filter((run) => !run.failed);
+  const record = {
+    schema_version: 1,
+    spike: '7',
+    run_date: new Date().toISOString(),
+    pricing_snapshot_date: '2026-09-16',
+    browser_launched_by_runner: launched,
+    runner_mode: frozenFrameDir ? 'direct-api-with-frozen-frames' : 'direct-api-with-cdp-frame-capture',
+    runs: successful,
+    failed_runs: runs.filter((run) => run.failed),
+    summary: { sample_size: successful.length, attempted: runs.length, failed: runs.length - successful.length },
+  };
+  await writeFile(outputPath, JSON.stringify(record, null, 2) + '\n');
+  console.log(`Wrote ${successful.length}/${runs.length} successful runs to ${outputPath}`);
+  if (successful.length < Math.min(8, targetCases.length)) {
+    console.error('Too few successful runs for a useful Spike 7 cost estimate.');
+    process.exitCode = 1;
+  } else {
+    console.log(`Next: pnpm cost:summary ${outputPath}`);
+  }
 }
