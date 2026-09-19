@@ -394,7 +394,7 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
     if (path === '/resolve-products') {
       const parsed: unknown = await request.json();
       const wrapped = Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'description' in parsed);
-      const record = wrapped ? parsed as { description: unknown; context?: unknown; source_image?: unknown } : { description: parsed, context: undefined, source_image: undefined };
+      const record = wrapped ? parsed as { description: unknown; context?: unknown; source_image?: unknown; multi_frame_available?: unknown } : { description: parsed, context: undefined, source_image: undefined, multi_frame_available: undefined };
       const sourceImage = parseSourceImage(record.source_image);
       if (record.source_image != null && !sourceImage) return jsonResponse({ error: 'source_image must be a base64 JPEG, PNG, WebP or GIF crop under 2 MB' }, 400);
       const description = normalizeObjectDescription(record.description);
