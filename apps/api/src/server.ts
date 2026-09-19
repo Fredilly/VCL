@@ -17,6 +17,8 @@ import { SerpApiCommerceProvider } from './serpapi-commerce.js';
 import { BraveCommerceProvider } from './brave-commerce.js';
 import { resolveBraveCredentials } from './brave-credentials.js';
 import { evaluateCommerceGate } from './commerce-gate.js';
+import { routeWithJev, routerInput, type JevRouterTelemetry } from './jev-router.js';
+import type { WorkersAiBinding } from './jev.js';
 
 export interface Env {
   GEMINI_API_KEY?: string;
@@ -38,6 +40,8 @@ export interface Env {
   ETSY_SHARED_SECRET?: string;
   BRAVE_SEARCH_API_KEY?: string;
   COMMERCE_ELIGIBILITY_GATE?: string;
+  JEV_DECISION_ROUTER?: string;
+  AI?: WorkersAiBinding;
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
@@ -122,14 +126,17 @@ function filterByCategory(providers: NamedCommerceProvider[], query: ProductQuer
 const LIKELY_CANDIDATE_THRESHOLD = 3;
 const SUFFICIENT_CANDIDATE_THRESHOLD = 3;
 
-export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages) {
+export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages, routing?: { commerce_action: 'SKIP' | 'SEARCH_NORMAL' | 'SEARCH_BROAD'; verification_action: 'LIGHT' | 'FULL'; telemetry: JevRouterTelemetry }) {
   const gateEnabled = env.COMMERCE_ELIGIBILITY_GATE === '1' || env.COMMERCE_ELIGIBILITY_GATE === 'true';
   const gateResult = evaluateCommerceGate(description);
+  const restrictFallbacks = gateEnabled && (gateResult.decision === 'RESTRICT' || gateResult.decision === 'REJECT');
 
   let attempts = 0;
   let sawProviderFailure = false;
   let completedProviderAttempt = false;
-  let activeProviders = [...providers];
+  let activeProviders = restrictFallbacks
+    ? providers.filter((p) => p.tier === 'primary')
+    : [...providers];
   const providersUsed = new Set<string>();
   const accepted: ProductCandidate[] = [];
   const seen = new Set<string>();
@@ -193,8 +200,13 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       commerce_gate_decision: gateResult.decision,
       commerce_gate_reason: gateResult.reason,
       commerce_gate_enabled: gateEnabled,
+      gate_behavior_active: restrictFallbacks,
+      fallback_providers_allowed: restrictFallbacks ? (accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD || sawProviderFailure) : true,
+      jev_router: routing?.telemetry,
     };
   };
+
+  if (routing?.commerce_action === 'SKIP') return respond(queries[0] ?? { query: '', category: description.category, subcategory: description.subcategory, brand: null, model: null, attributes: [] });
 
   const verifyFresh = async (products: ProductCandidate[]) => {
     const fresh = products.slice(0, 8).filter((product) => {
@@ -202,7 +214,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     });
     verification.retrieved += fresh.length;
     const verificationStarted = Date.now();
-    if (sourceImage && env.GEMINI_API_KEY && fresh.length) {
+    if (routing?.verification_action !== 'LIGHT' && sourceImage && env.GEMINI_API_KEY && fresh.length) {
       const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
       verification.compared += images.compared;
       verification.image_failures += images.failures;
@@ -265,6 +277,14 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       serpapiTelemetry.skipped = true;
       serpapiTelemetry.skip_reason ??= 'upstream_sufficient';
       skipSerpApi = true;
+    } else if (restrictFallbacks && !sawProviderFailure) {
+      // RESTRICT/REJECT: primaries ran but produced insufficient results.
+      // Allow fallbacks by re-adding them to the active set.
+      for (const p of providers) {
+        if (p.tier === 'fallback' && !activeProviders.some((a) => a.name === p.name)) {
+          activeProviders.push(p);
+        }
+      }
     }
 
     if (accepted.filter((product) => product.result_class === 'LIKELY').length >= LIKELY_CANDIDATE_THRESHOLD) return respond(query);
@@ -394,7 +414,7 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
     if (path === '/resolve-products') {
       const parsed: unknown = await request.json();
       const wrapped = Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'description' in parsed);
-      const record = wrapped ? parsed as { description: unknown; context?: unknown; source_image?: unknown } : { description: parsed, context: undefined, source_image: undefined };
+      const record = wrapped ? parsed as { description: unknown; context?: unknown; source_image?: unknown; multi_frame_available?: unknown } : { description: parsed, context: undefined, source_image: undefined, multi_frame_available: undefined };
       const sourceImage = parseSourceImage(record.source_image);
       if (record.source_image != null && !sourceImage) return jsonResponse({ error: 'source_image must be a base64 JPEG, PNG, WebP or GIF crop under 2 MB' }, 400);
       const description = normalizeObjectDescription(record.description);
@@ -402,8 +422,13 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const providers = commerceProviders(env);
       if (!providers.length) return jsonResponse({ error: 'No configured commerce provider' }, 503);
       const queries = buildProductQueryVariants(description, context);
+      let routing: Parameters<typeof resolveProducts>[7];
+      if (env.JEV_DECISION_ROUTER === 'true' && env.AI) {
+        const routed = await routeWithJev(routerInput(description, Boolean(record.multi_frame_available), providers.length), env.AI);
+        routing = { ...routed.decision, telemetry: routed.telemetry };
+      }
       const started = Date.now();
-      const resolved = await resolveProducts(providers, queries, description, env, context, sourceImage);
+      const resolved = await resolveProducts(routing?.commerce_action === 'SKIP' ? [] : providers, routing?.commerce_action === 'SEARCH_BROAD' ? queries : queries.slice(0, 1), description, env, context, sourceImage, compareCandidateImages, routing);
       const total_ms = Date.now() - started;
       return jsonResponse({ ...resolved, latency_ms: total_ms, timing: { ...resolved.timing, total_ms } });
     }
