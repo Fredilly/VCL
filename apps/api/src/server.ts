@@ -16,6 +16,8 @@ import { resolveEtsyCredentials, type EtsyCredentials } from './etsy-credentials
 import { SerpApiCommerceProvider } from './serpapi-commerce.js';
 import { BraveCommerceProvider } from './brave-commerce.js';
 import { resolveBraveCredentials } from './brave-credentials.js';
+import { routeWithJev, routerInput, type JevRouterTelemetry } from './jev-router.js';
+import type { WorkersAiBinding } from './jev.js';
 
 export interface Env {
   GEMINI_API_KEY?: string;
@@ -36,6 +38,8 @@ export interface Env {
   ETSY_KEYSTRING?: string;
   ETSY_SHARED_SECRET?: string;
   BRAVE_SEARCH_API_KEY?: string;
+  JEV_DECISION_ROUTER?: string;
+  AI?: WorkersAiBinding;
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
@@ -120,7 +124,8 @@ function filterByCategory(providers: NamedCommerceProvider[], query: ProductQuer
 const LIKELY_CANDIDATE_THRESHOLD = 3;
 const SUFFICIENT_CANDIDATE_THRESHOLD = 3;
 
-export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages) {
+export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages, routing?: { commerce_action: 'SKIP' | 'SEARCH_NORMAL' | 'SEARCH_BROAD'; verification_action: 'LIGHT' | 'FULL'; telemetry: JevRouterTelemetry }) {
+  const routingActive = Boolean(routing && !routing.telemetry.failed);
   let attempts = 0;
   let sawProviderFailure = false;
   let completedProviderAttempt = false;
@@ -185,8 +190,11 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       serpapi: serpapiTelemetry,
       brave: braveTelemetry,
       cost_usage: { commerce_calls: { ...commerceCalls }, verification_usage: { ...verificationUsage } },
+      jev_router: routing?.telemetry,
     };
   };
+
+  if (routingActive && routing?.commerce_action === 'SKIP') return respond(queries[0] ?? { query: '', category: description.category, subcategory: description.subcategory, brand: null, model: null, attributes: [] });
 
   const verifyFresh = async (products: ProductCandidate[]) => {
     const fresh = products.slice(0, 8).filter((product) => {
@@ -194,7 +202,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     });
     verification.retrieved += fresh.length;
     const verificationStarted = Date.now();
-    if (sourceImage && env.GEMINI_API_KEY && fresh.length) {
+    if (!(routingActive && routing?.verification_action === 'LIGHT') && sourceImage && env.GEMINI_API_KEY && fresh.length) {
       const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
       verification.compared += images.compared;
       verification.image_failures += images.failures;
@@ -386,7 +394,7 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
     if (path === '/resolve-products') {
       const parsed: unknown = await request.json();
       const wrapped = Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'description' in parsed);
-      const record = wrapped ? parsed as { description: unknown; context?: unknown; source_image?: unknown } : { description: parsed, context: undefined, source_image: undefined };
+      const record = wrapped ? parsed as { description: unknown; context?: unknown; source_image?: unknown; multi_frame_available?: unknown } : { description: parsed, context: undefined, source_image: undefined, multi_frame_available: undefined };
       const sourceImage = parseSourceImage(record.source_image);
       if (record.source_image != null && !sourceImage) return jsonResponse({ error: 'source_image must be a base64 JPEG, PNG, WebP or GIF crop under 2 MB' }, 400);
       const description = normalizeObjectDescription(record.description);
@@ -394,8 +402,20 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const providers = commerceProviders(env);
       if (!providers.length) return jsonResponse({ error: 'No configured commerce provider' }, 503);
       const queries = buildProductQueryVariants(description, context);
+      let routing: Parameters<typeof resolveProducts>[7];
+      if (env.JEV_DECISION_ROUTER === 'true' && env.AI) {
+        const routed = await routeWithJev(routerInput(description, Boolean(record.multi_frame_available), providers.length), env.AI);
+        routing = { ...routed.decision, telemetry: routed.telemetry };
+      }
+      const routingActive = Boolean(routing && !routing.telemetry.failed);
+      const routedProviders = routingActive && routing?.commerce_action === 'SKIP' ? [] : providers;
+      const routedQueries = !routingActive
+        ? queries
+        : routing?.commerce_action === 'SEARCH_BROAD'
+          ? queries
+          : queries.slice(0, 1);
       const started = Date.now();
-      const resolved = await resolveProducts(providers, queries, description, env, context, sourceImage);
+      const resolved = await resolveProducts(routedProviders, routedQueries, description, env, context, sourceImage, compareCandidateImages, routing);
       const total_ms = Date.now() - started;
       return jsonResponse({ ...resolved, latency_ms: total_ms, timing: { ...resolved.timing, total_ms } });
     }
