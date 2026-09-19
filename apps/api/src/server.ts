@@ -18,7 +18,7 @@ import { BraveCommerceProvider } from './brave-commerce.js';
 import { resolveBraveCredentials } from './brave-credentials.js';
 import { routeWithJev, routerInput, type JevRouterTelemetry } from './jev-router.js';
 import type { WorkersAiBinding } from './jev.js';
-import { VercelJevBinding } from './vercel-jev.js';
+import { resolveJevBinding } from './jev-binding.js';
 
 export interface Env {
   GEMINI_API_KEY?: string;
@@ -405,12 +405,12 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       if (!providers.length) return jsonResponse({ error: 'No configured commerce provider' }, 503);
       const queries = buildProductQueryVariants(description, context);
       let routing: Parameters<typeof resolveProducts>[7];
-      if (env.JEV_DECISION_ROUTER === 'true' && (env.AI_GATEWAY_API_KEY || env.AI)) {
-        const jevBinding: WorkersAiBinding = env.AI_GATEWAY_API_KEY
-          ? new VercelJevBinding(env.AI_GATEWAY_API_KEY)
-          : env.AI!;
-        const routed = await routeWithJev(routerInput(description, Boolean(record.multi_frame_available), providers.length), jevBinding);
-        routing = { ...routed.decision, telemetry: routed.telemetry };
+      if (env.JEV_DECISION_ROUTER === 'true') {
+        const jevBinding = resolveJevBinding(env);
+        if (jevBinding) {
+          const routed = await routeWithJev(routerInput(description, Boolean(record.multi_frame_available), providers.length), jevBinding);
+          routing = { ...routed.decision, telemetry: routed.telemetry };
+        }
       }
       const routingActive = Boolean(routing && !routing.telemetry.failed);
       const routedProviders = routingActive && routing?.commerce_action === 'SKIP' ? [] : providers;

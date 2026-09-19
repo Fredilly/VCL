@@ -4,6 +4,7 @@ import { loadModule } from './helpers/load-ts.mjs';
 
 const { routeWithJev, routerInput } = loadModule(new URL('../src/jev-router.ts', import.meta.url).pathname);
 const { VercelJevBinding } = loadModule(new URL('../src/vercel-jev.ts', import.meta.url).pathname);
+const { resolveJevBinding } = loadModule(new URL('../src/jev-binding.ts', import.meta.url).pathname);
 const evidence = { category: 'watch', subcategory: 'digital watch', confidence: 0.95, identity_confidence: 0.9, visible_text: ['CASIO'], logos_markings: ['CASIO'], distinctive_features: ['black resin band'] };
 
 function ai(response, error) {
@@ -96,4 +97,28 @@ test('Vercel Jev binding uses only the evaluation-model endpoint and expected he
   assert.equal(seen.init.headers.Authorization, 'Bearer test-key');
   assert.equal(seen.init.headers['ai-model-id'], 'typesafe-ai/jev');
   assert.equal(seen.init.headers['ai-evaluation-model-specification-version'], '4');
+});
+
+
+test('Jev binding prefers native Cloudflare Workers AI when both providers are configured', () => {
+  const cloudflare = ai({
+    answers: {
+      commerce_action: { type: 'choice', choice: 'SEARCH_NORMAL' },
+      verification_action: { type: 'choice', choice: 'LIGHT' },
+      multiframe_action: { type: 'choice', choice: 'NO' },
+    },
+  });
+  const binding = resolveJevBinding({ AI: cloudflare, AI_GATEWAY_API_KEY: 'vercel-key' });
+  assert.equal(binding, cloudflare);
+});
+
+test('Jev binding uses Vercel only when native Cloudflare Workers AI is unavailable', () => {
+  const binding = resolveJevBinding({ AI_GATEWAY_API_KEY: 'vercel-key' });
+  assert.ok(binding);
+  assert.equal(binding.modelId, 'typesafe-ai/jev');
+  assert.equal(typeof binding.run, 'function');
+});
+
+test('Jev binding is disabled when no provider is configured', () => {
+  assert.equal(resolveJevBinding({}), undefined);
 });
