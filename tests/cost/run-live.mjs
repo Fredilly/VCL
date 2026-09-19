@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 
 const port = Number(process.env.VCL_CDP_PORT ?? 9334);
-const apiOrigin = 'https://api.vcl.article6.org';
+const apiOrigin = process.env.VCL_API_ORIGIN || 'https://api.vcl.article6.org';
 const casesPath = process.env.VCL_COST_CASES ?? 'tests/manual/spike-5/cases.json';
 const outputPath = process.env.VCL_COST_OUTPUT ?? 'tests/cost/run.json';
 const profilePath = resolve(process.env.VCL_COST_PROFILE ?? '.tmp/vcl-cost-browser');
@@ -12,6 +12,7 @@ const caseLimit = Math.max(1, Number(process.env.VCL_COST_LIMIT ?? 10));
 const caseOffset = Math.max(0, Number(process.env.VCL_COST_OFFSET ?? 0));
 const caseIdFilter = process.env.VCL_COST_CASE_ID ?? null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const logEvent = (event, testCase, details = {}) => console.error(JSON.stringify({ event, case_id: testCase?.id ?? null, at: new Date().toISOString(), ...details }));
 
 async function targets() {
   try { return await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); }
@@ -20,13 +21,13 @@ async function targets() {
 
 function braveExecutable() {
   const candidates = process.platform === 'darwin'
-    ? ['/Applications/Brave Browser.app/Contents/MacOS/Brave Browser']
+    ? ['/Applications/Brave Browser.app/Contents/MacOS/Brave Browser', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']
     : process.platform === 'win32'
       ? [
           `${process.env.PROGRAMFILES ?? 'C:/Program Files'}/BraveSoftware/Brave-Browser/Application/brave.exe`,
           `${process.env['PROGRAMFILES(X86)'] ?? 'C:/Program Files (x86)'}/BraveSoftware/Brave-Browser/Application/brave.exe`,
         ]
-      : ['/usr/bin/brave-browser', '/usr/bin/brave'];
+      : ['/usr/bin/brave-browser', '/usr/bin/brave', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome'];
   return candidates.find(existsSync);
 }
 
@@ -41,6 +42,7 @@ async function ensureBrowser() {
     '--no-first-run',
     '--no-default-browser-check',
     '--autoplay-policy=no-user-gesture-required',
+    ...(process.env.VCL_HEADLESS === '1' ? ['--headless=new', '--disable-gpu', '--no-sandbox'] : []),
     'about:blank',
   ], { detached: true, stdio: 'ignore' }).unref();
   for (let i = 0; i < 40; i++) {
@@ -98,12 +100,20 @@ async function waitFor(predicate, timeoutMs, message) {
 }
 
 async function postJson(path, body) {
-  const response = await fetch(`${apiOrigin}/${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(120000),
-  });
+  console.error(JSON.stringify({ event: 'API_REQUEST_STARTED', path, at: new Date().toISOString() }));
+  let response;
+  try {
+    response = await fetch(`${apiOrigin}/${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(120000),
+    });
+  } catch (error) {
+    const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError';
+    console.error(JSON.stringify({ event: timedOut ? 'API_REQUEST_TIMEOUT' : 'API_REQUEST_FAILED', path, at: new Date().toISOString(), error: error.message }));
+    throw error;
+  }
   let payload = null;
   try { payload = await response.json(); } catch {}
   if (!response.ok) {
@@ -112,6 +122,7 @@ async function postJson(path, body) {
     error.reason = payload?.reason;
     throw error;
   }
+  console.error(JSON.stringify({ event: 'API_REQUEST_COMPLETED', path, status: response.status, at: new Date().toISOString() }));
   return payload;
 }
 
@@ -229,6 +240,7 @@ const runs = [];
 try {
   for (const testCase of targetCases) {
     console.error(`Spike 7: ${testCase.id} — ${testCase.selected_item}`);
+    logEvent('FIXTURE_OPEN', testCase, { source: testCase.source, timestamp_s: testCase.timestamp_s });
     const started = Date.now();
     try {
       const currentUrl = await page.eval(`location.href`);
@@ -256,6 +268,8 @@ try {
           && v.duration > ${Number(testCase.timestamp_s) + 1};
       })()`), 60000, 'Actual YouTube video did not become ready or an ad is still playing');
       await assertPlayableVideo(page);
+      logEvent('VIDEO_READY', testCase, { url: await page.eval('location.href') });
+      await sleep(Number(process.env.VCL_COST_STABILIZE_MS ?? 1500));
       const loadedVideoId = await page.eval(`new URL(location.href).searchParams.get('v')`);
       if (loadedVideoId !== targetVideoId) {
         throw new Error(`Video ID mismatch: loaded=${loadedVideoId} expected=${targetVideoId}`);
@@ -289,6 +303,8 @@ try {
 
       const rect = await videoRect(page);
       const frame = await screenshotDataUrl(page, rect);
+      if (!frame?.startsWith('data:image/')) throw new Error('Frame capture did not return an image');
+      logEvent('FRAME_READY', testCase, { timestamp_s: finalTime, width: rect.width, height: rect.height });
 
       if (process.env.VCL_COST_DEBUG_FRAME === '1') {
         await writeFile(
@@ -301,6 +317,7 @@ try {
       }
 
       const point = { x: Number(testCase.selection?.x ?? 0.5), y: Number(testCase.selection?.y ?? 0.5) };
+      logEvent('SCOOP_INVOKED', testCase, { selection: point, invocation: 'direct-api-runner' });
 
       let localization = null;
       let localizationFailure = null;
@@ -354,6 +371,8 @@ try {
         commerce_query: commerce?.query ?? null,
         verification_usage: commerce?.cost_usage?.verification_usage ?? null,
         verification: commerce?.verification ?? null,
+        result_classes: (commerce?.products ?? []).map((product) => product.result_class).filter(Boolean),
+        jev_router: commerce?.jev_router ?? null,
         timing: commerce?.timing ?? null,
         commerce_calls: commerce?.cost_usage?.commerce_calls ?? {},
         latency_ms: latencyMs,
@@ -364,6 +383,9 @@ try {
         notes: `state=${commerce?.state ?? 'unknown'}; products=${commerce?.products?.length ?? 0}${box.fallback ? '; localization=fallback' : ''}`,
       };
       runs.push(run);
+      await writeFile(outputPath, JSON.stringify({ schema_version: 1, spike: '7', run_date: new Date().toISOString(), runs, summary: { attempted: runs.length, successful: runs.filter((r) => !r.failed).length, failed: runs.filter((r) => r.failed).length } }, null, 2) + '\n');
+      logEvent('ARTIFACT_WRITTEN', testCase, { outputPath });
+      logEvent('FIXTURE_COMPLETE', testCase, { failed: Boolean(run.failed), latency_ms: latencyMs });
       console.error(`  ${latencyMs}ms · ${commerce?.state ?? 'unknown'} · ${commerce?.products?.length ?? 0} products · providers=${run.providers_used.join(',') || 'none'}`);
       console.error(`  localization=${box.fallback ? `fallback:${localizationFailure ?? 'unknown'}` : 'ok'}`);
       console.error(`  analysis=${JSON.stringify(analysisSummary)}`);
@@ -381,12 +403,17 @@ try {
         vision_usage: null,
         verification_usage: null,
         verification: null,
+        result_classes: [],
+        jev_router: null,
         timing: null,
         commerce_calls: {},
         latency_ms: latencyMs,
         provider_blocked: error.status === 429 || error.status === 503,
         notes: `runner/api failure: ${error.message}`,
       });
+      await writeFile(outputPath, JSON.stringify({ schema_version: 1, spike: '7', run_date: new Date().toISOString(), runs, summary: { attempted: runs.length, successful: runs.filter((r) => !r.failed).length, failed: runs.filter((r) => r.failed).length } }, null, 2) + '\n');
+      logEvent('ARTIFACT_WRITTEN', testCase, { outputPath, failure_class: runs.at(-1).failure_class });
+      logEvent('FIXTURE_COMPLETE', testCase, { failed: true, latency_ms: latencyMs });
       if (String(error.message).includes('telemetry is missing')) break;
     }
     await sleep(400);
