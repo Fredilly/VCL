@@ -45,6 +45,32 @@ function validDecision(value: unknown): value is JevRoutingDecision {
     && typeof v.multiframe_action === 'string' && actions.multiframe_action.has(v.multiframe_action as MultiframeAction);
 }
 
+function choiceAnswer(answers: Record<string, unknown>, key: keyof JevRoutingDecision): unknown {
+  const answer = answers[key];
+  if (!answer || typeof answer !== 'object' || Array.isArray(answer)) return undefined;
+  return (answer as Record<string, unknown>).choice;
+}
+
+function parseDecision(value: unknown): JevRoutingDecision | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+
+  // Backward-compatible with the early adapter/tests.
+  if (validDecision(raw.decision)) return raw.decision;
+  if (validDecision(raw)) return raw;
+
+  // Cloudflare Jev returns typed answers under response.answers.<question>.choice.
+  const answers = raw.answers;
+  if (!answers || typeof answers !== 'object' || Array.isArray(answers)) return null;
+  const answerRecord = answers as Record<string, unknown>;
+  const decision = {
+    commerce_action: choiceAnswer(answerRecord, 'commerce_action'),
+    verification_action: choiceAnswer(answerRecord, 'verification_action'),
+    multiframe_action: choiceAnswer(answerRecord, 'multiframe_action'),
+  };
+  return validDecision(decision) ? decision : null;
+}
+
 function usage(value: unknown, key: 'input_tokens' | 'output_tokens'): number {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return 0;
   const v = value as Record<string, unknown>;
@@ -68,8 +94,8 @@ export async function routeWithJev(input: JevRouterInput, ai: WorkersAiBinding, 
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Jev router timeout')), timeoutMs)),
     ]);
     const raw = result as Record<string, unknown>;
-    const decisionValue = raw?.decision ?? raw;
-    if (!validDecision(decisionValue)) throw new Error('Malformed Jev routing response');
+    const decisionValue = parseDecision(raw);
+    if (!decisionValue) throw new Error('Malformed Jev routing response');
     telemetry.input_tokens = usage(raw?.usage, 'input_tokens');
     telemetry.output_tokens = usage(raw?.usage, 'output_tokens');
     Object.assign(telemetry, decisionValue);
