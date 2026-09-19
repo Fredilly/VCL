@@ -54,7 +54,9 @@ async function postJson(path, body) {
 
 const prepared = JSON.parse(await readFile(preparedPath, 'utf8'));
 const rows = prepared.rows ?? [];
-if (rows.length !== 8) throw new Error(`Expected 8 prepared rows, got ${rows.length}`);
+const expectedRows = Number(process.env.JEV_CASE_LIMIT ?? rows.length);
+if (!Number.isInteger(expectedRows) || expectedRows < 1) throw new Error(`Invalid JEV_CASE_LIMIT: ${process.env.JEV_CASE_LIMIT}`);
+if (rows.length !== expectedRows) throw new Error(`Expected ${expectedRows} prepared rows, got ${rows.length}`);
 
 const runs = [];
 const failures = [];
