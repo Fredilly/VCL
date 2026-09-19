@@ -63,7 +63,7 @@ jobs:
             '"workers_dev": true,\n  "preview_urls": true,',
           );
           if (output === input) throw new Error('workers_dev=true not found in Wrangler config');
-          const path = process.env.RUNNER_TEMP + '/jev-wrangler.jsonc';
+          const path = 'apps/api/.jev-wrangler.jsonc';
           writeFileSync(path, output);
           console.log(readFileSync(path, 'utf8'));
           NODE
@@ -72,7 +72,7 @@ jobs:
       - name: Create OFF Worker version preview
         run: |
           pnpm exec wrangler versions upload \
-            --config "$RUNNER_TEMP/jev-wrangler.jsonc" \
+            --config "apps/api/.jev-wrangler.jsonc" \
             --name vcl-api \
             --var JEV_DECISION_ROUTER=false \
             --preview-alias jev-off \
@@ -84,7 +84,7 @@ jobs:
       - name: Create ON Worker version preview
         run: |
           pnpm exec wrangler versions upload \
-            --config "$RUNNER_TEMP/jev-wrangler.jsonc" \
+            --config "apps/api/.jev-wrangler.jsonc" \
             --name vcl-api \
             --var JEV_DECISION_ROUTER=true \
             --preview-alias jev-on \
@@ -130,7 +130,6 @@ jobs:
           echo $? > jev-on-status.txt
 
       - name: Produce OFF vs ON report
-        if: always()
         run: |
           node --input-type=module <<'NODE'
           import { readFileSync, writeFileSync } from 'node:fs';
