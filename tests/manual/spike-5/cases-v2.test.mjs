@@ -29,9 +29,9 @@ test('cases-v2.json has 10 entries with correct metadata', async () => {
 test('s5-08 timestamp is exactly 93 in v2', async () => {
   const v2 = await read('./cases-v2.json');
   const s508 = v2.cases.find((c) => c.id === 's5-08');
-  assert.equal(s508.timestamp_s, 90);
+  assert.equal(s508.timestamp_s, 93);
   assert.equal(s508.corrected, true);
-  assert.ok(s508.correction_note.includes('90s'));
+  assert.ok(s508.correction_note.includes('93s'));
 });
 
 test('s5-10 has valid=false in v2', async () => {
@@ -81,7 +81,7 @@ test('useful SIMILAR or truthful NO_RESULT remains acceptable', async () => {
   const validCases = v2.cases.filter((c) => c.valid !== false);
   assert.equal(validCases.length, 8, '8 valid cases for Golden gate');
   const ids = validCases.map((c) => c.id);
-  assert.ok(ids.includes('s5-08'), 's5-08 (corrected to 90s) is valid');
+  assert.ok(ids.includes('s5-08'), 's5-08 (corrected to 93s) is valid');
   assert.ok(!ids.includes('s5-09'), 's5-09 is excluded as invalid');
   assert.ok(!ids.includes('s5-10'), 's5-10 is excluded as invalid');
 });
