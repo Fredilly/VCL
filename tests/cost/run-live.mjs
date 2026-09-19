@@ -14,6 +14,34 @@ const caseIdFilter = process.env.VCL_COST_CASE_ID ?? null;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const logEvent = (event, testCase, details = {}) => console.error(JSON.stringify({ event, case_id: testCase?.id ?? null, at: new Date().toISOString(), ...details }));
 
+function normalizedIdentity(value) {
+  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function supportsExpectedIdentity(product, expected) {
+  if (!expected) return null;
+  const text = normalizedIdentity([product?.title, product?.brand, product?.model].filter(Boolean).join(' '));
+  const brand = normalizedIdentity(expected.brand);
+  const model = normalizedIdentity(expected.model);
+  if (brand && !text.includes(brand)) return false;
+  if (model) {
+    const modelTokens = model.split(' ').filter(Boolean);
+    if (!modelTokens.every((token) => text.includes(token))) return false;
+  }
+  return true;
+}
+
+function trustCounts(products, expected) {
+  let falseExact = 0;
+  let unsupportedLikely = 0;
+  for (const product of products ?? []) {
+    const supported = supportsExpectedIdentity(product, expected);
+    if (product?.result_class === 'EXACT' && supported !== true) falseExact++;
+    if (product?.result_class === 'LIKELY' && supported !== true) unsupportedLikely++;
+  }
+  return { false_exact: falseExact, unsupported_likely: unsupportedLikely };
+}
+
 async function targets() {
   try { return await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); }
   catch { return null; }
@@ -359,6 +387,7 @@ try {
         model: analysis?.model_candidate ?? null,
         color: analysis?.color ?? null,
       };
+      const trust = trustCounts(commerce?.products ?? [], testCase.expected_identity);
       const run = {
         case_id: testCase.id,
         selected_item: testCase.selected_item,
@@ -372,6 +401,9 @@ try {
         verification_usage: commerce?.cost_usage?.verification_usage ?? null,
         verification: commerce?.verification ?? null,
         result_classes: (commerce?.products ?? []).map((product) => product.result_class).filter(Boolean),
+        false_exact: trust.false_exact,
+        unsupported_likely: trust.unsupported_likely,
+        product_identities: (commerce?.products ?? []).map((product) => ({ title: product.title ?? null, brand: product.brand ?? null, model: product.model ?? null, result_class: product.result_class ?? null })),
         jev_router: commerce?.jev_router ?? null,
         timing: commerce?.timing ?? null,
         commerce_calls: commerce?.cost_usage?.commerce_calls ?? {},
@@ -404,6 +436,9 @@ try {
         verification_usage: null,
         verification: null,
         result_classes: [],
+        false_exact: null,
+        unsupported_likely: null,
+        product_identities: [],
         jev_router: null,
         timing: null,
         commerce_calls: {},
