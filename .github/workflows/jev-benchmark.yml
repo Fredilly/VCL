@@ -132,13 +132,38 @@ jobs:
           export VCL_CDP_PORT=9334
           export VCL_COST_PROFILE="$RUNNER_TEMP/jev-browser-prep"
           export VCL_API_ORIGIN="$(cat jev-off-origin.txt)"
-          node tests/cost/run-live.mjs
-          node --input-type=module <<'NODE'
+
+          prepared_ok=0
+          for attempt in 1 2 3; do
+            echo "Shared vision preparation attempt $attempt/3"
+            rm -f "$VCL_PREPARED_OUTPUT"
+
+            set +e
+            node tests/cost/run-live.mjs
+            runner_status=$?
+            set -e
+
+            if [ "$runner_status" -eq 0 ] && node --input-type=module <<'NODE'
           import { readFileSync } from 'node:fs';
           const prepared = JSON.parse(readFileSync('jev-prepared.json', 'utf8'));
           const expected = Number(process.env.JEV_CASE_LIMIT || 8);
-          if ((prepared.rows ?? []).length !== expected) throw new Error(`Expected ${expected} prepared inputs, got ${prepared.rows?.length ?? 0}`);
+          if ((prepared.rows ?? []).length !== expected) process.exit(1);
           NODE
+            then
+              prepared_ok=1
+              break
+            fi
+
+            if [ "$attempt" -lt 3 ]; then
+              echo "Shared vision preparation was provider-blocked; retrying after cooldown."
+              sleep 20
+            fi
+          done
+
+          if [ "$prepared_ok" -ne 1 ]; then
+            echo "Shared vision preparation failed after 3 attempts."
+            exit 1
+          fi
 
       - name: Run identical OFF and ON commerce from shared vision
         run: |
