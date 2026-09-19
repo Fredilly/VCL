@@ -120,14 +120,23 @@ jobs:
           set +e
           export VCL_COST_CASES="$RUNNER_TEMP/jev-cases.json"
           export VCL_COST_LIMIT=8
-          export VCL_COST_PROFILE="$RUNNER_TEMP/jev-browser"
           export VCL_HEADLESS=1
           export VCL_FROZEN_FRAME_DIR="$GITHUB_WORKSPACE/tests/benchmark/jev/frames"
           printf '{"runs":[]}' > "$GITHUB_WORKSPACE/jev-off.json"
           printf '{"runs":[]}' > "$GITHUB_WORKSPACE/jev-on.json"
-          VCL_API_ORIGIN="$(cat jev-off-origin.txt)" VCL_COST_OUTPUT="$GITHUB_WORKSPACE/jev-off.json" node tests/cost/run-live.mjs
+
+          VCL_CDP_PORT=9334 \
+          VCL_COST_PROFILE="$RUNNER_TEMP/jev-browser-off" \
+          VCL_API_ORIGIN="$(cat jev-off-origin.txt)" \
+          VCL_COST_OUTPUT="$GITHUB_WORKSPACE/jev-off.json" \
+          node tests/cost/run-live.mjs
           echo $? > jev-off-status.txt
-          VCL_API_ORIGIN="$(cat jev-on-origin.txt)" VCL_COST_OUTPUT="$GITHUB_WORKSPACE/jev-on.json" node tests/cost/run-live.mjs
+
+          VCL_CDP_PORT=9335 \
+          VCL_COST_PROFILE="$RUNNER_TEMP/jev-browser-on" \
+          VCL_API_ORIGIN="$(cat jev-on-origin.txt)" \
+          VCL_COST_OUTPUT="$GITHUB_WORKSPACE/jev-on.json" \
+          node tests/cost/run-live.mjs
           echo $? > jev-on-status.txt
 
       - name: Produce OFF vs ON report
