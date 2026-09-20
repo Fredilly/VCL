@@ -80,7 +80,7 @@ jobs:
           pnpm exec wrangler versions upload \
             --config "apps/api/.jev-wrangler.jsonc" \
             --name vcl-api \
-            --var JEV_DECISION_ROUTER=false \
+            --var JEV_DECISION_ROUTER:false \
             --preview-alias jev-off \
             --tag jev-off-${GITHUB_SHA} \
             --message "Jev benchmark OFF ${GITHUB_SHA}" | tee jev-off-upload.log
@@ -92,7 +92,7 @@ jobs:
           pnpm exec wrangler versions upload \
             --config "apps/api/.jev-wrangler.jsonc" \
             --name vcl-api \
-            --var JEV_DECISION_ROUTER=true \
+            --var JEV_DECISION_ROUTER:true \
             --preview-alias jev-on \
             --tag jev-on-${GITHUB_SHA} \
             --message "Jev benchmark ON ${GITHUB_SHA}" | tee jev-on-upload.log
