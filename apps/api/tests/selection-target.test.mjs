@@ -26,7 +26,7 @@ test('both vision adapters use exact click coordinates and two-scale images to l
     const payload = await response.json();
     const { provider_usage, vision_routing, ...box } = payload;
     assert.deepEqual(box, target);
-    assert.deepEqual(vision_routing, [{ provider, status: 'SUCCESS' }]);
+    assert.deepEqual(vision_routing, [{ provider: provider === 'groq' ? 'groq-3.8' : 'gemini', status: 'SUCCESS' }]);
     if (provider === 'groq') {
       assert.equal(provider_usage.provider, 'groq');
       assert.equal(provider_usage.model, 'qwen/qwen3.8-27b');
