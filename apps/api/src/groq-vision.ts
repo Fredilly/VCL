@@ -1,4 +1,5 @@
 import { normalizeObjectDescription, type ObjectDescription, type VisionProvider } from './types.js';
+import { VisionProviderError, type VisionFailureReason } from './gemini-vision.js';
 import { FIELD_CONFIDENCE_PROMPT, nearbyPrompt, normalizeNearbyObservation } from './frame-evidence-prompt.js';
 import { clickedObjectPrompt, normalizeTargetBox, selectionTargetPrompt, type SelectionPoint } from './selection-target.js';
 
@@ -33,6 +34,13 @@ function parseDataUrl(dataUrl: string) {
 
 function finite(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function classifyGroqFailure(status: number, message: string): VisionFailureReason {
+  if (status === 429) return /quota|limit|exhaust/i.test(message) ? 'QUOTA_EXHAUSTED' : 'RATE_LIMITED';
+  if (status === 401 || status === 403) return 'PROVIDER_AUTH';
+  if (status >= 500) return 'PROVIDER_5XX';
+  return 'PROVIDER_ERROR';
 }
 
 export class GroqVisionProvider implements VisionProvider {
@@ -78,7 +86,9 @@ export class GroqVisionProvider implements VisionProvider {
   }
 
   private async generate(prompt: string, images: string[]): Promise<unknown> {
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    let response: Response;
+    try {
+      response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       signal: AbortSignal.timeout(15000),
       headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
@@ -94,10 +104,18 @@ export class GroqVisionProvider implements VisionProvider {
         max_completion_tokens: 1024,
         temperature: 0.2,
       }),
-    });
+      });
+    } catch (error) {
+      const name = error instanceof Error ? error.name : '';
+      if (name === 'TimeoutError' || name === 'AbortError') throw new VisionProviderError('PROVIDER_TIMEOUT', 'Vision provider request timed out.');
+      throw error;
+    }
     const payload = await response.json();
     this.recordUsage(payload?.usage);
-    if (!response.ok) throw new Error(payload?.error?.message || `Vision provider failed with HTTP ${response.status}.`);
+    if (!response.ok) {
+      const message = payload?.error?.message || `Vision provider failed with HTTP ${response.status}.`;
+      throw new VisionProviderError(classifyGroqFailure(response.status, message), message);
+    }
     const content = payload?.choices?.[0]?.message?.content;
     if (typeof content !== 'string') throw new Error('Model returned no text output.');
     return JSON.parse(content.trim().replace(/^```json\s*/i, '').replace(/\s*```$/, ''));
