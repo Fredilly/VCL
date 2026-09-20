@@ -148,3 +148,31 @@ test('default Jev timeout budget is long enough for normal gateway latency', asy
   assert.equal(result.decision.verification_action, 'LIGHT');
   assert.ok(Date.now() - started >= 1000);
 });
+
+test('LIGHT is upgraded to FULL when evidence is not strong enough', async () => {
+  const weak = { ...evidence, confidence: 0.88, identity_confidence: 0.7, visible_text: [], logos_markings: [], distinctive_features: [] };
+  const result = await routeWithJev(routerInput(weak, false, 2), ai({
+    answers: {
+      commerce_action: { type: 'choice', choice: 'SEARCH_NORMAL' },
+      verification_action: { type: 'choice', choice: 'LIGHT' },
+      multiframe_action: { type: 'choice', choice: 'NO' },
+    },
+  }));
+  assert.equal(result.telemetry.failed, false);
+  assert.equal(result.decision.verification_action, 'FULL');
+  assert.equal(result.telemetry.verification_action, 'FULL');
+});
+
+test('LIGHT is preserved only for high-confidence corroborated evidence', async () => {
+  const strong = { ...evidence, confidence: 0.96, identity_confidence: 0.94, visible_text: ['CASIO'], logos_markings: [], distinctive_features: [] };
+  const result = await routeWithJev(routerInput(strong, false, 2), ai({
+    answers: {
+      commerce_action: { type: 'choice', choice: 'SEARCH_NORMAL' },
+      verification_action: { type: 'choice', choice: 'LIGHT' },
+      multiframe_action: { type: 'choice', choice: 'NO' },
+    },
+  }));
+  assert.equal(result.telemetry.failed, false);
+  assert.equal(result.decision.verification_action, 'LIGHT');
+  assert.equal(result.telemetry.verification_action, 'LIGHT');
+});

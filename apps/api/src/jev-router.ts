@@ -52,6 +52,17 @@ function validDecision(value: unknown): value is JevRoutingDecision {
     && typeof v.multiframe_action === 'string' && actions.multiframe_action.has(v.multiframe_action as MultiframeAction);
 }
 
+function strongEnoughForLight(input: JevRouterInput): boolean {
+  const d = input.description;
+  const corroboratingEvidence =
+    (d.visible_text?.length ?? 0) +
+    (d.logos_markings?.length ?? 0) +
+    (d.distinctive_features?.length ?? 0);
+  return d.confidence >= 0.9
+    && d.identity_confidence >= 0.9
+    && corroboratingEvidence >= 1;
+}
+
 function choiceAnswer(answers: Record<string, unknown>, key: keyof JevRoutingDecision): unknown {
   const answer = answers[key];
   if (!answer || typeof answer !== 'object' || Array.isArray(answer)) return undefined;
@@ -154,11 +165,14 @@ export async function routeWithJev(input: JevRouterInput, ai: WorkersAiBinding, 
       telemetry.response_shape = lastResponseShape;
       throw new Error('Malformed Jev routing response');
     }
+    const guardedDecision = decisionValue.verification_action === 'LIGHT' && !strongEnoughForLight(input)
+      ? { ...decisionValue, verification_action: 'FULL' as const }
+      : decisionValue;
     telemetry.input_tokens = usage(raw?.usage, 'input_tokens');
     telemetry.output_tokens = usage(raw?.usage, 'output_tokens');
-    Object.assign(telemetry, decisionValue);
+    Object.assign(telemetry, guardedDecision);
     telemetry.latency_ms = Date.now() - started;
-    return { decision: decisionValue, telemetry };
+    return { decision: guardedDecision, telemetry };
   } catch (error) {
     telemetry.failed = true;
     telemetry.latency_ms = Date.now() - started;
