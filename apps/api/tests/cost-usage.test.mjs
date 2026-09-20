@@ -24,7 +24,7 @@ test('Groq analysis exposes provider token usage without changing description fi
   const result = await provider.analyzeSelection(image, { x: 0.5, y: 0.5 });
   assert.equal(result.subcategory, 'Sweater');
   assert.deepEqual(JSON.parse(JSON.stringify(result.provider_usage)), {
-    provider: 'groq', model: 'qwen/qwen3.6-27b', requests: 1,
+    provider: 'groq', model: 'qwen/qwen3.8-27b', requests: 1,
     prompt_tokens: 120, completion_tokens: 30, total_tokens: 150,
     prompt_time_ms: 10, completion_time_ms: 20, total_time_ms: 30,
   });

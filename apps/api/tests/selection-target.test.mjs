@@ -28,7 +28,7 @@ test('both vision adapters use exact click coordinates and two-scale images to l
     assert.deepEqual(box, target);
     if (provider === 'groq') {
       assert.equal(provider_usage.provider, 'groq');
-      assert.equal(provider_usage.model, 'qwen/qwen3.6-27b');
+      assert.equal(provider_usage.model, 'qwen/qwen3.8-27b');
       assert.equal(provider_usage.requests, 1);
     } else {
       assert.equal(provider_usage, undefined);
