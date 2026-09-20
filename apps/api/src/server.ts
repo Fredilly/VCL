@@ -5,7 +5,7 @@ import { analyzeWithNearbyFrames, mergeFrameEvidence, parseEvidenceFrames } from
 import { normalizeObjectDescription } from './types.js';
 import { parseSelectionPoint, TargetLocalizationError, type SelectionPoint } from './selection-target.js';
 import { CommerceNoResultsError, buildProductQueryVariants, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
-import { verifyCandidate, rankVerified } from './candidate-verification.js';
+import { highConfidenceMetadataContradiction, verifyCandidate, rankVerified } from './candidate-verification.js';
 import { canonical } from './verification-evidence.js';
 import { candidateKey, compareCandidateImages, parseSourceImage, imageRequestBudget } from './candidate-images.js';
 import type { ImageComparison } from './verification-evidence.js';
@@ -164,7 +164,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
   const seen = new Set<string>();
   const imageEvidence = new Map<string, ImageComparison>();
   const imageBudget = imageRequestBudget();
-  const verification = { retrieved: 0, compared: 0, image_failures: 0, image_failure_reasons: {} as Record<string, number>, rejected: 0, contradictions: {} as Record<string, number> };
+  const verification = { retrieved: 0, metadata_prefiltered: 0, compared: 0, image_failures: 0, image_failure_reasons: {} as Record<string, number>, rejected: 0, contradictions: {} as Record<string, number> };
   const timing = {
     provider_retrieval_ms: 0,
     candidate_verification_ms: 0,
@@ -231,8 +231,17 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     });
     verification.retrieved += fresh.length;
     const verificationStarted = Date.now();
-    if (!(routingActive && routing?.verification_action === 'LIGHT') && sourceImage && env.GEMINI_API_KEY && fresh.length) {
-      const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, fresh, context, imageBudget);
+    const viable = fresh.filter((product) => {
+      const contradiction = highConfidenceMetadataContradiction(description, product);
+      if (!contradiction) return true;
+      verification.metadata_prefiltered++;
+      verification.rejected++;
+      const reason = contradiction.split(':')[0];
+      verification.contradictions[reason] = (verification.contradictions[reason] ?? 0) + 1;
+      return false;
+    });
+    if (!(routingActive && routing?.verification_action === 'LIGHT') && sourceImage && env.GEMINI_API_KEY && viable.length) {
+      const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, viable, context, imageBudget);
       verification.compared += images.compared;
       verification.image_failures += images.failures;
       verificationUsage.requests += images.usage?.requests ?? 0;
@@ -245,7 +254,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
       for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
     }
-    for (const product of fresh) {
+    for (const product of viable) {
       const decision = verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context);
       if (decision.product) accepted.push(decision.product);
       else {

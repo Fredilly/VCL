@@ -49,6 +49,23 @@ export function candidateEvidence(candidate: ProductCandidate): Evidence {
   return evidence;
 }
 
+
+export function highConfidenceMetadataContradiction(description: ObjectDescription, candidate: ProductCandidate): string | null {
+  const expected = sourceEvidence(description);
+  const observed = candidateEvidence(candidate);
+  for (const key of critical) {
+    const selected = expected[key];
+    const item = observed[key];
+    const a = canonical(key, selected?.value);
+    const b = canonical(key, item?.value);
+    if (!a || !b || !selected || !item) continue;
+    if (selected.confidence >= HIGH && item.confidence >= HIGH && !compatible(key, a, b)) {
+      return `${key} contradiction: selected ${a}, candidate ${b} (${item.basis})`;
+    }
+  }
+  return null;
+}
+
 function groundedIdentity(description: ObjectDescription, observed: Evidence, comparison?: ImageComparison): boolean {
   if (!comparison) return false;
   return (['brand', 'model'] as const).every(key => {
