@@ -410,9 +410,11 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const groq38 = env.GROQ_API_KEY ? { name: 'groq-3.8' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY, 'qwen/qwen3.8-27b') } : null;
       const groq36 = env.GROQ_API_KEY ? { name: 'groq-3.6' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY, 'qwen/qwen3.6-27b') } : null;
       const cloudflare = env.AI ? { name: 'cloudflare' as const, provider: new CloudflareVisionProvider(env.AI) } : null;
-      const preferred: Array<NamedVisionProvider | null> = env.VISION_PROVIDER === 'groq'
-        ? [groq38, groq36, gemini, cloudflare]
-        : [gemini, groq38, groq36, cloudflare];
+      const preferred: Array<NamedVisionProvider | null> = env.VISION_PROVIDER === 'cloudflare'
+        ? [cloudflare, gemini, groq38, groq36]
+        : env.VISION_PROVIDER === 'groq'
+          ? [groq38, groq36, gemini, cloudflare]
+          : [gemini, groq38, groq36, cloudflare];
       const visionProviders: NamedVisionProvider[] = preferred.filter((entry): entry is NamedVisionProvider => entry !== null);
       if (!visionProviders.length) return jsonResponse({ error: 'No configured vision provider' }, 500);
 
