@@ -48,7 +48,7 @@ export interface Env {
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 
-type VisionProviderName = 'gemini' | 'groq' | 'cloudflare';
+type VisionProviderName = 'gemini' | 'groq-3.8' | 'groq-3.6' | 'cloudflare';
 const visionCooldownUntil = new Map<VisionProviderName, number>();
 const visionFailureReason = new Map<VisionProviderName, string>();
 
@@ -407,11 +407,12 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       type ActiveVisionProvider = GeminiVisionProvider | GroqVisionProvider | CloudflareVisionProvider;
       type NamedVisionProvider = { name: VisionProviderName; provider: ActiveVisionProvider };
       const gemini = env.GEMINI_API_KEY ? { name: 'gemini' as const, provider: new GeminiVisionProvider(env.GEMINI_API_KEY, env.GEMINI_MODEL) } : null;
-      const groq = env.GROQ_API_KEY ? { name: 'groq' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY) } : null;
+      const groq38 = env.GROQ_API_KEY ? { name: 'groq-3.8' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY, 'qwen/qwen3.8-27b') } : null;
+      const groq36 = env.GROQ_API_KEY ? { name: 'groq-3.6' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY, 'qwen/qwen3.6-27b') } : null;
       const cloudflare = env.AI ? { name: 'cloudflare' as const, provider: new CloudflareVisionProvider(env.AI) } : null;
       const preferred: Array<NamedVisionProvider | null> = env.VISION_PROVIDER === 'groq'
-        ? [groq, gemini, cloudflare]
-        : [gemini, groq, cloudflare];
+        ? [groq38, groq36, gemini, cloudflare]
+        : [gemini, groq38, groq36, cloudflare];
       const visionProviders: NamedVisionProvider[] = preferred.filter((entry): entry is NamedVisionProvider => entry !== null);
       if (!visionProviders.length) return jsonResponse({ error: 'No configured vision provider' }, 500);
 
