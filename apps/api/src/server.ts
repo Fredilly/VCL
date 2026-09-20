@@ -416,19 +416,26 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const visionProviders: NamedVisionProvider[] = preferred.filter((entry): entry is NamedVisionProvider => entry !== null);
       if (!visionProviders.length) return jsonResponse({ error: 'No configured vision provider' }, 500);
 
+      const visionRouting: Array<{ provider: VisionProviderName; status: 'SUCCESS' | 'FAILED' | 'SKIPPED'; reason?: string }> = [];
       const tryVision = async <T>(operation: (provider: ActiveVisionProvider) => Promise<T>) => {
         let lastError: unknown;
         let attempted = 0;
         for (const { name, provider } of visionProviders) {
-          if (visionCircuitOpen(name)) continue;
+          if (visionCircuitOpen(name)) {
+            visionRouting.push({ provider: name, status: 'SKIPPED', reason: visionFailureReason.get(name) ?? 'COOLDOWN' });
+            continue;
+          }
           attempted++;
           try {
             const value = await operation(provider);
             markVisionSuccess(name);
+            visionRouting.push({ provider: name, status: 'SUCCESS' });
             return value;
           } catch (error) {
             lastError = error;
             markVisionFailure(name, error);
+            const reason = error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR';
+            visionRouting.push({ provider: name, status: 'FAILED', reason });
             logSafeError(error);
           }
         }
@@ -441,26 +448,33 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       };
 
       if (point && path === '/locate-selection') {
-        try { return jsonResponse(await tryVision((provider) => provider.locateSelection(dataUrl, record.focusDataUrl as string, point))); }
+        try {
+          const localized = await tryVision((provider) => provider.locateSelection(dataUrl, record.focusDataUrl as string, point));
+          return jsonResponse({ ...(localized as object), vision_routing: visionRouting });
+        }
         catch (error) {
           const reason = error instanceof TargetLocalizationError ? error.reason : error instanceof VisionProviderError ? error.reason : 'localization_unavailable';
-          return jsonResponse({ error: 'Could not isolate the clicked object. Adjust the crop and try again.', reason }, 422);
+          return jsonResponse({ error: 'Could not isolate the clicked object. Adjust the crop and try again.', reason, vision_routing: visionRouting }, 422);
         }
       }
       if (nearby && primary && typeof timestamp === 'number') {
-        try { return jsonResponse(await tryVision((provider) => analyzeWithNearbyFrames(provider, dataUrl, primary, timestamp, nearby, point))); }
+        try {
+          const analyzed = await tryVision((provider) => analyzeWithNearbyFrames(provider, dataUrl, primary, timestamp, nearby, point));
+          return jsonResponse({ ...(analyzed as object), vision_routing: visionRouting });
+        }
         catch (error) {
           const reason = error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR';
-          return jsonResponse({ error: 'Object analysis is temporarily unavailable', reason }, 502);
+          return jsonResponse({ error: 'Object analysis is temporarily unavailable', reason, vision_routing: visionRouting }, 502);
         }
       }
       let description;
       try { description = normalizeObjectDescription(await tryVision((provider) => provider.analyzeSelection(dataUrl, point))); }
       catch (error) {
         const reason = error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR';
-        return jsonResponse({ error: 'Object analysis is temporarily unavailable', reason }, 502);
+        return jsonResponse({ error: 'Object analysis is temporarily unavailable', reason, vision_routing: visionRouting }, 502);
       }
-      return jsonResponse(timestamp === undefined ? description : mergeFrameEvidence(description, timestamp as number, []));
+      const analyzed = timestamp === undefined ? description : mergeFrameEvidence(description, timestamp as number, []);
+      return jsonResponse({ ...(analyzed as object), vision_routing: visionRouting });
     }
     if (path === '/resolve-products') {
       const parsed: unknown = await request.json();
