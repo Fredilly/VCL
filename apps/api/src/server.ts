@@ -164,7 +164,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
   const seen = new Set<string>();
   const imageEvidence = new Map<string, ImageComparison>();
   const imageBudget = imageRequestBudget();
-  const verification = { retrieved: 0, metadata_prefiltered: 0, compared: 0, image_failures: 0, image_failure_reasons: {} as Record<string, number>, rejected: 0, contradictions: {} as Record<string, number> };
+  const verification = { retrieved: 0, metadata_prefiltered: 0, light_escalations: 0, compared: 0, image_failures: 0, image_failure_reasons: {} as Record<string, number>, rejected: 0, contradictions: {} as Record<string, number> };
   const timing = {
     provider_retrieval_ms: 0,
     candidate_verification_ms: 0,
@@ -240,7 +240,9 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       verification.contradictions[reason] = (verification.contradictions[reason] ?? 0) + 1;
       return false;
     });
-    if (!(routingActive && routing?.verification_action === 'LIGHT') && sourceImage && env.GEMINI_API_KEY && viable.length) {
+
+    const runImageVerification = async () => {
+      if (!sourceImage || !env.GEMINI_API_KEY || !viable.length) return;
       const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, viable, context, imageBudget);
       verification.compared += images.compared;
       verification.image_failures += images.failures;
@@ -253,9 +255,19 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       timing.verification_batches.push(...(images.timing?.batches ?? []));
       for (const [reason, count] of Object.entries(images.failure_reasons ?? {})) verification.image_failure_reasons[reason] = (verification.image_failure_reasons[reason] ?? 0) + count;
       for (const [key, value] of images.comparisons) imageEvidence.set(key, value);
+    };
+
+    const lightMode = routingActive && routing?.verification_action === 'LIGHT';
+    if (!lightMode) await runImageVerification();
+
+    let decisions = viable.map((product) => ({ product, decision: verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context) }));
+    if (lightMode && viable.length && !decisions.some(({ decision }) => decision.product) && sourceImage && env.GEMINI_API_KEY) {
+      verification.light_escalations++;
+      await runImageVerification();
+      decisions = viable.map((product) => ({ product, decision: verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context) }));
     }
-    for (const product of viable) {
-      const decision = verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context);
+
+    for (const { decision } of decisions) {
       if (decision.product) accepted.push(decision.product);
       else {
         verification.rejected++;

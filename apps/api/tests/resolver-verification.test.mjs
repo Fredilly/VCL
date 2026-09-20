@@ -102,6 +102,21 @@ test('FULL verification skips candidates with obvious metadata contradictions', 
   assert.equal(result.products.length, 1);
 });
 
+test('LIGHT verification escalates to FULL only when metadata yields zero accepted candidates', async () => {
+  const weak = { ...candidate, id: 'weak', title: 'Generic product listing', metadata: {}, destination: 'https://shop.example/weak' };
+  let verifierCalls = 0;
+  const compare = async (...args) => { verifierCalls++; return verifier(...args); };
+  const routing = { commerce_action: 'SEARCH_NORMAL', verification_action: 'LIGHT', telemetry: { failed: false } };
+  const result = await resolveProducts(
+    [{ name: 'test', provider: { async search() { return [weak]; } }, tier: 'primary' }],
+    [queries[0]], description, env, undefined, source, compare, routing,
+  );
+  assert.equal(verifierCalls, 1, 'zero-result LIGHT should escalate once');
+  assert.equal(result.verification.light_escalations, 1);
+  assert.equal(result.state, 'RESULTS');
+  assert.equal(result.products[0].verification_status, 'multimodal');
+});
+
 test('missing images keep credible type matches as SIMILAR without claiming verification', async () => {
   const unavailable = async () => ({ comparisons: new Map(), compared: 0, failures: 1 });
   const result = await resolveProducts([{ name: 'test', provider: { async search() { return [candidate]; } }, tier: 'primary' }], queries, description, env, undefined, source, unavailable);
