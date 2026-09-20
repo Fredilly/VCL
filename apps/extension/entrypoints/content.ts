@@ -203,10 +203,12 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
         dataUrl: result.dataUrl, focusDataUrl: focus.dataUrl, point: selectionPoint(result) });
       if (controller.signal.aborted) return;
       if (located?.error) throw new Error(located.error + (__VCL_DEBUG_PROVENANCE__ && located.reason ? ` (${located.reason})` : ''));
-      result = await cropFrozenSelection(result, validatedTargetBox(located, result));
+      // Validate the localized target, but keep the user's selected crop for analysis.
+      // Destructively recropping to the model's box can remove garment/object context
+      // and amplify localization errors into bad product understanding.
+      validatedTargetBox(located, result);
       stageTiming.localization_ms = Date.now() - localizationStarted;
       if (controller.signal.aborted) return;
-      image.src = result.dataUrl;
       panel.firstElementChild!.textContent = 'VCL analyzing the clicked object…';
     }
     const requestId = crypto.randomUUID();
