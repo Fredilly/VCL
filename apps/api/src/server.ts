@@ -2,7 +2,7 @@ import { GeminiVisionProvider, VisionProviderError } from './gemini-vision.js';
 import { GroqVisionProvider } from './groq-vision.js';
 import { analyzeWithNearbyFrames, mergeFrameEvidence, parseEvidenceFrames } from './multi-frame-evidence.js';
 import { normalizeObjectDescription } from './types.js';
-import { parseSelectionPoint, TargetLocalizationError } from './selection-target.js';
+import { parseSelectionPoint, TargetLocalizationError, type SelectionPoint } from './selection-target.js';
 import { CommerceNoResultsError, buildProductQueryVariants, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
 import { verifyCandidate, rankVerified } from './candidate-verification.js';
 import { canonical } from './verification-evidence.js';
@@ -360,7 +360,7 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const record = parsed as Record<string, unknown>;
       const dataUrl = record.dataUrl;
       if (typeof dataUrl !== 'string' || !parseSourceImage(dataUrl)) return jsonResponse({ error: 'dataUrl must be an image crop under 2 MB' }, 400);
-      let point;
+      let point: SelectionPoint | undefined;
       if (path === '/locate-selection' || record.point !== undefined) {
         try { point = parseSelectionPoint(record.point); }
         catch { return jsonResponse({ error: 'A normalized click point is required' }, 400); }
