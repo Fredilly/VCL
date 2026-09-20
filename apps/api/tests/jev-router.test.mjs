@@ -100,7 +100,7 @@ test('Vercel Jev binding uses only the evaluation-model endpoint and expected he
 });
 
 
-test('Jev binding prefers native Cloudflare Workers AI when both providers are configured', () => {
+test('Jev binding prefers Vercel when both providers are configured', () => {
   const cloudflare = ai({
     answers: {
       commerce_action: { type: 'choice', choice: 'SEARCH_NORMAL' },
@@ -109,14 +109,21 @@ test('Jev binding prefers native Cloudflare Workers AI when both providers are c
     },
   });
   const binding = resolveJevBinding({ AI: cloudflare, AI_GATEWAY_API_KEY: 'vercel-key' });
-  assert.equal(binding, cloudflare);
-});
-
-test('Jev binding uses Vercel only when native Cloudflare Workers AI is unavailable', () => {
-  const binding = resolveJevBinding({ AI_GATEWAY_API_KEY: 'vercel-key' });
   assert.ok(binding);
   assert.equal(binding.modelId, 'typesafe-ai/jev');
   assert.equal(typeof binding.run, 'function');
+});
+
+test('Jev binding falls back to native Cloudflare Workers AI when Vercel is unavailable', () => {
+  const cloudflare = ai({
+    answers: {
+      commerce_action: { type: 'choice', choice: 'SEARCH_NORMAL' },
+      verification_action: { type: 'choice', choice: 'LIGHT' },
+      multiframe_action: { type: 'choice', choice: 'NO' },
+    },
+  });
+  const binding = resolveJevBinding({ AI: cloudflare });
+  assert.equal(binding, cloudflare);
 });
 
 test('Jev binding is disabled when no provider is configured', () => {
