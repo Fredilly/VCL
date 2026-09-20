@@ -264,9 +264,36 @@ jobs:
             const unsupportedLikely = unsupportedLikelyValues.length === rows.length ? unsupportedLikelyValues.reduce((a,b)=>a+b,0) : null;
             const out = { successful_cases: rows.length, useful_rate: rows.length ? useful/rows.length : null, p50_latency_ms: percentile(latencies,.5), p95_latency_ms: percentile(latencies,.95), verification_calls: verification, commerce_calls: commerce, false_exact: falseExact, unsupported_likely: unsupportedLikely };
             if (includeJev) {
-              out.jev_route_choices = {}; out.jev_latency_ms = []; out.jev_failures_timeouts = 0;
-              for (const r of rows) { const j=r.jev_router; if (!j) continue; const k=`${j.commerce_action}/${j.verification_action}/${j.multiframe_action}`; out.jev_route_choices[k]=(out.jev_route_choices[k]??0)+1; out.jev_latency_ms.push(j.latency_ms); if (j.failed) out.jev_failures_timeouts++; }
-              out.jev_p50_latency_ms=percentile(out.jev_latency_ms,.5); out.jev_p95_latency_ms=percentile(out.jev_latency_ms,.95);
+              out.jev_route_choices = {};
+              out.jev_latency_ms = [];
+              out.jev_failures = 0;
+              out.jev_failure_kinds = {};
+              out.jev_failure_diagnostics = [];
+              for (const r of rows) {
+                const j=r.jev_router;
+                if (!j) continue;
+                const k=`${j.commerce_action}/${j.verification_action}/${j.multiframe_action}`;
+                out.jev_route_choices[k]=(out.jev_route_choices[k]??0)+1;
+                out.jev_latency_ms.push(j.latency_ms);
+                if (j.failed) {
+                  out.jev_failures++;
+                  const kind=j.failure_kind ?? 'unknown';
+                  out.jev_failure_kinds[kind]=(out.jev_failure_kinds[kind]??0)+1;
+                  out.jev_failure_diagnostics.push({
+                    case_id:r.case_id,
+                    kind,
+                    message:j.failure_message ?? null,
+                    http_status:j.http_status ?? null,
+                    error_code:j.error_code ?? null,
+                    response_shape:j.response_shape ?? null,
+                    latency_ms:j.latency_ms ?? null,
+                    model:j.model ?? null,
+                    request_schema_version:j.request_schema_version ?? null,
+                  });
+                }
+              }
+              out.jev_p50_latency_ms=percentile(out.jev_latency_ms,.5);
+              out.jev_p95_latency_ms=percentile(out.jev_latency_ms,.95);
             }
             return out;
           };
