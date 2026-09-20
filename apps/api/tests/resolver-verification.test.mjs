@@ -84,6 +84,24 @@ test('resolver verifies at most 8 candidates per provider round before ranking o
   assert.ok(Number.isFinite(result.timing.candidate_verification_ms));
 });
 
+test('FULL verification skips candidates with obvious metadata contradictions', async () => {
+  const wrong = { ...candidate, id: 'wrong', title: 'Nike red dress', destination: 'https://shop.example/wrong' };
+  const good = { ...candidate, id: 'good', destination: 'https://shop.example/good' };
+  const verifiedIds = [];
+  const compare = async (...args) => {
+    verifiedIds.push(...args[4].map((product) => product.id));
+    return verifier(...args);
+  };
+  const result = await resolveProducts(
+    [{ name: 'test', provider: { async search() { return [wrong, good]; } }, tier: 'primary' }],
+    [queries[0]], description, env, undefined, source, compare,
+  );
+  assert.deepEqual(verifiedIds, ['good']);
+  assert.equal(result.verification.metadata_prefiltered, 1);
+  assert.equal(result.verification.rejected, 1);
+  assert.equal(result.products.length, 1);
+});
+
 test('missing images keep credible type matches as SIMILAR without claiming verification', async () => {
   const unavailable = async () => ({ comparisons: new Map(), compared: 0, failures: 1 });
   const result = await resolveProducts([{ name: 'test', provider: { async search() { return [candidate]; } }, tier: 'primary' }], queries, description, env, undefined, source, unavailable);
