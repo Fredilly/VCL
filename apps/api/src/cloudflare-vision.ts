@@ -3,7 +3,7 @@ import { VisionProviderError, type VisionFailureReason } from './gemini-vision.j
 import { FIELD_CONFIDENCE_PROMPT, nearbyPrompt, normalizeNearbyObservation } from './frame-evidence-prompt.js';
 import { clickedObjectPrompt, normalizeTargetBox, selectionTargetPrompt, type SelectionPoint } from './selection-target.js';
 
-const MODEL = '@cf/google/gemma-4-26b-a4b-it';
+const MODEL = '@cf/qwen/qwen3.8-27b';
 const SYSTEM_PROMPT = 'Analyze only the selected product/object crop. Return JSON only with exactly these fields: category, subcategory, brand_candidate, model_candidate, color, material, style_attributes, visible_text, logos_markings, distinctive_features, hardware_details, shape_silhouette, search_terms, confidence, identity_confidence. Extract only visually supported evidence. category should be broad, but subcategory must be the most specific visible product type you can support. If brand/model evidence is weak, use null. Do not infer a famous brand from style alone.';
 
 export interface CloudflareVisionBinding {
