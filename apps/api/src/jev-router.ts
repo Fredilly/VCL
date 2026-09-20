@@ -120,7 +120,7 @@ function stringErrorField(error: unknown, keys: string[]): string | undefined {
   return undefined;
 }
 
-export async function routeWithJev(input: JevRouterInput, ai: WorkersAiBinding, timeoutMs = 900): Promise<{ decision: JevRoutingDecision; telemetry: JevRouterTelemetry }> {
+export async function routeWithJev(input: JevRouterInput, ai: WorkersAiBinding, timeoutMs = 3000): Promise<{ decision: JevRoutingDecision; telemetry: JevRouterTelemetry }> {
   const provider = new JevJudgmentProvider(ai);
   const telemetry: JevRouterTelemetry = {
     enabled: true,
