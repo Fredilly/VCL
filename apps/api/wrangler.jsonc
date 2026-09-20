@@ -11,8 +11,11 @@
     "traces": { "enabled": true, "head_sampling_rate": 0.01 }
   },
   "vars": {
-    "VISION_PROVIDER": "gemini",
-    "GEMINI_MODEL": "gemini-3.5-flash-lite"
+    "VISION_PROVIDER": "groq",
+    "GEMINI_MODEL": "gemini-3.5-flash-lite",
+    "COMMERCE_ELIGIBILITY_GATE": "1",
+    "EBAY_ENVIRONMENT": "production",
+    "JEV_DECISION_ROUTER": "true"
   },
   "ai": {
     "binding": "AI"
