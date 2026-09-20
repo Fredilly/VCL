@@ -85,3 +85,22 @@ Before merging changes that affect capture, selection, localization, vision, pro
 6. Track `PROVIDER_BLOCKED` separately from product or system regression.
 
 Golden tests are smoke/regression evidence, not the full benchmark. Do not expand scope or build later-phase features to compensate for a failed Golden gate.
+
+
+## Founder operating preference — avoid unnecessary sidequests
+
+Default to execution, not low-level instruction.
+
+- Do not send the founder into manual infrastructure, CLI, configuration, deployment, or debugging work when the agent can do it or automate it.
+- Prefer permanent workflow fixes over repeated manual steps.
+- Keep explanations short, simple, and outcome-focused unless deeper detail is explicitly requested.
+- Do not teach implementation details merely because they are educational. Explain only what is necessary to make the current decision or unblock progress.
+- When a repeated operational task appears, automate or encode it in CI/config rather than making the founder repeat it.
+- Surface technical details only when they materially affect product, cost, security, reliability, or a business decision.
+- Exception: deeper technical learning is appropriate when the founder explicitly chooses it, especially for robotics, model fine-tuning, or another skill they intentionally want to learn.
+
+Decision rule:
+
+`Can this be handled by the system/agent instead of consuming founder attention?`
+
+If yes, handle or automate it.
