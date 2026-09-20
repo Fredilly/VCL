@@ -1,5 +1,6 @@
 import { GeminiVisionProvider, VisionProviderError } from './gemini-vision.js';
 import { GroqVisionProvider } from './groq-vision.js';
+import { CloudflareVisionProvider, type CloudflareVisionBinding } from './cloudflare-vision.js';
 import { analyzeWithNearbyFrames, mergeFrameEvidence, parseEvidenceFrames } from './multi-frame-evidence.js';
 import { normalizeObjectDescription } from './types.js';
 import { parseSelectionPoint, TargetLocalizationError, type SelectionPoint } from './selection-target.js';
@@ -41,11 +42,37 @@ export interface Env {
   BRAVE_SEARCH_API_KEY?: string;
   JEV_DECISION_ROUTER?: string;
   AI_GATEWAY_API_KEY?: string;
-  AI?: WorkersAiBinding;
+  AI?: WorkersAiBinding & CloudflareVisionBinding;
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
+
+type VisionProviderName = 'gemini' | 'groq' | 'cloudflare';
+const visionCooldownUntil = new Map<VisionProviderName, number>();
+const visionFailureReason = new Map<VisionProviderName, string>();
+
+function visionCooldownMs(error: unknown): number {
+  const reason = error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR';
+  if (reason === 'QUOTA_EXHAUSTED' || reason === 'PROVIDER_AUTH') return 15 * 60_000;
+  if (reason === 'RATE_LIMITED') return 60_000;
+  if (reason === 'PROVIDER_5XX' || reason === 'PROVIDER_TIMEOUT') return 15_000;
+  return 10_000;
+}
+
+function visionCircuitOpen(name: VisionProviderName): boolean {
+  return (visionCooldownUntil.get(name) ?? 0) > Date.now();
+}
+
+function markVisionFailure(name: VisionProviderName, error: unknown) {
+  visionCooldownUntil.set(name, Date.now() + visionCooldownMs(error));
+  visionFailureReason.set(name, error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR');
+}
+
+function markVisionSuccess(name: VisionProviderName) {
+  visionCooldownUntil.delete(name);
+  visionFailureReason.delete(name);
+}
 const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 function logSafeError(error: unknown) { console.error('VCL API error', error instanceof Error ? { name: error.name, message: error.message } : { name: typeof error, message: String(error) }); }
 
@@ -377,23 +404,37 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
           primary = normalizeObjectDescription(record.primary_description);
         } catch { return jsonResponse({ error: 'Invalid multi-frame evidence request' }, 400); }
       }
-      const providers = env.VISION_PROVIDER === 'groq'
-        ? [
-            env.GROQ_API_KEY ? new GroqVisionProvider(env.GROQ_API_KEY) : null,
-            env.GEMINI_API_KEY ? new GeminiVisionProvider(env.GEMINI_API_KEY, env.GEMINI_MODEL) : null,
-          ]
-        : [
-            env.GEMINI_API_KEY ? new GeminiVisionProvider(env.GEMINI_API_KEY, env.GEMINI_MODEL) : null,
-            env.GROQ_API_KEY ? new GroqVisionProvider(env.GROQ_API_KEY) : null,
-          ];
-      const visionProviders = providers.filter((provider): provider is GeminiVisionProvider | GroqVisionProvider => Boolean(provider));
+      type ActiveVisionProvider = GeminiVisionProvider | GroqVisionProvider | CloudflareVisionProvider;
+      type NamedVisionProvider = { name: VisionProviderName; provider: ActiveVisionProvider };
+      const gemini = env.GEMINI_API_KEY ? { name: 'gemini' as const, provider: new GeminiVisionProvider(env.GEMINI_API_KEY, env.GEMINI_MODEL) } : null;
+      const groq = env.GROQ_API_KEY ? { name: 'groq' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY) } : null;
+      const cloudflare = env.AI ? { name: 'cloudflare' as const, provider: new CloudflareVisionProvider(env.AI) } : null;
+      const preferred = env.VISION_PROVIDER === 'groq'
+        ? [groq, gemini, cloudflare]
+        : [gemini, groq, cloudflare];
+      const visionProviders = preferred.filter((entry): entry is NamedVisionProvider => Boolean(entry));
       if (!visionProviders.length) return jsonResponse({ error: 'No configured vision provider' }, 500);
 
-      const tryVision = async <T>(operation: (provider: GeminiVisionProvider | GroqVisionProvider) => Promise<T>) => {
+      const tryVision = async <T>(operation: (provider: ActiveVisionProvider) => Promise<T>) => {
         let lastError: unknown;
-        for (const provider of visionProviders) {
-          try { return await operation(provider); }
-          catch (error) { lastError = error; logSafeError(error); }
+        let attempted = 0;
+        for (const { name, provider } of visionProviders) {
+          if (visionCircuitOpen(name)) continue;
+          attempted++;
+          try {
+            const value = await operation(provider);
+            markVisionSuccess(name);
+            return value;
+          } catch (error) {
+            lastError = error;
+            markVisionFailure(name, error);
+            logSafeError(error);
+          }
+        }
+        if (!attempted) {
+          const reasons = visionProviders.map(({ name }) => visionFailureReason.get(name)).filter(Boolean);
+          const reason = reasons.includes('QUOTA_EXHAUSTED') ? 'QUOTA_EXHAUSTED' : 'PROVIDER_ERROR';
+          throw new VisionProviderError(reason as any, 'All configured vision providers are temporarily cooling down.');
         }
         throw lastError ?? new Error('Vision providers unavailable');
       };
