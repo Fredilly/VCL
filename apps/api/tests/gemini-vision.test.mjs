@@ -34,16 +34,29 @@ test('recovers from the reported Gemini high-demand error', async (t) => {
   assert.deepEqual(calls[0], calls[2]);
 });
 
-test('stops after three attempts and preserves the reported error', async (t) => {
+test('stops after three attempts and classifies provider 5xx safely', async (t) => {
   const mock = t.mock.method(globalThis, 'fetch', async () =>
     Response.json({ error: { message: fixture.error } }, { status: 503 }));
-  await assert.rejects(new GeminiVisionProvider('test-key').analyzeSelection(image), { message: fixture.error });
+  await assert.rejects(new GeminiVisionProvider('test-key').analyzeSelection(image), { message: fixture.error, reason: 'PROVIDER_5XX' });
   assert.equal(mock.mock.callCount(), 3);
 });
 
 test('does not retry authentication errors', async (t) => {
   const mock = t.mock.method(globalThis, 'fetch', async () =>
     Response.json({ error: { message: 'Invalid API key' } }, { status: 403 }));
-  await assert.rejects(new GeminiVisionProvider('test-key').analyzeSelection(image), { message: 'Invalid API key' });
+  await assert.rejects(new GeminiVisionProvider('test-key').analyzeSelection(image), { message: 'Invalid API key', reason: 'PROVIDER_AUTH' });
   assert.equal(mock.mock.callCount(), 1);
+});
+
+
+test('classifies Gemini quota exhaustion separately from generic rate limiting', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () =>
+    Response.json({ error: { message: 'Quota exceeded for quota metric' } }, { status: 429 }));
+  await assert.rejects(new GeminiVisionProvider('test-key').analyzeSelection(image), { reason: 'QUOTA_EXHAUSTED' });
+});
+
+test('classifies non-quota 429 as rate limited', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () =>
+    Response.json({ error: { message: 'Too many requests' } }, { status: 429 }));
+  await assert.rejects(new GeminiVisionProvider('test-key').analyzeSelection(image), { reason: 'RATE_LIMITED' });
 });
