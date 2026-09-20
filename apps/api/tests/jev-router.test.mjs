@@ -129,3 +129,22 @@ test('Jev binding falls back to native Cloudflare Workers AI when Vercel is unav
 test('Jev binding is disabled when no provider is configured', () => {
   assert.equal(resolveJevBinding({}), undefined);
 });
+
+test('default Jev timeout budget is long enough for normal gateway latency', async () => {
+  const started = Date.now();
+  const result = await routeWithJev(routerInput(evidence, false, 2), {
+    async run() {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+      return {
+        answers: {
+          commerce_action: { type: 'choice', choice: 'SEARCH_NORMAL' },
+          verification_action: { type: 'choice', choice: 'LIGHT' },
+          multiframe_action: { type: 'choice', choice: 'NO' },
+        },
+      };
+    },
+  });
+  assert.equal(result.telemetry.failed, false);
+  assert.equal(result.decision.verification_action, 'LIGHT');
+  assert.ok(Date.now() - started >= 1000);
+});
