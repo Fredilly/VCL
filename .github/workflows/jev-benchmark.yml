@@ -135,44 +135,65 @@ jobs:
           # Preview Workers are reserved for the commerce/Jev comparison only.
           export VCL_API_ORIGIN="https://api.vcl.article6.org"
 
-          prepared_ok=0
-          for attempt in 1 2 3; do
-            echo "Shared vision preparation attempt $attempt/3"
-            rm -f "$VCL_PREPARED_OUTPUT"
+          printf '{"schema_version":1,"rows":[]}' > "$VCL_PREPARED_OUTPUT"
 
-            # Each retry must start from a clean browser/CDP session. The previous
-            # attempt may have exited with a dead Chromium process or stale target.
-            pkill -f "remote-debugging-port=$VCL_CDP_PORT" 2>/dev/null || true
-            rm -rf "$VCL_COST_PROFILE" || true
-            mkdir -p "$VCL_COST_PROFILE"
-            sleep 1
+          for case_index in $(seq 0 $((JEV_CASE_LIMIT - 1))); do
+            case_ok=0
+            case_output="$RUNNER_TEMP/jev-prepared-case-$case_index.json"
 
-            set +e
-            node tests/cost/run-live.mjs
-            runner_status=$?
-            set -e
+            for attempt in 1 2 3; do
+              echo "Preparing vision case $((case_index + 1))/$JEV_CASE_LIMIT, attempt $attempt/3"
+              rm -f "$case_output"
 
-            if [ "$runner_status" -eq 0 ] && node --input-type=module <<'NODE'
-          import { readFileSync } from 'node:fs';
-          const prepared = JSON.parse(readFileSync('jev-prepared.json', 'utf8'));
-          const expected = Number(process.env.JEV_CASE_LIMIT || 8);
-          if ((prepared.rows ?? []).length !== expected) process.exit(1);
+              # A failed provider call can leave Chromium/CDP in a bad state.
+              # Reset only the browser session; keep already prepared cases.
+              pkill -f "remote-debugging-port=$VCL_CDP_PORT" 2>/dev/null || true
+              rm -rf "$VCL_COST_PROFILE" || true
+              mkdir -p "$VCL_COST_PROFILE"
+              sleep 1
+
+              set +e
+              VCL_COST_OFFSET="$case_index" \
+              VCL_COST_LIMIT=1 \
+              VCL_PREPARED_OUTPUT="$case_output" \
+              node tests/cost/run-live.mjs
+              runner_status=$?
+              set -e
+
+              if [ "$runner_status" -eq 0 ] && node --input-type=module "$case_output" "$VCL_PREPARED_OUTPUT" <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const [casePath, combinedPath] = process.argv.slice(2);
+          const one = JSON.parse(readFileSync(casePath, 'utf8'));
+          if ((one.rows ?? []).length !== 1) process.exit(1);
+          const combined = JSON.parse(readFileSync(combinedPath, 'utf8'));
+          combined.rows.push(one.rows[0]);
+          writeFileSync(combinedPath, JSON.stringify(combined, null, 2) + '\n');
           NODE
-            then
-              prepared_ok=1
-              break
-            fi
+              then
+                case_ok=1
+                break
+              fi
 
-            if [ "$attempt" -lt 3 ]; then
-              echo "Shared vision preparation was provider-blocked; retrying after cooldown."
-              sleep 20
+              if [ "$attempt" -lt 3 ]; then
+                echo "Vision case was provider-blocked; preserving completed cases and retrying after cooldown."
+                sleep 20
+              fi
+            done
+
+            if [ "$case_ok" -ne 1 ]; then
+              echo "Shared vision preparation failed on case $((case_index + 1)); completed cases were preserved."
+              exit 1
             fi
           done
 
-          if [ "$prepared_ok" -ne 1 ]; then
-            echo "Shared vision preparation failed after 3 attempts."
-            exit 1
-          fi
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const prepared = JSON.parse(readFileSync('jev-prepared.json', 'utf8'));
+          const expected = Number(process.env.JEV_CASE_LIMIT || 8);
+          if ((prepared.rows ?? []).length !== expected) {
+            throw new Error(`Expected ${expected} prepared inputs, got ${prepared.rows?.length ?? 0}`);
+          }
+          NODE
 
       - name: Run identical OFF and ON commerce from shared vision
         run: |
