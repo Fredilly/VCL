@@ -152,6 +152,7 @@ async function postJson(path, body) {
     const error = new Error(payload?.error ?? `${path} failed with HTTP ${response.status}`);
     error.status = response.status;
     error.reason = payload?.reason;
+    error.vision_routing = payload?.vision_routing ?? null;
     throw error;
   }
   console.error(JSON.stringify({ event: 'API_REQUEST_COMPLETED', path, status: response.status, at: new Date().toISOString() }));
@@ -388,13 +389,16 @@ try {
 
       let localization = null;
       let localizationFailure = null;
+      let localizationRouting = null;
       let box = { x: 0, y: 0, width: 1, height: 1, fallback: true };
       try {
         const focusDataUrl = await screenshotDataUrl(page, focusClip(rect, point));
         localization = await postJson('locate-selection', { dataUrl: frame, focusDataUrl, point });
+        localizationRouting = localization?.vision_routing ?? null;
         box = safeTargetBox(localization);
       } catch (error) {
         localizationFailure = error.reason ?? error.message;
+        localizationRouting = error.vision_routing ?? null;
         console.error(`  localization fallback: ${error.message}${error.reason ? ` (${error.reason})` : ''}`);
       }
 
@@ -420,7 +424,9 @@ try {
           preprocessing_latency_ms: Date.now() - started,
           localization_usage: localization?.provider_usage ?? null,
           localization_failure: localizationFailure,
+          localization_routing: localizationRouting,
           vision_usage: analysis?.provider_usage ?? null,
+          vision_routing: analysis?.vision_routing ?? null,
         });
         await writeFile(preparedOutputPath, JSON.stringify({ schema_version: 1, rows: prepared }, null, 2) + '\n');
         logEvent('PREPARED_INPUT_WRITTEN', testCase, { preparedOutputPath });
@@ -454,7 +460,9 @@ try {
         failure_class: degraded ? 'PROVIDER_BLOCKED' : undefined,
         localization_usage: localization?.provider_usage ?? null,
         localization_failure: localizationFailure,
+        localization_routing: localizationRouting,
         vision_usage: analysis?.provider_usage ?? null,
+        vision_routing: analysis?.vision_routing ?? null,
         analysis: analysisSummary,
         commerce_query: commerce?.query ?? null,
         verification_usage: commerce?.cost_usage?.verification_usage ?? null,
@@ -491,7 +499,9 @@ try {
         failed: true,
         failure_class: error.status === 429 || error.status === 503 ? 'PROVIDER_BLOCKED' : 'RUNNER_OR_API_FAILURE',
         localization_usage: null,
+        localization_routing: null,
         vision_usage: null,
+        vision_routing: error.vision_routing ?? null,
         verification_usage: null,
         verification: null,
         result_classes: [],

@@ -136,6 +136,7 @@ jobs:
           export VCL_API_ORIGIN="https://api.vcl.article6.org"
 
           printf '{"schema_version":1,"rows":[]}' > "$VCL_PREPARED_OUTPUT"
+          printf '{"attempts":[]}' > "$GITHUB_WORKSPACE/jev-vision-attempts.json"
 
           for case_index in $(seq 0 $((JEV_CASE_LIMIT - 1))); do
             case_ok=0
@@ -144,6 +145,8 @@ jobs:
             for attempt in 1 2 3; do
               echo "Preparing vision case $((case_index + 1))/$JEV_CASE_LIMIT, attempt $attempt/3"
               rm -f "$case_output"
+              attempt_output="$RUNNER_TEMP/jev-attempt-$case_index-$attempt.json"
+              rm -f "$attempt_output"
 
               # A failed provider call can leave Chromium/CDP in a bad state.
               # Reset only the browser session; keep already prepared cases.
@@ -156,9 +159,32 @@ jobs:
               VCL_COST_OFFSET="$case_index" \
               VCL_COST_LIMIT=1 \
               VCL_PREPARED_OUTPUT="$case_output" \
+              VCL_COST_OUTPUT="$attempt_output" \
               node tests/cost/run-live.mjs
               runner_status=$?
               set -e
+
+              node --input-type=module - "$attempt_output" "$GITHUB_WORKSPACE/jev-vision-attempts.json" "$runner_status" "$case_index" "$attempt" <<'NODE'
+          import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+          const [attemptPath, aggregatePath, statusRaw, caseIndexRaw, attemptRaw] = process.argv.slice(2);
+          const aggregate = JSON.parse(readFileSync(aggregatePath, 'utf8'));
+          let detail = null;
+          if (existsSync(attemptPath)) {
+            try {
+              const doc = JSON.parse(readFileSync(attemptPath, 'utf8'));
+              detail = (doc.runs ?? doc.failed_runs ?? [])[0] ?? null;
+            } catch {}
+          }
+          aggregate.attempts.push({
+            case_index: Number(caseIndexRaw),
+            attempt: Number(attemptRaw),
+            runner_status: Number(statusRaw),
+            case_id: detail?.case_id ?? null,
+            failure_class: detail?.failure_class ?? null,
+            vision_routing: detail?.vision_routing ?? null,
+          });
+          writeFileSync(aggregatePath, JSON.stringify(aggregate, null, 2) + '\n');
+          NODE
 
               if [ "$runner_status" -eq 0 ] && node --input-type=module - "$case_output" "$VCL_PREPARED_OUTPUT" <<'NODE'
           import { readFileSync, writeFileSync } from 'node:fs';
@@ -220,6 +246,8 @@ jobs:
           const load = (path) => JSON.parse(readFileSync(path, 'utf8'));
           const off = load('jev-off.json');
           const on = load('jev-on.json');
+          const prepared = load('jev-prepared.json');
+          const visionAttempts = load('jev-vision-attempts.json');
           const percentile = (values, p) => { const v = values.filter(Number.isFinite).sort((a,b)=>a-b); return v.length ? v[Math.min(v.length-1, Math.ceil(v.length*p)-1)] : null; };
           const metric = (doc, includeJev) => {
             const rows = doc.runs ?? [];
@@ -239,15 +267,44 @@ jobs:
             }
             return out;
           };
+          const visionRoutes = (prepared.rows ?? []).flatMap(r => [r.localization_routing, r.vision_routing].filter(Array.isArray));
+          const failedAttemptRoutes = (visionAttempts.attempts ?? []).map(a => a.vision_routing).filter(Array.isArray);
+          const allRouteEntries = [...visionRoutes, ...failedAttemptRoutes].flat();
+          const successfulRoute = (route) => route.find(e => e?.status === 'SUCCESS') ?? null;
+          const fallbackOperations = visionRoutes.filter(route => {
+            const success = successfulRoute(route);
+            if (!success) return false;
+            const firstAttempted = route.find(e => e?.status !== 'SKIPPED');
+            return firstAttempted && success.provider !== firstAttempted.provider;
+          }).length;
+          const scoutRetryRecovered = visionRoutes.filter(route =>
+            route.some(e => e?.provider === 'cloudflare' && e?.status === 'FAILED' && e?.reason === 'PROVIDER_ERROR') &&
+            route.some(e => e?.provider === 'cloudflare' && e?.status === 'SUCCESS')
+          ).length;
+          const expectedVisionCases = Number(process.env.JEV_CASE_LIMIT || 8);
+          const firstAttempts = (visionAttempts.attempts ?? []).filter(a => a.attempt === 1);
+          const retriedCaseIndexes = new Set((visionAttempts.attempts ?? []).filter(a => a.attempt > 1).map(a => a.case_index));
+          const visionReliability = {
+            vision_success_rate: expectedVisionCases ? firstAttempts.filter(a => a.runner_status === 0).length / expectedVisionCases : null,
+            first_attempt_successes: firstAttempts.filter(a => a.runner_status === 0).length,
+            cases_retried: retriedCaseIndexes.size,
+            retry_rate: expectedVisionCases ? retriedCaseIndexes.size / expectedVisionCases : null,
+            provider_errors: allRouteEntries.filter(e => e?.reason === 'PROVIDER_ERROR').length,
+            provider_timeouts: allRouteEntries.filter(e => e?.reason === 'PROVIDER_TIMEOUT').length,
+            fallback_operations: fallbackOperations,
+            fallback_rate: visionRoutes.length ? fallbackOperations / visionRoutes.length : null,
+            scout_retry_recovered: scoutRetryRecovered,
+            measured_operations: visionRoutes.length,
+          };
           const O=metric(off,false), N=metric(on,true);
           const delta=(a,b)=>a==null||b==null?null:b-a;
           const pct=(a,b)=>a==null||b==null||a===0?null:(b-a)/a*100;
           const runStatus={off:Number(readFileSync('jev-off-status.txt','utf8')),on:Number(readFileSync('jev-on-status.txt','utf8'))};
           const expected=Number(process.env.JEV_CASE_LIMIT || 8);
           const complete=runStatus.off===0&&runStatus.on===0&&O.successful_cases===expected&&N.successful_cases===expected;
-          const report={commit:readFileSync('benchmark-commit.txt','utf8').trim(),case_limit:expected,off:O,on:N,run_status:runStatus,sample_complete:complete,delta:{useful_rate:delta(O.useful_rate,N.useful_rate),p50_latency_pct:pct(O.p50_latency_ms,N.p50_latency_ms),p95_latency_pct:pct(O.p95_latency_ms,N.p95_latency_ms),verification_calls_pct:pct(O.verification_calls,N.verification_calls),commerce_calls_pct:pct(O.commerce_calls,N.commerce_calls)},trust_gates:{false_exact:O.false_exact===0&&N.false_exact===0,unsupported_likely:O.unsupported_likely===0&&N.unsupported_likely===0,measured:complete&&Number.isFinite(O.false_exact)&&Number.isFinite(N.false_exact)&&Number.isFinite(O.unsupported_likely)&&Number.isFinite(N.unsupported_likely)}};
+          const report={commit:readFileSync('benchmark-commit.txt','utf8').trim(),case_limit:expected,vision_reliability:visionReliability,off:O,on:N,run_status:runStatus,sample_complete:complete,delta:{useful_rate:delta(O.useful_rate,N.useful_rate),p50_latency_pct:pct(O.p50_latency_ms,N.p50_latency_ms),p95_latency_pct:pct(O.p95_latency_ms,N.p95_latency_ms),verification_calls_pct:pct(O.verification_calls,N.verification_calls),commerce_calls_pct:pct(O.commerce_calls,N.commerce_calls)},trust_gates:{false_exact:O.false_exact===0&&N.false_exact===0,unsupported_likely:O.unsupported_likely===0&&N.unsupported_likely===0,measured:complete&&Number.isFinite(O.false_exact)&&Number.isFinite(N.false_exact)&&Number.isFinite(O.unsupported_likely)&&Number.isFinite(N.unsupported_likely)}};
           writeFileSync('jev-report.json',JSON.stringify(report,null,2)+'\n');
-          writeFileSync('jev-report.md', '# Jev OFF vs ON\\n\\nCommit: ' + report.commit + '\\n\\n## OFF\\n\\n' + JSON.stringify(O,null,2) + '\\n\\n## ON\\n\\n' + JSON.stringify(N,null,2) + '\\n\\n## DELTA\\n\\n' + JSON.stringify(report.delta,null,2) + '\\n\\nTrust gates: false EXACT=' + (report.trust_gates.false_exact ? 0 : 'FAIL') + ', unsupported LIKELY=' + (report.trust_gates.unsupported_likely ? 0 : 'FAIL') + '\\n');
+          writeFileSync('jev-report.md', '# Jev OFF vs ON\\n\\nCommit: ' + report.commit + '\\n\\n## VISION RELIABILITY\\n\\n' + JSON.stringify(visionReliability,null,2) + '\\n\\n## OFF\\n\\n' + JSON.stringify(O,null,2) + '\\n\\n## ON\\n\\n' + JSON.stringify(N,null,2) + '\\n\\n## DELTA\\n\\n' + JSON.stringify(report.delta,null,2) + '\\n\\nTrust gates: false EXACT=' + (report.trust_gates.false_exact ? 0 : 'FAIL') + ', unsupported LIKELY=' + (report.trust_gates.unsupported_likely ? 0 : 'FAIL') + '\\n');
           console.log(JSON.stringify(report,null,2));
           if (!report.trust_gates.measured || !report.trust_gates.false_exact || !report.trust_gates.unsupported_likely) process.exitCode=1;
           NODE
@@ -262,6 +319,7 @@ jobs:
             jev-*-upload.log
             jev-*-origin.txt
             jev-prepared.json
+            jev-vision-attempts.json
             jev-off.json
             jev-on.json
             jev-*-status.txt
