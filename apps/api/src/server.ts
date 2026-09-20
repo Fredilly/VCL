@@ -409,10 +409,10 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const gemini = env.GEMINI_API_KEY ? { name: 'gemini' as const, provider: new GeminiVisionProvider(env.GEMINI_API_KEY, env.GEMINI_MODEL) } : null;
       const groq = env.GROQ_API_KEY ? { name: 'groq' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY) } : null;
       const cloudflare = env.AI ? { name: 'cloudflare' as const, provider: new CloudflareVisionProvider(env.AI) } : null;
-      const preferred = env.VISION_PROVIDER === 'groq'
+      const preferred: Array<NamedVisionProvider | null> = env.VISION_PROVIDER === 'groq'
         ? [groq, gemini, cloudflare]
         : [gemini, groq, cloudflare];
-      const visionProviders = preferred.filter((entry): entry is NamedVisionProvider => Boolean(entry));
+      const visionProviders: NamedVisionProvider[] = preferred.filter((entry): entry is NamedVisionProvider => entry !== null);
       if (!visionProviders.length) return jsonResponse({ error: 'No configured vision provider' }, 500);
 
       const tryVision = async <T>(operation: (provider: ActiveVisionProvider) => Promise<T>) => {
