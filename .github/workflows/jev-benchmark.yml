@@ -227,12 +227,15 @@ jobs:
           printf '{"runs":[]}' > "$GITHUB_WORKSPACE/jev-off.json"
           printf '{"runs":[]}' > "$GITHUB_WORKSPACE/jev-on.json"
 
+          prepared_count="$(cat jev-prepared-count.txt)"
+          VCL_PREPARED_CASE_COUNT="$prepared_count" \
           VCL_PREPARED_INPUT="$GITHUB_WORKSPACE/jev-prepared.json" \
           VCL_API_ORIGIN="$(cat jev-off-origin.txt)" \
           VCL_COST_OUTPUT="$GITHUB_WORKSPACE/jev-off.json" \
           node tests/cost/run-prepared-commerce.mjs
           echo $? > jev-off-status.txt
 
+          VCL_PREPARED_CASE_COUNT="$prepared_count" \
           VCL_PREPARED_INPUT="$GITHUB_WORKSPACE/jev-prepared.json" \
           VCL_API_ORIGIN="$(cat jev-on-origin.txt)" \
           VCL_COST_OUTPUT="$GITHUB_WORKSPACE/jev-on.json" \
