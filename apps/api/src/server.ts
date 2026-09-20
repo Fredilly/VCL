@@ -2,7 +2,7 @@ import { GeminiVisionProvider, VisionProviderError } from './gemini-vision.js';
 import { GroqVisionProvider } from './groq-vision.js';
 import { analyzeWithNearbyFrames, mergeFrameEvidence, parseEvidenceFrames } from './multi-frame-evidence.js';
 import { normalizeObjectDescription } from './types.js';
-import { parseSelectionPoint, TargetLocalizationError } from './selection-target.js';
+import { parseSelectionPoint, TargetLocalizationError, type SelectionPoint } from './selection-target.js';
 import { CommerceNoResultsError, buildProductQueryVariants, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
 import { verifyCandidate, rankVerified } from './candidate-verification.js';
 import { canonical } from './verification-evidence.js';
@@ -360,7 +360,7 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const record = parsed as Record<string, unknown>;
       const dataUrl = record.dataUrl;
       if (typeof dataUrl !== 'string' || !parseSourceImage(dataUrl)) return jsonResponse({ error: 'dataUrl must be an image crop under 2 MB' }, 400);
-      let point;
+      let point: SelectionPoint | undefined;
       if (path === '/locate-selection' || record.point !== undefined) {
         try { point = parseSelectionPoint(record.point); }
         catch { return jsonResponse({ error: 'A normalized click point is required' }, 400); }
@@ -377,19 +377,42 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
           primary = normalizeObjectDescription(record.primary_description);
         } catch { return jsonResponse({ error: 'Invalid multi-frame evidence request' }, 400); }
       }
-      const useGemini = env.VISION_PROVIDER === 'gemini';
-      const apiKey = useGemini ? env.GEMINI_API_KEY : env.GROQ_API_KEY;
-      if (!apiKey) return jsonResponse({ error: `Missing ${useGemini ? 'GEMINI_API_KEY' : 'GROQ_API_KEY'}` }, 500);
-      const provider = useGemini ? new GeminiVisionProvider(apiKey, env.GEMINI_MODEL) : new GroqVisionProvider(apiKey);
+      const providers = env.VISION_PROVIDER === 'groq'
+        ? [
+            env.GROQ_API_KEY ? new GroqVisionProvider(env.GROQ_API_KEY) : null,
+            env.GEMINI_API_KEY ? new GeminiVisionProvider(env.GEMINI_API_KEY, env.GEMINI_MODEL) : null,
+          ]
+        : [
+            env.GEMINI_API_KEY ? new GeminiVisionProvider(env.GEMINI_API_KEY, env.GEMINI_MODEL) : null,
+            env.GROQ_API_KEY ? new GroqVisionProvider(env.GROQ_API_KEY) : null,
+          ];
+      const visionProviders = providers.filter((provider): provider is GeminiVisionProvider | GroqVisionProvider => Boolean(provider));
+      if (!visionProviders.length) return jsonResponse({ error: 'No configured vision provider' }, 500);
+
+      const tryVision = async <T>(operation: (provider: GeminiVisionProvider | GroqVisionProvider) => Promise<T>) => {
+        let lastError: unknown;
+        for (const provider of visionProviders) {
+          try { return await operation(provider); }
+          catch (error) { lastError = error; logSafeError(error); }
+        }
+        throw lastError ?? new Error('Vision providers unavailable');
+      };
+
       if (point && path === '/locate-selection') {
-        try { return jsonResponse(await provider.locateSelection(dataUrl, record.focusDataUrl as string, point)); }
+        try { return jsonResponse(await tryVision((provider) => provider.locateSelection(dataUrl, record.focusDataUrl as string, point))); }
         catch (error) {
           return jsonResponse({ error: 'Could not isolate the clicked object. Adjust the crop and try again.', reason: error instanceof TargetLocalizationError ? error.reason : 'localization_unavailable' }, 422);
         }
       }
-      if (nearby && primary && typeof timestamp === 'number') return jsonResponse(await analyzeWithNearbyFrames(provider, dataUrl, primary, timestamp, nearby, point));
+      if (nearby && primary && typeof timestamp === 'number') {
+        try { return jsonResponse(await tryVision((provider) => analyzeWithNearbyFrames(provider, dataUrl, primary, timestamp, nearby, point))); }
+        catch (error) {
+          const reason = error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR';
+          return jsonResponse({ error: 'Object analysis is temporarily unavailable', reason }, 502);
+        }
+      }
       let description;
-      try { description = normalizeObjectDescription(await provider.analyzeSelection(dataUrl, point)); }
+      try { description = normalizeObjectDescription(await tryVision((provider) => provider.analyzeSelection(dataUrl, point))); }
       catch (error) {
         const reason = error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR';
         return jsonResponse({ error: 'Object analysis is temporarily unavailable', reason }, 502);
