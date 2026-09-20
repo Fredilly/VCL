@@ -24,7 +24,10 @@ test('legacy single-frame API shape is unchanged and response is not cacheable',
   const response = await post({ dataUrl: image });
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('cache-control'), 'no-store');
-  assert.deepEqual(await response.json(), description);
+  const result = await response.json();
+  const { vision_routing, ...legacy } = result;
+  assert.deepEqual(legacy, description);
+  assert.deepEqual(vision_routing, [{ provider: 'gemini', status: 'SUCCESS' }]);
 });
 
 test('both adapters send primary first and a single nearby crop per comparison', async () => {
