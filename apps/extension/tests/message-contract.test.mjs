@@ -67,21 +67,21 @@ test('valid vision response continues through commerce resolution', async () => 
   assert.equal(requestBodies[1].source_image, requestBodies[0].dataUrl, 'the same selected crop reaches candidate verification');
 });
 
-test('click point and focus reach localization; only the isolated target reaches analysis and commerce', async () => {
+test('click point and focus reach localization while analysis and commerce preserve the selected crop', async () => {
   const { requestBodies, requests } = await run({ targeted: true });
   assert.equal(requests, 3);
   assert.deepEqual(requestBodies[0].point, { x: 0.75, y: 0.25 });
   assert.equal(requestBodies[0].focusDataUrl, 'focus-pixels');
-  assert.equal(requestBodies[1].dataUrl, 'target-pixels');
+  assert.equal(requestBodies[1].dataUrl, 'data:image/png;base64,test');
   assert.deepEqual(requestBodies[1].point, { x: 0.75, y: 0.25 });
-  assert.equal(requestBodies[2].source_image, 'target-pixels');
+  assert.equal(requestBodies[2].source_image, 'data:image/png;base64,test');
 });
 
 test('failed localization falls back non-blockingly and continues analysis', async () => {
   const { requests, requestBodies, panel } = await run({ targeted: true, locateFails: true });
   assert.equal(requests, 3);
-  assert.equal(requestBodies[1].dataUrl, 'target-pixels');
-  assert.equal(requestBodies[2].source_image, 'target-pixels');
+  assert.equal(requestBodies[1].dataUrl, 'data:image/png;base64,test');
+  assert.equal(requestBodies[2].source_image, 'data:image/png;base64,test');
   assert.equal(panel.firstElementChild.textContent, 'VCL object understanding: success');
 });
 
@@ -116,7 +116,7 @@ test('a complete high-confidence identity can send nearby evidence without chang
   const { panel, requestBodies, requests } = await run({ targeted: true, visionPayload: complete, improve: true });
   assert.equal(requests, 4);
   const nearby = requestBodies.at(-1);
-  assert.equal(nearby.dataUrl, 'target-pixels');
+  assert.equal(nearby.dataUrl, 'data:image/png;base64,test');
   assert.deepEqual(nearby.point, { x: 0.75, y: 0.25 });
   assert.equal(nearby.nearby_frames.length, 1);
   assert.equal(nearby.nearby_frames[0].dataUrl, 'neighbor-pixels');
