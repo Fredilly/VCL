@@ -401,7 +401,8 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       if (point && path === '/locate-selection') {
         try { return jsonResponse(await tryVision((provider) => provider.locateSelection(dataUrl, record.focusDataUrl as string, point))); }
         catch (error) {
-          return jsonResponse({ error: 'Could not isolate the clicked object. Adjust the crop and try again.', reason: error instanceof TargetLocalizationError ? error.reason : 'localization_unavailable' }, 422);
+          const reason = error instanceof TargetLocalizationError ? error.reason : error instanceof VisionProviderError ? error.reason : 'localization_unavailable';
+          return jsonResponse({ error: 'Could not isolate the clicked object. Adjust the crop and try again.', reason }, 422);
         }
       }
       if (nearby && primary && typeof timestamp === 'number') {
