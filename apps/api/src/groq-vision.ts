@@ -40,7 +40,7 @@ export class GroqVisionProvider implements VisionProvider {
 
   constructor(
     private readonly apiKey: string,
-    private readonly model = 'qwen/qwen3.6-27b',
+    private readonly model = 'qwen/qwen3.8-27b',
   ) {
     this.usage = {
       provider: 'groq', model, requests: 0,
