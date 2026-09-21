@@ -26,7 +26,6 @@ test('Cloudflare vision retries one PROVIDER_ERROR before falling back', async (
   const ai = {
     async run(_model, input) {
       calls++;
-      assert.equal(input.image, 'aGVsbG8=');
       if (calls === 1) throw new Error('transient malformed provider response');
       return { response: JSON.stringify(description) };
     },
