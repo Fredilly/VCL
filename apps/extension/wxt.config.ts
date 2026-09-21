@@ -17,7 +17,7 @@ export default defineConfig({
       128: 'icons/scoop-extension-128.png',
     },
     permissions: ['activeTab'],
-    host_permissions: ['http://127.0.0.1:8787/*', 'http://localhost:8787/*'],
+    host_permissions: ['https://api.vcl.article6.org/*'],
     action: {
       default_title: 'Scoop this item',
       default_icon: {
