@@ -50,7 +50,7 @@ export function recordAlphaScoop(input: {
     latency_ms: Math.max(0, now - input.telemetry.interaction_started_at),
     api_commerce_ms: Math.max(0, Math.floor(input.totalMs)),
     providers_used: input.providersUsed.slice(0, 8),
-    results: input.resultRows.slice(0, 8).map((row) => ({ id: boundedId(row.id, 'result_id'), result_class: row.result_class })),
+    results: input.resultRows.slice(0, 8).map((row) => ({ id: String(row.id).slice(0, 160), result_class: row.result_class })),
     vision_usage: input.visionUsage ?? null,
     verification_usage: input.verificationUsage ?? null,
     commerce_calls: input.commerceCalls ?? {},
