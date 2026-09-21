@@ -454,18 +454,24 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
             visionRouting.push({ provider: name, status: 'SKIPPED', reason: visionFailureReason.get(name) ?? 'COOLDOWN' });
             continue;
           }
-          attempted++;
-          try {
-            const value = await operation(provider);
-            markVisionSuccess(name);
-            visionRouting.push({ provider: name, status: 'SUCCESS' });
-            return value;
-          } catch (error) {
-            lastError = error;
-            const reason = error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR';
-            visionRouting.push({ provider: name, status: 'FAILED', reason });
-            logSafeError(error);
-            markVisionFailure(name, error);
+          const maxAttempts = name === 'cloudflare' ? 2 : 1;
+          for (let providerAttempt = 1; providerAttempt <= maxAttempts; providerAttempt++) {
+            attempted++;
+            try {
+              const value = await operation(provider);
+              markVisionSuccess(name);
+              visionRouting.push({ provider: name, status: 'SUCCESS' });
+              return value;
+            } catch (error) {
+              lastError = error;
+              const reason = error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR';
+              visionRouting.push({ provider: name, status: 'FAILED', reason });
+              logSafeError(error);
+              const shouldRetryScout = name === 'cloudflare' && providerAttempt === 1 && reason === 'PROVIDER_ERROR';
+              if (shouldRetryScout) continue;
+              markVisionFailure(name, error);
+              break;
+            }
           }
         }
         if (!attempted) {
