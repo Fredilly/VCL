@@ -13,6 +13,7 @@ export type ProductContext = {
   platform?: string | null;
   title?: string | null;
   url?: string | null;
+  content_ref?: string | null;
 };
 
 export type ProductCandidate = {
@@ -35,6 +36,8 @@ export type ProductCandidate = {
   verification_score?: number;
   verification_reasons?: string[];
   provider?: string;
+  attribution_token?: string;
+  click_ref?: string;
 };
 
 export interface CommerceProvider {
