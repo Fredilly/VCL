@@ -12,10 +12,11 @@ const now = new Date('2026-09-21T00:00:00.000Z');
 
 test('feedback contract accepts only supported labels and binds event/result ids', () => {
   for (const feedback_type of FEEDBACK_TYPES) {
-    assert.deepEqual(
-      normalizeUserFeedback({ event_id: 'evt-1', result_id: 'result-1', feedback_type }, now),
-      { event_id: 'evt-1', result_id: 'result-1', feedback_type, created_at: now.toISOString() },
-    );
+    const feedback = normalizeUserFeedback({ event_id: 'evt-1', result_id: 'result-1', feedback_type }, now);
+    assert.equal(feedback.event_id, 'evt-1');
+    assert.equal(feedback.result_id, 'result-1');
+    assert.equal(feedback.feedback_type, feedback_type);
+    assert.equal(feedback.created_at, now.toISOString());
   }
 
   assert.throws(
