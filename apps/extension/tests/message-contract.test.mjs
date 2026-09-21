@@ -19,7 +19,9 @@ async function run({ visionStatus = 200, visionPayload = description, commerceSt
   const element = () => ({ style: {}, children: [], listeners: new Map(), appendChild(child) { this.children.push(child); if (child.id) nodes.set(child.id, child); },
     append(...children) { for (const child of children) this.appendChild(child); },
     get firstElementChild() { return this.children[0]; }, addEventListener(type, fn) { this.listeners.set(type, fn); }, remove() { nodes.delete(this.id); } });
-  const browser = { action: { onClicked: { addListener() {} } }, commands: { onCommand: { addListener() {} } }, tabs: { query: async () => [], sendMessage: async () => undefined }, runtime: {
+  const storageState = {};
+  const browser = { action: { onClicked: { addListener() {} } }, commands: { onCommand: { addListener() {} } }, tabs: { query: async () => [], sendMessage: async () => undefined },
+    storage: { local: { get: async (key) => ({ [key]: storageState[key] }), set: async (value) => Object.assign(storageState, value) } }, runtime: {
     onMessage: { addListener(fn) { listener = fn; } },
     async sendMessage(message) {
       return await new Promise((resolve, reject) => {
@@ -87,8 +89,11 @@ test('failed localization falls back non-blockingly and continues analysis', asy
 
 test('background listener delivers callback response and returns true to keep channel open', async () => {
   let listener;
-  const browser = { action: { onClicked: { addListener() {} } }, commands: { onCommand: { addListener() {} } }, tabs: { query: async () => [], sendMessage: async () => undefined }, runtime: { onMessage: { addListener(fn) { listener = fn; } } } };
-  const context = vm.createContext({ exports: {}, browser, defineBackground: fn => fn(), console,
+  const storageState = {};
+  const browser = { action: { onClicked: { addListener() {} } }, commands: { onCommand: { addListener() {} } }, tabs: { query: async () => [], sendMessage: async () => undefined },
+    storage: { local: { get: async (key) => ({ [key]: storageState[key] }), set: async (value) => Object.assign(storageState, value) } },
+    runtime: { onMessage: { addListener(fn) { listener = fn; } } } };
+  const context = vm.createContext({ exports: {}, browser, defineBackground: fn => fn(), console, crypto: { randomUUID: () => '123e4567-e89b-12d3-a456-426614174000' },
     fetch: async () => Response.json(description) });
   vm.runInContext(compile(background), context);
   let response;
