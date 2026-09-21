@@ -68,3 +68,35 @@ test('Cloudflare vision does not retry quota exhaustion', async () => {
     { provider: 'cloudflare', status: 'FAILED', reason: 'QUOTA_EXHAUSTED' },
   ]);
 });
+
+
+test('generic Cloudflare provider errors do not open the cooldown circuit', async () => {
+  let calls = 0;
+  const ai = {
+    async run() {
+      calls++;
+      if (calls === 1) throw new Error('transient malformed provider response');
+      return { response: JSON.stringify(description) };
+    },
+  };
+  const { default: worker } = loadModule(new URL('../src/server.ts', import.meta.url).pathname, { TextDecoder });
+
+  const first = await worker.fetch(
+    new Request('https://api.test/analyze-selection', {
+      method: 'POST',
+      body: JSON.stringify({ dataUrl: image }),
+    }),
+    { VISION_PROVIDER: 'cloudflare', AI: ai },
+  );
+  assert.equal(first.status, 502);
+
+  const second = await worker.fetch(
+    new Request('https://api.test/analyze-selection', {
+      method: 'POST',
+      body: JSON.stringify({ dataUrl: image }),
+    }),
+    { VISION_PROVIDER: 'cloudflare', AI: ai },
+  );
+  assert.equal(second.status, 200);
+  assert.equal(calls, 2);
+});
