@@ -1,5 +1,5 @@
 import type { ObjectDescription } from './types.js';
-import type { ProductCandidate, ProductContext } from './commerce.js';
+import { accessoryContradiction, type ProductCandidate, type ProductContext } from './commerce.js';
 import { attributes, canonical, compatible, gender, ageGroup, normalize, phrase, productType, sleeve, type Attribute, type Evidence, type ImageComparison } from './verification-evidence.js';
 
 const HIGH = 0.85;
@@ -51,6 +51,8 @@ export function candidateEvidence(candidate: ProductCandidate): Evidence {
 
 
 export function highConfidenceMetadataContradiction(description: ObjectDescription, candidate: ProductCandidate): string | null {
+  const accessoryConflict = accessoryContradiction(description, candidate);
+  if (accessoryConflict) return accessoryConflict;
   const expected = sourceEvidence(description);
   const observed = candidateEvidence(candidate);
   for (const key of critical) {
@@ -92,6 +94,8 @@ export function verifyCandidate(
   description: ObjectDescription, candidate: ProductCandidate,
   comparison?: ImageComparison, context?: ProductContext,
 ): VerificationDecision {
+  const accessoryConflict = accessoryContradiction(description, candidate);
+  if (accessoryConflict) return { product: null, reasons: [accessoryConflict] };
   const expected = sourceEvidence(description);
   const observed = candidateEvidence(candidate);
   // Pixels outrank the initial model description, which may have mistaken a generic top.
