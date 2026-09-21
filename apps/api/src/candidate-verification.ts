@@ -52,7 +52,7 @@ export function candidateEvidence(candidate: ProductCandidate): Evidence {
 
 export function highConfidenceMetadataContradiction(description: ObjectDescription, candidate: ProductCandidate): string | null {
   const accessoryConflict = accessoryContradiction(description, candidate);
-  if (accessoryConflict) return { product: null, reasons: [accessoryConflict] };
+  if (accessoryConflict) return accessoryConflict;
   const expected = sourceEvidence(description);
   const observed = candidateEvidence(candidate);
   for (const key of critical) {
@@ -94,6 +94,8 @@ export function verifyCandidate(
   description: ObjectDescription, candidate: ProductCandidate,
   comparison?: ImageComparison, context?: ProductContext,
 ): VerificationDecision {
+  const accessoryConflict = accessoryContradiction(description, candidate);
+  if (accessoryConflict) return { product: null, reasons: [accessoryConflict] };
   const expected = sourceEvidence(description);
   const observed = candidateEvidence(candidate);
   // Pixels outrank the initial model description, which may have mistaken a generic top.
