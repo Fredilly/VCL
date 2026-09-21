@@ -21,13 +21,12 @@ const description = {
   identity_confidence: 0,
 };
 
-test('Cloudflare vision retries one PROVIDER_ERROR before falling back', async () => {
+test('Cloudflare vision fails fast on PROVIDER_ERROR so fallback is not delayed', async () => {
   let calls = 0;
   const ai = {
     async run() {
       calls++;
-      if (calls === 1) throw new Error('transient malformed provider response');
-      return { response: JSON.stringify(description) };
+      throw new Error('transient malformed provider response');
     },
   };
   const { default: worker } = loadModule(new URL('../src/server.ts', import.meta.url).pathname, { TextDecoder });
@@ -38,15 +37,12 @@ test('Cloudflare vision retries one PROVIDER_ERROR before falling back', async (
     }),
     { VISION_PROVIDER: 'cloudflare', AI: ai },
   );
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 502);
   const payload = await response.json();
-  assert.equal(calls, 2);
+  assert.equal(calls, 1);
   assert.deepEqual(payload.vision_routing, [
     { provider: 'cloudflare', status: 'FAILED', reason: 'PROVIDER_ERROR' },
-    { provider: 'cloudflare', status: 'SUCCESS' },
   ]);
-  assert.equal(payload.subcategory, 'jersey');
-  assert.deepEqual(payload.visible_text, ['BOSTON', '9']);
 });
 
 test('Cloudflare vision does not retry quota exhaustion', async () => {
