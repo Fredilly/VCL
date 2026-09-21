@@ -68,7 +68,6 @@ function surfaceContext() {
   return {
     platform: location.hostname.includes('youtube.com') ? 'youtube' : 'generic-html5',
     title: youtubeTitle || null,
-    url: location.href,
   };
 }
 
