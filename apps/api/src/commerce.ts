@@ -81,6 +81,94 @@ const TYPE_TERMS: Record<string, string[]> = {
 const COLORS = ['black', 'white', 'grey', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'navy', 'purple', 'pink', 'brown', 'beige', 'cream', 'gold', 'silver'];
 const MATERIALS = ['cotton', 'wool', 'cashmere', 'leather', 'suede', 'silk', 'linen', 'polyester', 'nylon', 'denim', 'ceramic', 'metal', 'glass', 'plastic'];
 
+type ParentAccessoryRule = {
+  family: string;
+  selected: string[];
+  accessories: string[];
+};
+
+const PARENT_ACCESSORY_RULES: ParentAccessoryRule[] = [
+  {
+    family: 'vehicle',
+    selected: ['vehicle', 'car', 'automobile', 'suv', 'sedan', 'truck', 'coupe', 'hatchback'],
+    accessories: ['floor mat', 'floor mats', 'cargo liner', 'seat cover', 'car cover', 'window shade', 'sunshade', 'paint protection film', 'protection film', 'trim kit', 'replacement part', 'spare part'],
+  },
+  {
+    family: 'phone',
+    selected: ['phone', 'smartphone', 'mobile phone', 'cell phone'],
+    accessories: ['phone case', 'protective case', 'case cover', 'screen protector', 'tempered glass', 'charging cable', 'charger', 'phone mount', 'phone holder', 'replacement screen', 'replacement battery'],
+  },
+  {
+    family: 'camera',
+    selected: ['camera', 'mirrorless camera', 'digital camera', 'dslr'],
+    accessories: ['camera case', 'camera bag', 'camera strap', 'battery charger', 'replacement battery', 'lens cap', 'camera mount', 'tripod', 'camera cage'],
+  },
+  {
+    family: 'watch',
+    selected: ['watch', 'smartwatch', 'wristwatch'],
+    accessories: ['watch strap', 'watch band', 'replacement band', 'replacement strap', 'watch charger', 'charging dock', 'watch case', 'screen protector'],
+  },
+  {
+    family: 'furniture',
+    selected: ['furniture', 'sofa', 'couch', 'chair', 'table', 'desk', 'bed', 'cabinet', 'dresser'],
+    accessories: ['furniture cover', 'sofa cover', 'chair cover', 'table cover', 'slipcover', 'replacement leg', 'replacement hardware', 'hardware kit', 'furniture protector'],
+  },
+  {
+    family: 'garment',
+    selected: ['shirt', 't shirt', 'tshirt', 'sweater', 'jumper', 'hoodie', 'jacket', 'coat', 'blazer', 'dress', 'trousers', 'pants', 'jeans', 'shorts', 'skirt', 'polo'],
+    accessories: ['belt', 'scarf', 'tie', 'necktie', 'hat', 'cap', 'handbag', 'bag', 'wallet', 'necklace', 'bracelet', 'sunglasses'],
+  },
+];
+
+function hasPhrase(value: string, phraseValue: string): boolean {
+  return containsPhrase(value, phraseValue);
+}
+
+function familySelectionText(description: ObjectDescription): string {
+  return [
+    description.category,
+    description.subcategory,
+    ...description.style_attributes,
+    ...description.distinctive_features,
+    ...description.shape_silhouette,
+    ...description.search_terms,
+  ].join(' ');
+}
+
+function candidateFamilyText(candidate: ProductCandidate): string {
+  return [
+    candidate.title,
+    candidate.category,
+    candidate.metadata?.category,
+    candidate.metadata?.description,
+  ].filter(Boolean).join(' ');
+}
+
+export function accessoryContradiction(description: ObjectDescription, candidate: ProductCandidate): string | null {
+  const selectedText = familySelectionText(description);
+  const observedText = candidateFamilyText(candidate);
+
+  for (const rule of PARENT_ACCESSORY_RULES) {
+    const selectedParent = rule.selected.some((term) => hasPhrase(selectedText, term));
+    if (!selectedParent) continue;
+
+    // If the selected object itself is clearly an accessory, do not reinterpret it as its parent.
+    const selectedAccessory = rule.accessories.some((term) => hasPhrase(selectedText, term));
+    if (selectedAccessory) continue;
+
+    const accessory = rule.accessories.find((term) => hasPhrase(observedText, term));
+    if (!accessory) continue;
+
+    // Avoid rejecting clear bundles where the candidate explicitly names the parent product too.
+    const namesParent = rule.selected.some((term) => hasPhrase(candidate.title, term));
+    const bundleLanguage = /\b(with|includes|including|bundle|kit with)\b/i.test(candidate.title);
+    if (namesParent && bundleLanguage) continue;
+
+    return `${rule.family} accessory contradiction: selected parent object, candidate ${accessory}`;
+  }
+  return null;
+}
+
 function normalized(value: string | null | undefined): string {
   return (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
@@ -164,6 +252,8 @@ function identityEvidence(description: ObjectDescription): string[] {
 }
 
 export function verifyProductCandidate(description: ObjectDescription, candidate: ProductCandidate, context?: ProductContext): ProductCandidate | null {
+  const accessoryConflict = accessoryContradiction(description, candidate);
+  if (accessoryConflict) return null;
   const title = candidate.title || '';
   const expectedTypes = selectedTypes(description, context);
   const candidateTypes = typeFamilies(title);
