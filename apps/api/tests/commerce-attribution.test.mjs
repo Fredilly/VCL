@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadModule } from './helpers/load-ts.mjs';
 
-const mod = await loadModule('src/commerce-attribution.ts');
+const here = dirname(fileURLToPath(import.meta.url));
+const mod = loadModule(resolve(here, '../src/commerce-attribution.ts'));
 const secret = '0123456789abcdef0123456789abcdef';
 
 test('creator mapping is server controlled', () => {
