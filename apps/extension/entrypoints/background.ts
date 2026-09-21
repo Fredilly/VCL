@@ -57,14 +57,17 @@ export default defineBackground(() => {
     const isLocate = message?.type === 'VCL_LOCATE_SELECTION' && typeof message.dataUrl === 'string';
     const isVision = (message?.type === 'VCL_ANALYZE_SELECTION' || isLocate) && typeof message.dataUrl === 'string';
     const isCommerce = message?.type === 'VCL_RESOLVE_PRODUCTS' && message.description && typeof message.description === 'object';
-    if (!isVision && !isCommerce) return;
+    const isAttribution = message?.type === 'VCL_COMMERCE_CLICK' && typeof message.attribution_token === 'string';
+    if (!isVision && !isCommerce && !isAttribution) return;
 
     const requestId = message.requestId;
-    const endpoint = isLocate ? 'locate-selection' : isVision ? 'analyze-selection' : 'resolve-products';
+    const endpoint = isLocate ? 'locate-selection' : isVision ? 'analyze-selection' : isAttribution ? 'commerce-click' : 'resolve-products';
     const body = isVision
       ? { dataUrl: message.dataUrl, timestamp: message.timestamp, nearby_frames: message.nearby_frames, primary_description: message.primary_description,
         point: message.point, ...(isLocate ? { focusDataUrl: message.focusDataUrl } : {}) }
-      : { description: message.description, context: message.context ?? null, source_image: message.source_image, telemetry: message.telemetry ?? null };
+      : isAttribution
+        ? { attribution_token: message.attribution_token }
+        : { description: message.description, context: message.context ?? null, source_image: message.source_image, telemetry: message.telemetry ?? null };
 
     void getInstallId().then((installId) => fetch(`https://api.vcl.article6.org/${endpoint}`, {
       method: 'POST',

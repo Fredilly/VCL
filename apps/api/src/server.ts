@@ -22,6 +22,7 @@ import { routeWithJev, routerInput, type JevRouterTelemetry } from './jev-router
 import type { WorkersAiBinding } from './jev.js';
 import { resolveJevBinding } from './jev-binding.js';
 import { normalizeAlphaTelemetry, recordAlphaFeedback, recordAlphaScoop } from './alpha-telemetry.js';
+import { creatorForContent, makeAttribution, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 
 export interface Env {
   GEMINI_API_KEY?: string;
@@ -47,6 +48,8 @@ export interface Env {
   JEV_DECISION_ROUTER?: string;
   AI_GATEWAY_API_KEY?: string;
   ALPHA_ENABLED?: string;
+  ALPHA_ATTRIBUTION_SECRET?: string;
+  ALPHA_CREATOR_CONTENT_MAP?: string;
   ALPHA_INSTALL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
   ALPHA_GLOBAL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
   AI?: WorkersAiBinding & CloudflareVisionBinding;
@@ -119,7 +122,7 @@ function dedupeProducts(products: ProductCandidate[]) {
 function normalizeContext(value: unknown): ProductContext | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const v = value as Record<string, unknown>;
-  return { platform: typeof v.platform === 'string' ? v.platform.slice(0, 40) : null, title: typeof v.title === 'string' ? v.title.slice(0, 300) : null };
+  return { platform: typeof v.platform === 'string' ? v.platform.slice(0, 40) : null, title: typeof v.title === 'string' ? v.title.slice(0, 300) : null, content_ref: typeof v.content_ref === 'string' ? v.content_ref.slice(0, 180) : null };
 }
 
 function makeEbayAuth(creds: EbayCredentials): EbayAuth {
@@ -436,7 +439,7 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
   const path = new URL(request.url).pathname;
   if (request.method !== 'POST') return jsonResponse({ error: 'Not found' }, 404);
-  if (env.ALPHA_ENABLED === 'false' && path !== '/feedback') {
+  if (env.ALPHA_ENABLED === 'false' && path !== '/feedback' && path !== '/commerce-click') {
     return jsonResponse({ error: 'Scoop alpha is temporarily paused', reason: 'ALPHA_DISABLED', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: false }, 503);
   }
   try {
@@ -554,6 +557,17 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const analyzed = timestamp === undefined ? description : mergeFrameEvidence(description, timestamp as number, []);
       return jsonResponse({ ...(analyzed as object), vision_routing: visionRouting });
     }
+    if (path === '/commerce-click') {
+      if (!env.ALPHA_ATTRIBUTION_SECRET) return jsonResponse({ error: 'Commerce attribution is not configured' }, 503);
+      try {
+        const body = await request.json() as Record<string, unknown>;
+        const context = await verifyAttributionToken(env.ALPHA_ATTRIBUTION_SECRET, body?.attribution_token);
+        recordCommerceClick(context);
+        return jsonResponse({ accepted: true, click_ref: context.click_ref });
+      } catch {
+        return jsonResponse({ error: 'Invalid commerce attribution' }, 400);
+      }
+    }
     if (path === '/feedback') {
       try {
         const feedback = recordAlphaFeedback(await request.json());
@@ -625,7 +639,25 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
         visionUsage: rawDescription?.provider_usage,
         failureState,
       });
-      return jsonResponse({ ...resolved, latency_ms: total_ms, timing: { ...resolved.timing, total_ms },
+      let attributedProducts = resolved.products;
+      const contentRef = context?.content_ref ?? null;
+      const creatorId = creatorForContent(env.ALPHA_CREATOR_CONTENT_MAP, contentRef);
+      if (env.ALPHA_ATTRIBUTION_SECRET && creatorId && contentRef && alphaTelemetry) {
+        attributedProducts = await Promise.all(resolved.products.map(async (product) => {
+          const merchant = product.provider || product.provenance || 'unknown';
+          const attribution = await makeAttribution({
+            secret: env.ALPHA_ATTRIBUTION_SECRET as string,
+            creator_id: creatorId,
+            content_ref: contentRef,
+            event_id: alphaTelemetry!.event_id,
+            result_id: product.id,
+            merchant,
+            affiliate_network: null,
+          });
+          return { ...product, attribution_token: attribution.attribution_token, click_ref: attribution.click_ref };
+        }));
+      }
+      return jsonResponse({ ...resolved, products: attributedProducts, latency_ms: total_ms, timing: { ...resolved.timing, total_ms },
         ...(resolved.state === 'TEMPORARILY_UNAVAILABLE' ? { failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: true } :
           resolved.state === 'NO_RESULTS' ? { failure_state: 'NO_RESULTS', retryable: false } : {}) });
     }

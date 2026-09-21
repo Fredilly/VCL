@@ -29,6 +29,8 @@ type ProductCandidate = {
   currency: string | null;
   result_class: 'LIKELY' | 'SIMILAR';
   provider?: string;
+  attribution_token?: string;
+  click_ref?: string;
 };
 
 type CommerceResponse = {
@@ -66,9 +68,12 @@ function surfaceContext() {
   const youtubeTitle = document.querySelector('h1.ytd-watch-metadata yt-formatted-string')?.textContent?.trim()
     || document.querySelector('h1.title yt-formatted-string')?.textContent?.trim()
     || document.title.replace(/\s*-\s*YouTube\s*$/i, '').trim();
+  const youtubeMatch = location.hostname.includes('youtube.com') && typeof location.search === 'string' ? location.search.match(/[?&]v=([^&]+)/) : null;
+  const youtubeId = youtubeMatch?.[1] ? decodeURIComponent(youtubeMatch[1]) : null;
   return {
     platform: location.hostname.includes('youtube.com') ? 'youtube' : 'generic-html5',
     title: youtubeTitle || null,
+    content_ref: youtubeId ? `youtube:${youtubeId}` : null,
   };
 }
 
@@ -157,6 +162,11 @@ function renderProducts(panel: HTMLElement, commerce: CommerceResponse) {
       row.href = product.destination;
       row.target = '_blank';
       row.rel = 'noopener noreferrer';
+      if (product.attribution_token) {
+        row.addEventListener('click', () => {
+          void browser.runtime.sendMessage({ type: 'VCL_COMMERCE_CLICK', attribution_token: product.attribution_token }).catch(() => undefined);
+        });
+      }
     }
     Object.assign((row as HTMLElement).style, {
       display: 'grid', gridTemplateColumns: product.image_reference ? '56px 1fr' : '1fr', gap: '8px',
