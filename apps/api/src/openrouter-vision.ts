@@ -1,0 +1,103 @@
+import { normalizeObjectDescription, type ObjectDescription, type ProviderUsage, type VisionProvider } from './types.js';
+import { VisionProviderError, type VisionFailureReason } from './gemini-vision.js';
+import { FIELD_CONFIDENCE_PROMPT, nearbyPrompt, normalizeNearbyObservation } from './frame-evidence-prompt.js';
+import { clickedObjectPrompt, normalizeTargetBox, selectionTargetPrompt, type SelectionPoint } from './selection-target.js';
+
+export const DEFAULT_OPENROUTER_MODEL = 'google/gemini-2.5-flash-lite';
+const PROMPT = 'Analyze only the selected object crop. Return JSON only with exactly these fields: category, subcategory, brand_candidate, model_candidate, color, material, style_attributes, visible_text, logos_markings, distinctive_features, hardware_details, shape_silhouette, search_terms, confidence, identity_confidence. Extract only visually supported evidence. category should be broad, but subcategory must be the most specific visible product type you can support. For apparel, prefer concrete garment types over generic labels. visible_text should contain readable words/letters/numbers actually visible. logos_markings should describe visible logos, emblems, monograms, patches, labels, or symbols without guessing a brand unless supported. If brand/model evidence is weak, use null and keep identity_confidence low. Do not infer a famous brand from style alone.';
+
+function classify(status: number, message: string): VisionFailureReason {
+  if (status === 429) return /quota|credit|balance|insufficient/i.test(message) ? 'QUOTA_EXHAUSTED' : 'RATE_LIMITED';
+  if (status === 401 || status === 403) return 'PROVIDER_AUTH';
+  if (status >= 500) return 'PROVIDER_5XX';
+  return 'PROVIDER_ERROR';
+}
+
+function usage(payload: any, model: string): ProviderUsage {
+  const u = payload?.usage ?? {};
+  return {
+    provider: 'openrouter',
+    model: typeof payload?.model === 'string' ? payload.model : model,
+    requests: 1,
+    prompt_tokens: Number(u.prompt_tokens ?? 0),
+    completion_tokens: Number(u.completion_tokens ?? 0),
+    total_tokens: Number(u.total_tokens ?? 0),
+    ...(Number.isFinite(Number(u.cost)) ? { cost_usd: Number(u.cost) } : {}),
+  };
+}
+
+function parseText(payload: any): string {
+  const content = payload?.choices?.[0]?.message?.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    const text = content.map((part) => typeof part?.text === 'string' ? part.text : '').join('');
+    if (text) return text;
+  }
+  throw new Error('OpenRouter model returned no text output.');
+}
+
+export class OpenRouterVisionProvider implements VisionProvider {
+  constructor(private readonly apiKey: string, private readonly model = DEFAULT_OPENROUTER_MODEL) {}
+
+  async analyzeSelection(dataUrl: string, point?: SelectionPoint): Promise<ObjectDescription> {
+    const result = await this.generate(PROMPT + FIELD_CONFIDENCE_PROMPT + clickedObjectPrompt(point), [dataUrl]);
+    const description = normalizeObjectDescription(result.value);
+    return { ...description, provider_usage: result.usage };
+  }
+
+  async locateSelection(dataUrl: string, focusDataUrl: string, point: SelectionPoint) {
+    const result = await this.generate(selectionTargetPrompt(point), [dataUrl, focusDataUrl]);
+    return { ...normalizeTargetBox(result.value, point), provider_usage: result.usage };
+  }
+
+  async analyzeNearbyFrame(primary: string, nearby: string, description: ObjectDescription, point?: SelectionPoint) {
+    const result = await this.generate(nearbyPrompt(description) + clickedObjectPrompt(point), [primary, nearby]);
+    const observation = normalizeNearbyObservation(result.value);
+    return { ...observation, description: { ...observation.description, provider_usage: result.usage } };
+  }
+
+  private async generate(prompt: string, images: string[]): Promise<{ value: unknown; usage: ProviderUsage }> {
+    let response: Response;
+    try {
+      response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://scoop.article6.org',
+          'X-Title': 'Scoop',
+        },
+        signal: AbortSignal.timeout(15000),
+        body: JSON.stringify({
+          model: this.model,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              ...images.map((url) => ({ type: 'image_url', image_url: { url } })),
+            ],
+          }],
+          response_format: { type: 'json_object' },
+          temperature: 0.2,
+          usage: { include: true },
+        }),
+      });
+    } catch (error) {
+      const name = error instanceof Error ? error.name : '';
+      if (name === 'TimeoutError' || name === 'AbortError') throw new VisionProviderError('PROVIDER_TIMEOUT', 'OpenRouter vision request timed out.');
+      throw error;
+    }
+
+    const payload = await response.json() as any;
+    if (!response.ok) {
+      const message = payload?.error?.message || `OpenRouter vision failed with HTTP ${response.status}.`;
+      throw new VisionProviderError(classify(response.status, message), message);
+    }
+
+    const text = parseText(payload);
+    return {
+      value: JSON.parse(text.trim().replace(/^\`\`\`json\s*/i, '').replace(/\s*\`\`\`$/, '')),
+      usage: usage(payload, this.model),
+    };
+  }
+}
