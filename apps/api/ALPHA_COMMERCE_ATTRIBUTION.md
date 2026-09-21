@@ -35,11 +35,11 @@ The server verifies the signature before logging the click. A client cannot rewr
 
 ## Affiliate sub-ID / click reference
 
-Scoop derives a compact 32-character `click_ref` for each attributed result.
+Scoop derives one compact 32-character `click_ref` per attributed Scoop event. Every product token from that event carries the same reference so the affiliate-network transaction and Scoop click ledger reconcile to the same event.
 
 Current primary-source verification:
 
-- eBay Partner Network supports Custom ID values for granular transaction-level tracking and includes them in transaction detail reporting.
+- eBay Partner Network: set `EBAY_AFFILIATE_CAMPAIGN_ID`. Scoop sends the request `click_ref` as Browse API `affiliateReferenceId` and uses eBay's returned `itemAffiliateWebUrl` as the outbound destination.
 - Awin supports ClickRef/SubID values and reports conversions/commission by ClickRef.
 
 Do not append tracking parameters to ordinary merchant URLs blindly. The commercial adapter must produce the network-approved affiliate destination first, then place Scoop's `click_ref` in that network's documented tracking field.
