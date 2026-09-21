@@ -12,6 +12,7 @@ type EbayItemSummary = {
   title?: string;
   image?: { imageUrl?: string };
   itemWebUrl?: string;
+  itemAffiliateWebUrl?: string;
   price?: { value?: string; currency?: string };
   categories?: Array<{ categoryName?: string }>;
   brand?: { brandName?: string };
@@ -39,7 +40,7 @@ function normalizeItem(item: EbayItemSummary, query: ProductQuery): ProductCandi
     metadata: { brand: item.brand?.brandName, category: item.categories?.[0]?.categoryName },
     image_reference: item.image?.imageUrl ?? null,
     provenance: 'ebay:browse',
-    destination: item.itemWebUrl ?? null,
+    destination: item.itemAffiliateWebUrl ?? item.itemWebUrl ?? null,
     price: item.price?.value ?? null,
     currency: item.price?.currency ?? null,
     result_class: isLikely ? 'LIKELY' : 'SIMILAR',
@@ -53,6 +54,7 @@ export class EbayCommerceProvider implements CommerceProvider {
   constructor(
     private readonly auth: EbayAuth,
     timeoutMs = 2500,
+    private readonly affiliateCampaignId?: string,
   ) {
     this.timeoutMs = timeoutMs;
   }
@@ -101,6 +103,9 @@ export class EbayCommerceProvider implements CommerceProvider {
         headers: {
           Authorization: `Bearer ${token}`,
           'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
+          ...(this.affiliateCampaignId && query.affiliate_reference_id
+            ? { 'X-EBAY-C-ENDUSERCTX': `affiliateCampaignId=${this.affiliateCampaignId},affiliateReferenceId=${query.affiliate_reference_id}` }
+            : {}),
           ...options.headers,
         },
         body: options.body,
