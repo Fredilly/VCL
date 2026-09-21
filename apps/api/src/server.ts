@@ -439,6 +439,9 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
 export default { async fetch(request: Request, env: Env): Promise<Response> {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
   const path = new URL(request.url).pathname;
+  if (request.method === 'GET' && path === '/health') {
+    return jsonResponse({ service: 'vcl-api', status: 'ok' });
+  }
   if (request.method !== 'POST') return jsonResponse({ error: 'Not found' }, 404);
   if (env.ALPHA_ENABLED === 'false' && path !== '/feedback' && path !== '/commerce-click') {
     return jsonResponse({ error: 'Scoop alpha is temporarily paused', reason: 'ALPHA_DISABLED', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: false }, 503);
