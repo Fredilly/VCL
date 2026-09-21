@@ -30,10 +30,10 @@ Current deployed limit:
 
 ## Global guardrail
 
-The Worker also limits the alpha as a whole:
-- 30 product-resolution Scoops per minute across the cohort
+The Worker also limits aggregate alpha traffic:
+- 30 product-resolution Scoops per minute per Cloudflare edge location
 
-This is a runaway-usage brake, not billing/accounting. Cloudflare's rate-limit counters are intentionally permissive/eventually consistent, so cost telemetry and provider-side quota caps remain the accounting source of truth.
+This is a runaway-usage brake, not exact billing/accounting. Cloudflare rate-limit counters are local to an edge location and intentionally permissive/eventually consistent, so cost telemetry and provider-side quota caps remain the accounting source of truth.
 
 ## Cohort access
 
