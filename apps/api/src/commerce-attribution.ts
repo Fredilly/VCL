@@ -41,7 +41,7 @@ function utf8String(bytes: Uint8Array): string {
 function safeId(value: unknown, field: string, max = 120): string {
   if (typeof value !== 'string') throw new Error(`${field} must be a string`);
   const trimmed = value.trim();
-  if (!trimmed || trimmed.length > max || !/^[A-Za-z0-9._:-]+$/.test(trimmed)) throw new Error(`${field} is invalid`);
+  if (!trimmed || trimmed.length > max || !/^[A-Za-z0-9._:|/-]+$/.test(trimmed)) throw new Error(`${field} is invalid`);
   return trimmed;
 }
 
@@ -82,6 +82,20 @@ export function creatorForContent(mapJson: string | undefined, contentRef: unkno
   try { return safeId(creator, 'creator_id', 80); } catch { return null; }
 }
 
+export async function makeCommerceClickRef(input: {
+  secret: string;
+  creator_id: string;
+  content_ref: string;
+  event_id: string;
+}) {
+  const compact = JSON.stringify({
+    creator_id: safeId(input.creator_id, 'creator_id', 80),
+    content_ref: safeId(input.content_ref, 'content_ref', 180),
+    event_id: safeId(input.event_id, 'event_id'),
+  });
+  return bytesToHex(await hmac(input.secret, compact)).slice(0, 32);
+}
+
 export async function makeAttribution(input: {
   secret: string;
   creator_id: string;
@@ -90,6 +104,7 @@ export async function makeAttribution(input: {
   result_id: string;
   merchant: string;
   affiliate_network?: string | null;
+  click_ref?: string | null;
 }) {
   const payload = {
     creator_id: safeId(input.creator_id, 'creator_id', 80),
@@ -100,12 +115,13 @@ export async function makeAttribution(input: {
     affiliate_network: input.affiliate_network ? safeId(input.affiliate_network, 'affiliate_network', 80) : null,
   };
   const content_hash = await sha256(payload.content_ref);
-  const compact = JSON.stringify({ ...payload, content_hash });
+  const click_ref = input.click_ref ? safeId(input.click_ref, 'click_ref', 64) : null;
+  const compact = JSON.stringify({ ...payload, content_hash, ...(click_ref ? { click_ref } : {}) });
   const signature = bytesToHex(await hmac(input.secret, compact));
-  const click_ref = signature.slice(0, 32);
+  const resolved_click_ref = click_ref ?? signature.slice(0, 32);
   return {
     attribution_token: `${base64UrlEncode(compact)}.${signature}`,
-    click_ref,
+    click_ref: resolved_click_ref,
     content_hash,
   };
 }
@@ -129,7 +145,7 @@ export async function verifyAttributionToken(secret: string, token: unknown): Pr
   const merchant = safeId(parsed.merchant, 'merchant', 80);
   const affiliate_network = parsed.affiliate_network == null ? null : safeId(parsed.affiliate_network, 'affiliate_network', 80);
   const content_hash = safeId(parsed.content_hash, 'content_hash', 64);
-  const click_ref = signature.slice(0, 32);
+  const click_ref = parsed.click_ref == null ? signature.slice(0, 32) : safeId(parsed.click_ref, 'click_ref', 64);
   return { creator_id, content_ref, content_hash, event_id, result_id, merchant, affiliate_network, click_ref };
 }
 

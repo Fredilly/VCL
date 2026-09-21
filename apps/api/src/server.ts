@@ -22,7 +22,7 @@ import { routeWithJev, routerInput, type JevRouterTelemetry } from './jev-router
 import type { WorkersAiBinding } from './jev.js';
 import { resolveJevBinding } from './jev-binding.js';
 import { normalizeAlphaTelemetry, recordAlphaFeedback, recordAlphaScoop } from './alpha-telemetry.js';
-import { creatorForContent, makeAttribution, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
+import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 
 export interface Env {
   GEMINI_API_KEY?: string;
@@ -40,6 +40,7 @@ export interface Env {
   EBAY_CLIENT_ID?: string;
   EBAY_CLIENT_SECRET?: string;
   EBAY_SANDBOX?: string;
+  EBAY_AFFILIATE_CAMPAIGN_ID?: string;
   SERPAPI_API_KEY?: string;
   COMMERCE_PROVIDER?: string;
   ETSY_KEYSTRING?: string;
@@ -135,7 +136,7 @@ function commerceProviders(env: Env): NamedCommerceProvider[] {
 
   let ebay: NamedCommerceProvider | null = null;
   const ebayCreds = resolveEbayCredentials(env);
-  if (ebayCreds) ebay = { name: 'ebay', provider: new EbayCommerceProvider(makeEbayAuth(ebayCreds)), tier: 'primary' };
+  if (ebayCreds) ebay = { name: 'ebay', provider: new EbayCommerceProvider(makeEbayAuth(ebayCreds), 2500, env.EBAY_AFFILIATE_CAMPAIGN_ID), tier: 'primary' };
 
   let etsy: NamedCommerceProvider | null = null;
   const etsyCreds = resolveEtsyCredentials(env);
@@ -606,7 +607,19 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
         recordFailureState('commerce', 'NO_CONFIGURED_PROVIDER', false);
         return jsonResponse({ error: 'Shopping sources are temporarily unavailable', reason: 'NO_CONFIGURED_PROVIDER', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: false }, 503);
       }
-      const queries = buildProductQueryVariants(description, context);
+      const contentRef = context?.content_ref ?? null;
+      const creatorId = creatorForContent(env.ALPHA_CREATOR_CONTENT_MAP, contentRef);
+      const affiliateClickRef = env.ALPHA_ATTRIBUTION_SECRET && creatorId && contentRef && alphaTelemetry
+        ? await makeCommerceClickRef({
+            secret: env.ALPHA_ATTRIBUTION_SECRET,
+            creator_id: creatorId,
+            content_ref: contentRef,
+            event_id: alphaTelemetry.event_id,
+          })
+        : null;
+      const queries = buildProductQueryVariants(description, context).map((query) => affiliateClickRef
+        ? { ...query, affiliate_reference_id: affiliateClickRef }
+        : query);
       let routing: Parameters<typeof resolveProducts>[7];
       if (env.JEV_DECISION_ROUTER === 'true') {
         const jevBinding = resolveJevBinding(env);
@@ -640,8 +653,6 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
         failureState,
       });
       let attributedProducts = resolved.products;
-      const contentRef = context?.content_ref ?? null;
-      const creatorId = creatorForContent(env.ALPHA_CREATOR_CONTENT_MAP, contentRef);
       if (env.ALPHA_ATTRIBUTION_SECRET && creatorId && contentRef && alphaTelemetry) {
         attributedProducts = await Promise.all(resolved.products.map(async (product) => {
           const merchant = product.provider || product.provenance || 'unknown';
@@ -652,7 +663,8 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
             event_id: alphaTelemetry!.event_id,
             result_id: product.id,
             merchant,
-            affiliate_network: null,
+            affiliate_network: product.provider === 'ebay' && env.EBAY_AFFILIATE_CAMPAIGN_ID ? 'ebay-epn' : null,
+            click_ref: affiliateClickRef,
           });
           return { ...product, attribution_token: attribution.attribution_token, click_ref: attribution.click_ref };
         }));

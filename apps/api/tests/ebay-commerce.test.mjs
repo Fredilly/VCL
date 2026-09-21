@@ -535,3 +535,53 @@ test('eBay adapter: retrieves 12 candidates before verification limits display',
   const results = await provider.search(query);
   assert.equal(results.length, 12);
 });
+
+
+test('eBay adapter: configured affiliate context carries click_ref and prefers affiliate URL', async () => {
+  let capturedHeaders = {};
+  const ctx = makeEbayContext(makeMockAuth(), {
+    fetch: async (_url, opts) => {
+      capturedHeaders = opts?.headers ?? {};
+      return Response.json({
+        itemSummaries: [{
+          itemId: 'affiliate-1',
+          title: 'Nike Air Max 90 White',
+          itemWebUrl: 'https://example.test/plain',
+          itemAffiliateWebUrl: 'https://example.test/affiliate',
+        }],
+      });
+    },
+  });
+  loadModule(ebaySource, ctx);
+  const { EbayCommerceProvider } = ctx.exports;
+
+  const provider = new EbayCommerceProvider(makeMockAuth(), 2500, '1234567890');
+  const [result] = await provider.search({ ...query, affiliate_reference_id: 'abc123def456' });
+
+  assert.equal(capturedHeaders['X-EBAY-C-ENDUSERCTX'], 'affiliateCampaignId=1234567890,affiliateReferenceId=abc123def456');
+  assert.equal(result.destination, 'https://example.test/affiliate');
+});
+
+test('eBay adapter: unconfigured affiliate context leaves ordinary request and destination unchanged', async () => {
+  let capturedHeaders = {};
+  const ctx = makeEbayContext(makeMockAuth(), {
+    fetch: async (_url, opts) => {
+      capturedHeaders = opts?.headers ?? {};
+      return Response.json({
+        itemSummaries: [{
+          itemId: 'plain-1',
+          title: 'Nike Air Max 90 White',
+          itemWebUrl: 'https://example.test/plain',
+        }],
+      });
+    },
+  });
+  loadModule(ebaySource, ctx);
+  const { EbayCommerceProvider } = ctx.exports;
+
+  const provider = new EbayCommerceProvider(makeMockAuth());
+  const [result] = await provider.search({ ...query, affiliate_reference_id: 'abc123def456' });
+
+  assert.equal(capturedHeaders['X-EBAY-C-ENDUSERCTX'], undefined);
+  assert.equal(result.destination, 'https://example.test/plain');
+});

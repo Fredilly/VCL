@@ -7,6 +7,7 @@ export type ProductQuery = {
   brand: string | null;
   model: string | null;
   attributes: string[];
+  affiliate_reference_id?: string | null;
 };
 
 export type ProductContext = {
