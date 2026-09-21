@@ -57,3 +57,29 @@ test('transaction fixture reconciles to creator and preserves ledger states', as
     assert.equal(ledger.creator_share, 5);
   }
 });
+
+
+test('request-scoped click_ref can be reused by affiliate network and signed token', async () => {
+  const clickRef = await mod.makeCommerceClickRef({
+    secret,
+    creator_id: 'creator_003',
+    content_ref: 'youtube:affiliate123',
+    event_id: 'evt_affiliate_1',
+  });
+  assert.match(clickRef, /^[a-f0-9]{32}$/);
+
+  const issued = await mod.makeAttribution({
+    secret,
+    creator_id: 'creator_003',
+    content_ref: 'youtube:affiliate123',
+    event_id: 'evt_affiliate_1',
+    result_id: 'ebay_789',
+    merchant: 'ebay',
+    affiliate_network: 'ebay-epn',
+    click_ref: clickRef,
+  });
+  const verified = await mod.verifyAttributionToken(secret, issued.attribution_token);
+  assert.equal(issued.click_ref, clickRef);
+  assert.equal(verified.click_ref, clickRef);
+  assert.equal(verified.affiliate_network, 'ebay-epn');
+});
