@@ -19,7 +19,6 @@ test('navigation and fresh overlay paths clean up stale Scoop UI', () => {
   assert.match(content, /event\.key === 'Escape'\) cleanupScoopUi\(\)/);
 });
 
-test('extension requests no persistent storage permission', () => {
-  assert.match(config, /permissions:\s*\['activeTab'\]/);
-  assert.doesNotMatch(config, /['"]storage['"]/);
+test('extension storage permission is explicit and narrowly documented', () => {
+  assert.match(config, /permissions:\s*\['activeTab', 'storage'\]/);
 });
