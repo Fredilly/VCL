@@ -98,17 +98,24 @@ test('background listener delivers callback response and returns true to keep ch
   assert.deepEqual(response, description);
 });
 
-test('vision upstream error crosses promise boundary as friendly UI copy', async () => {
-  const { panel, requests } = await run({ visionStatus: 500, visionPayload: { error: 'Provider unavailable' } });
-  assert.ok(panel.children.some(child => child.textContent === 'Something went wrong. Try again.'));
+test('vision provider failure is shown as temporary and recoverable', async () => {
+  const { panel, requests } = await run({ visionStatus: 502, visionPayload: { error: 'Object analysis is temporarily unavailable', reason: 'PROVIDER_ERROR' } });
+  assert.ok(panel.children.some(child => child.textContent === 'Scoop is temporarily unavailable. Try again in a moment.'));
   assert.equal(requests, 1);
 });
 
-test('commerce error does not erase successful object understanding', async () => {
-  const { panel, requests } = await run({ commerceStatus: 503, commercePayload: { error: 'Missing EBAY_ACCESS_TOKEN' } });
+test('commerce provider failure does not erase successful object understanding', async () => {
+  const { panel, requests } = await run({ commerceStatus: 503, commercePayload: { error: 'Shopping sources are temporarily unavailable', reason: 'NO_CONFIGURED_PROVIDER' } });
   assert.equal(panel.firstElementChild.textContent, 'VCL object understanding: success');
-  assert.ok(panel.children.some(child => child.textContent === 'Scoop is temporarily busy. Try again in a moment.'));
+  assert.ok(panel.children.some(child => child.textContent === 'Scoop is temporarily unavailable. Try again in a moment.'));
   assert.equal(requests, 2);
+});
+
+test('true no-results stays distinct from provider failure', async () => {
+  const { panel, requests } = await run({ commerceStatus: 200, commercePayload: { ...commerce, state: 'NO_RESULTS', failure_state: 'NO_RESULTS', retryable: false } });
+  assert.equal(requests, 2);
+  assert.ok(panel.children.some(child => child.textContent === 'No useful product candidates returned.'));
+  assert.ok(!panel.children.some(child => child.textContent?.includes('temporarily unavailable')));
 });
 
 test('a complete high-confidence identity can send nearby evidence without changing the selected target or confidence', async () => {
