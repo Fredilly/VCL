@@ -564,7 +564,8 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
     }
     if (path === '/resolve-products') {
       const installId = request.headers.get('x-scoop-install-id') ?? '';
-      if (!/^[a-f0-9-]{36}$/i.test(installId)) {
+      const alphaGuardrailsEnabled = Boolean(env.ALPHA_INSTALL_RATE_LIMITER || env.ALPHA_GLOBAL_RATE_LIMITER);
+      if (alphaGuardrailsEnabled && !/^[a-f0-9-]{36}$/i.test(installId)) {
         return jsonResponse({ error: 'Missing alpha install identifier', reason: 'ALPHA_INSTALL_ID_REQUIRED' }, 400);
       }
       if (env.ALPHA_INSTALL_RATE_LIMITER) {
