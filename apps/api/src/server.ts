@@ -65,8 +65,14 @@ function visionCircuitOpen(name: VisionProviderName): boolean {
 }
 
 function markVisionFailure(name: VisionProviderName, error: unknown) {
+  const reason = error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR';
+  if (reason === 'PROVIDER_ERROR') {
+    visionCooldownUntil.delete(name);
+    visionFailureReason.delete(name);
+    return;
+  }
   visionCooldownUntil.set(name, Date.now() + visionCooldownMs(error));
-  visionFailureReason.set(name, error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR');
+  visionFailureReason.set(name, reason);
 }
 
 function markVisionSuccess(name: VisionProviderName) {
