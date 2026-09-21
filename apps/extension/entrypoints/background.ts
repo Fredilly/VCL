@@ -51,7 +51,7 @@ export default defineBackground(() => {
     const body = isVision
       ? { dataUrl: message.dataUrl, timestamp: message.timestamp, nearby_frames: message.nearby_frames, primary_description: message.primary_description,
         point: message.point, ...(isLocate ? { focusDataUrl: message.focusDataUrl } : {}) }
-      : { description: message.description, context: message.context ?? null, source_image: message.source_image };
+      : { description: message.description, context: message.context ?? null, source_image: message.source_image, telemetry: message.telemetry ?? null };
 
     void fetch(`https://api.vcl.article6.org/${endpoint}`, {
       method: 'POST',

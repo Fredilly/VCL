@@ -4,6 +4,7 @@ import { captureNearbyFrames, nearbyCaptureLimitation } from '../lib/nearby-fram
 const OVERLAY_ID = 'vcl-overlay-root';
 const RESULT_ID = 'vcl-capture-result';
 let activeCapture: AbortController | undefined;
+const alphaSessionId = crypto.randomUUID();
 
 type ObjectDescription = {
   category: string;
@@ -190,6 +191,8 @@ function renderProducts(panel: HTMLElement, commerce: CommerceResponse) {
 }
 
 async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, supplied?: ObjectDescription, captureDebug?: unknown, stageTiming: Record<string, number | null> = {}) {
+  const scoopEventId = crypto.randomUUID();
+  const interactionStarted = Date.now();
   const panel = basePanel('VCL analyzing selection…');
   const controller = new AbortController();
   activeCapture = controller;
@@ -310,6 +313,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       description: analysis,
       context: surfaceContext(),
       source_image: result.dataUrl,
+      telemetry: { event_id: scoopEventId, session_id: alphaSessionId, interaction_started_at: interactionStarted },
     });
     if (controller.signal.aborted) return;
     if (commerceRaw && typeof commerceRaw === 'object' && typeof commerceRaw.error === 'string') throw new Error(commerceRaw.error);
