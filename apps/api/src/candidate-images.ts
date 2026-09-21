@@ -191,7 +191,15 @@ export async function compareCandidateImages(
   let failures = 0;
   const failure_reasons: Record<string, number> = {};
   const verificationProvider = options.provider ?? 'gemini';
-  const usage: GeminiVerificationUsage = { provider: verificationProvider, model, requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0 };
+  const usage: GeminiVerificationUsage = {
+    provider: verificationProvider,
+    model,
+    requests: 0,
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+    ...(verificationProvider === 'openrouter' ? { cost_usd: 0 } : {}),
+  };
   const timingStarted = Date.now();
   const timing: ImageVerification['timing'] = { image_fetch_ms: 0, model_ms: 0, total_ms: 0, batches: [] };
   const failure = (reason: string, count = 1) => { failure_reasons[reason] = (failure_reasons[reason] ?? 0) + count; };
