@@ -11,12 +11,13 @@ function reserve(budget: ImageRequestBudget): boolean {
   budget.remaining--; return true;
 }
 export type GeminiVerificationUsage = {
-  provider: 'gemini';
+  provider: 'gemini' | 'openrouter';
   model: string;
   requests: number;
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  cost_usd?: number;
 };
 export type VerificationBatchTiming = {
   batch_index: number;
@@ -184,11 +185,21 @@ function usageNumber(value: unknown): number {
 export async function compareCandidateImages(
   apiKey: string, model: string, source: Image, description: ObjectDescription,
   products: ProductCandidate[], context?: ProductContext, budget = imageRequestBudget(),
+  options: { provider?: 'gemini' | 'openrouter' } = {},
 ): Promise<ImageVerification> {
   const comparisons = new Map<string, ImageComparison>();
   let failures = 0;
   const failure_reasons: Record<string, number> = {};
-  const usage: GeminiVerificationUsage = { provider: 'gemini', model, requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+  const verificationProvider = options.provider ?? 'gemini';
+  const usage: GeminiVerificationUsage = {
+    provider: verificationProvider,
+    model,
+    requests: 0,
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+    ...(verificationProvider === 'openrouter' ? { cost_usd: 0 } : {}),
+  };
   const timingStarted = Date.now();
   const timing: ImageVerification['timing'] = { image_fetch_ms: 0, model_ms: 0, total_ms: 0, batches: [] };
   const failure = (reason: string, count = 1) => { failure_reasons[reason] = (failure_reasons[reason] ?? 0) + count; };
@@ -269,22 +280,52 @@ export async function compareCandidateImages(
       const modelStarted = Date.now();
       try {
         usage.requests++;
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-          // A verifier result is useful only while the interaction is still live.
-          // Keep this bounded below the former 25s serial-batch stall; failure
-          // remains an unknown comparison and never promotes a candidate.
-          method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(12000),
-          body: JSON.stringify({ systemInstruction: { parts: [{ text: INSTRUCTIONS }] }, contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', responseSchema, temperature: 0, maxOutputTokens: 12000 } }),
-        });
+        const response = verificationProvider === 'openrouter'
+          ? await fetch('https://openrouter.ai/api/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': 'https://scoop.article6.org',
+                'X-Title': 'Scoop',
+              },
+              signal: AbortSignal.timeout(12000),
+              body: JSON.stringify({
+                model,
+                messages: [
+                  { role: 'system', content: INSTRUCTIONS },
+                  { role: 'user', content: parts.map((part) => 'text' in part
+                    ? { type: 'text', text: part.text }
+                    : { type: 'image_url', image_url: { url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` } }) },
+                ],
+                response_format: { type: 'json_object' },
+                temperature: 0,
+                max_tokens: 12000,
+                usage: { include: true },
+              }),
+            })
+          : await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+              // A verifier result is useful only while the interaction is still live.
+              // Keep this bounded below the former 25s serial-batch stall; failure
+              // remains an unknown comparison and never promotes a candidate.
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(12000),
+              body: JSON.stringify({ systemInstruction: { parts: [{ text: INSTRUCTIONS }] }, contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', responseSchema, temperature: 0, maxOutputTokens: 12000 } }),
+            });
         if (!response.ok) { failure(`model_http_${response.status}`, images.length); await response.body?.cancel(); failures += images.length; return; }
-        const payload = await response.json() as {
-          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-          usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
-        };
-        usage.prompt_tokens += usageNumber(payload.usageMetadata?.promptTokenCount);
-        usage.completion_tokens += usageNumber(payload.usageMetadata?.candidatesTokenCount);
-        usage.total_tokens += usageNumber(payload.usageMetadata?.totalTokenCount);
-        const text = payload.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('');
+        const payload = await response.json() as any;
+        if (verificationProvider === 'openrouter') {
+          usage.prompt_tokens += usageNumber(payload.usage?.prompt_tokens);
+          usage.completion_tokens += usageNumber(payload.usage?.completion_tokens);
+          usage.total_tokens += usageNumber(payload.usage?.total_tokens);
+          usage.cost_usd = (usage.cost_usd ?? 0) + usageNumber(payload.usage?.cost);
+        } else {
+          usage.prompt_tokens += usageNumber(payload.usageMetadata?.promptTokenCount);
+          usage.completion_tokens += usageNumber(payload.usageMetadata?.candidatesTokenCount);
+          usage.total_tokens += usageNumber(payload.usageMetadata?.totalTokenCount);
+        }
+        const text = verificationProvider === 'openrouter'
+          ? (typeof payload.choices?.[0]?.message?.content === 'string' ? payload.choices[0].message.content : '')
+          : payload.candidates?.[0]?.content?.parts?.map((part: any) => part.text ?? '').join('');
         const parsed = parseComparisons(text ? JSON.parse(text) : null, images.length);
         failures += images.length - parsed.size;
         if (parsed.size < images.length) failure(text ? 'model_schema' : 'model_empty', images.length - parsed.size);

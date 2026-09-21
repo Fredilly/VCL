@@ -1,6 +1,7 @@
 import { GeminiVisionProvider, VisionProviderError } from './gemini-vision.js';
 import { GroqVisionProvider } from './groq-vision.js';
 import { CloudflareVisionProvider, type CloudflareVisionBinding } from './cloudflare-vision.js';
+import { OpenRouterVisionProvider, DEFAULT_OPENROUTER_MODEL } from './openrouter-vision.js';
 import { analyzeWithNearbyFrames, mergeFrameEvidence, parseEvidenceFrames } from './multi-frame-evidence.js';
 import { normalizeObjectDescription } from './types.js';
 import { parseSelectionPoint, TargetLocalizationError, type SelectionPoint } from './selection-target.js';
@@ -26,6 +27,8 @@ export interface Env {
   GROQ_API_KEY?: string;
   VISION_PROVIDER?: string;
   GEMINI_MODEL?: string;
+  OPENROUTER_API_KEY?: string;
+  OPENROUTER_MODEL?: string;
   EBAY_SANDBOX_CLIENT_ID?: string;
   EBAY_SANDBOX_CLIENT_SECRET?: string;
   EBAY_PRODUCTION_CLIENT_ID?: string;
@@ -48,7 +51,7 @@ export interface Env {
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 
-type VisionProviderName = 'gemini' | 'groq-3.8' | 'groq-3.6' | 'cloudflare';
+type VisionProviderName = 'openrouter' | 'gemini' | 'groq-3.8' | 'groq-3.6' | 'cloudflare';
 const visionCooldownUntil = new Map<VisionProviderName, number>();
 const visionFailureReason = new Map<VisionProviderName, string>();
 
@@ -187,7 +190,16 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     }>,
   };
   const commerceCalls: Record<string, number> = {};
-  const verificationUsage = { provider: 'gemini', model: env.GEMINI_MODEL || 'gemini-3.5-flash-lite', requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+  const useOpenRouterVerification = env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
+  const verificationUsage = {
+    provider: useOpenRouterVerification ? 'openrouter' : 'gemini',
+    model: useOpenRouterVerification ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite'),
+    requests: 0,
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+    cost_usd: 0,
+  };
   const noteCommerceCall = (name: string) => { commerceCalls[name] = (commerceCalls[name] ?? 0) + 1; };
 
   const serpapiProvider = providers.find((p) => p.name === 'serpapi') ?? null;
@@ -248,14 +260,26 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     });
 
     const runImageVerification = async () => {
-      if (!sourceImage || !env.GEMINI_API_KEY || !viable.length) return;
-      const images = await imageVerifier(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, viable, context, imageBudget);
+      const verificationKey = useOpenRouterVerification ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY;
+      if (!sourceImage || !verificationKey || !viable.length) return;
+      const verificationModel = useOpenRouterVerification ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
+      const images = await imageVerifier(
+        verificationKey,
+        verificationModel,
+        sourceImage,
+        description,
+        viable,
+        context,
+        imageBudget,
+        { provider: useOpenRouterVerification ? 'openrouter' : 'gemini' },
+      );
       verification.compared += images.compared;
       verification.image_failures += images.failures;
       verificationUsage.requests += images.usage?.requests ?? 0;
       verificationUsage.prompt_tokens += images.usage?.prompt_tokens ?? 0;
       verificationUsage.completion_tokens += images.usage?.completion_tokens ?? 0;
       verificationUsage.total_tokens += images.usage?.total_tokens ?? 0;
+      verificationUsage.cost_usd += images.usage?.cost_usd ?? 0;
       timing.candidate_image_fetch_ms += images.timing?.image_fetch_ms ?? 0;
       timing.candidate_model_verification_ms += images.timing?.model_ms ?? 0;
       timing.verification_batches.push(...(images.timing?.batches ?? []));
@@ -267,7 +291,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     if (!lightMode) await runImageVerification();
 
     let decisions = viable.map((product) => ({ product, decision: verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context) }));
-    if (lightMode && viable.length && !decisions.some(({ decision }) => decision.product) && sourceImage && env.GEMINI_API_KEY) {
+    if (lightMode && viable.length && !decisions.some(({ decision }) => decision.product) && sourceImage && (useOpenRouterVerification ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY)) {
       verification.light_escalations++;
       await runImageVerification();
       decisions = viable.map((product) => ({ product, decision: verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context) }));
@@ -431,17 +455,20 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
           primary = normalizeObjectDescription(record.primary_description);
         } catch { return jsonResponse({ error: 'Invalid multi-frame evidence request' }, 400); }
       }
-      type ActiveVisionProvider = GeminiVisionProvider | GroqVisionProvider | CloudflareVisionProvider;
+      type ActiveVisionProvider = OpenRouterVisionProvider | GeminiVisionProvider | GroqVisionProvider | CloudflareVisionProvider;
       type NamedVisionProvider = { name: VisionProviderName; provider: ActiveVisionProvider };
+      const openrouter = env.OPENROUTER_API_KEY ? { name: 'openrouter' as const, provider: new OpenRouterVisionProvider(env.OPENROUTER_API_KEY, env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) } : null;
       const gemini = env.GEMINI_API_KEY ? { name: 'gemini' as const, provider: new GeminiVisionProvider(env.GEMINI_API_KEY, env.GEMINI_MODEL) } : null;
       const groq38 = env.GROQ_API_KEY ? { name: 'groq-3.8' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY, 'qwen/qwen3.8-27b') } : null;
       const groq36 = env.GROQ_API_KEY ? { name: 'groq-3.6' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY, 'qwen/qwen3.6-27b') } : null;
       const cloudflare = env.AI ? { name: 'cloudflare' as const, provider: new CloudflareVisionProvider(env.AI) } : null;
-      const preferred: Array<NamedVisionProvider | null> = env.VISION_PROVIDER === 'cloudflare'
-        ? [cloudflare, gemini, groq38, groq36]
-        : env.VISION_PROVIDER === 'groq'
-          ? [groq38, groq36, gemini, cloudflare]
-          : [gemini, groq38, groq36, cloudflare];
+      const preferred: Array<NamedVisionProvider | null> = env.VISION_PROVIDER === 'openrouter'
+        ? [openrouter, gemini, cloudflare, groq38, groq36]
+        : env.VISION_PROVIDER === 'cloudflare'
+          ? [cloudflare, openrouter, gemini, groq38, groq36]
+          : env.VISION_PROVIDER === 'groq'
+            ? [groq38, groq36, openrouter, gemini, cloudflare]
+            : [gemini, openrouter, groq38, groq36, cloudflare];
       const visionProviders: NamedVisionProvider[] = preferred.filter((entry): entry is NamedVisionProvider => entry !== null);
       if (!visionProviders.length) return jsonResponse({ error: 'No configured vision provider' }, 500);
 

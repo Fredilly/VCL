@@ -8,6 +8,7 @@ export type ProviderUsage = {
   prompt_time_ms?: number;
   completion_time_ms?: number;
   total_time_ms?: number;
+  cost_usd?: number;
 };
 
 export type ObjectDescription = {
@@ -41,7 +42,7 @@ function providerUsage(value: unknown): ProviderUsage | undefined {
   const v = value as Record<string, unknown>;
   if (typeof v.provider !== 'string' || typeof v.model !== 'string' || typeof v.requests !== 'number' || !Number.isFinite(v.requests) || v.requests < 0) return undefined;
   const usage: ProviderUsage = { provider: v.provider.slice(0, 40), model: v.model.slice(0, 120), requests: Math.floor(v.requests) };
-  for (const key of ['prompt_tokens', 'completion_tokens', 'total_tokens', 'prompt_time_ms', 'completion_time_ms', 'total_time_ms'] as const) {
+  for (const key of ['prompt_tokens', 'completion_tokens', 'total_tokens', 'prompt_time_ms', 'completion_time_ms', 'total_time_ms', 'cost_usd'] as const) {
     const number = v[key];
     if (typeof number === 'number' && Number.isFinite(number) && number >= 0) usage[key] = number;
   }
