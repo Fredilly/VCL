@@ -68,7 +68,8 @@ function surfaceContext() {
   const youtubeTitle = document.querySelector('h1.ytd-watch-metadata yt-formatted-string')?.textContent?.trim()
     || document.querySelector('h1.title yt-formatted-string')?.textContent?.trim()
     || document.title.replace(/\s*-\s*YouTube\s*$/i, '').trim();
-  const youtubeId = location.hostname.includes('youtube.com') ? new URL(location.href).searchParams.get('v') : null;
+  const youtubeMatch = location.hostname.includes('youtube.com') && typeof location.search === 'string' ? location.search.match(/[?&]v=([^&]+)/) : null;
+  const youtubeId = youtubeMatch ? decodeURIComponent(youtubeMatch[1]) : null;
   return {
     platform: location.hostname.includes('youtube.com') ? 'youtube' : 'generic-html5',
     title: youtubeTitle || null,
