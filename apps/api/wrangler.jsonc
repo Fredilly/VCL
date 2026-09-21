@@ -20,6 +20,18 @@
   "ai": {
     "binding": "AI"
   },
+  "ratelimits": [
+    {
+      "name": "ALPHA_INSTALL_RATE_LIMITER",
+      "namespace_id": "11301",
+      "simple": { "limit": 6, "period": 60 }
+    },
+    {
+      "name": "ALPHA_GLOBAL_RATE_LIMITER",
+      "namespace_id": "11302",
+      "simple": { "limit": 30, "period": 60 }
+    }
+  ],
   "routes": [
     {
       "pattern": "api.vcl.article6.org",
