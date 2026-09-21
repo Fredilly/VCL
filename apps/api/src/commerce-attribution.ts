@@ -20,7 +20,16 @@ export type CommissionEvent = AttributionContext & {
   occurred_at: string;
 };
 
-const encoder = new TextEncoder();
+function utf8Bytes(value: string): Uint8Array {
+  const encoded = unescape(encodeURIComponent(value));
+  return Uint8Array.from(encoded, (char) => char.charCodeAt(0));
+}
+
+function utf8String(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return decodeURIComponent(escape(binary));
+}
 
 function safeId(value: unknown, field: string, max = 120): string {
   if (typeof value !== 'string') throw new Error(`${field} must be a string`);
@@ -34,17 +43,17 @@ function bytesToHex(bytes: Uint8Array) {
 }
 
 async function hmac(secret: string, value: string) {
-  const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  return new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(value)));
+  const key = await crypto.subtle.importKey('raw', utf8Bytes(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return new Uint8Array(await crypto.subtle.sign('HMAC', key, utf8Bytes(value)));
 }
 
 async function sha256(value: string) {
-  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(value));
+  const digest = await crypto.subtle.digest('SHA-256', utf8Bytes(value));
   return bytesToHex(new Uint8Array(digest));
 }
 
 function base64UrlEncode(value: string) {
-  const bytes = encoder.encode(value);
+  const bytes = utf8Bytes(value);
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
@@ -53,7 +62,7 @@ function base64UrlEncode(value: string) {
 function base64UrlDecode(value: string) {
   const padded = value.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - value.length % 4) % 4);
   const binary = atob(padded);
-  return new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
+  return utf8String(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
 }
 
 export function creatorForContent(mapJson: string | undefined, contentRef: unknown): string | null {
