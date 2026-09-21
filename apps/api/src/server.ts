@@ -85,7 +85,7 @@ function markVisionSuccess(name: VisionProviderName) {
 const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 function logSafeError(error: unknown) { console.error('VCL API error', error instanceof Error ? { name: error.name, message: error.message } : { name: typeof error, message: String(error) }); }
 function recordFailureState(stage: 'localization' | 'vision' | 'commerce', reason: string, retryable: boolean) {
-  console.warn('Scoop failure state', { stage, reason: reason.slice(0, 80), retryable });
+  console.warn?.('Scoop failure state', { stage, reason: reason.slice(0, 80), retryable });
 }
 
 async function readAnalysisBody(request: Request): Promise<unknown> {
