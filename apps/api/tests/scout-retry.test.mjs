@@ -70,6 +70,8 @@ test('Cloudflare vision does not retry quota exhaustion', async () => {
   assert.deepEqual(payload.vision_routing, [
     { provider: 'cloudflare', status: 'FAILED', reason: 'QUOTA_EXHAUSTED' },
   ]);
+  assert.equal(payload.failure_state, 'TEMPORARILY_UNAVAILABLE');
+  assert.equal(payload.retryable, true);
 });
 
 test('generic Cloudflare provider errors do not open the cooldown circuit', async () => {

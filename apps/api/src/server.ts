@@ -84,6 +84,9 @@ function markVisionSuccess(name: VisionProviderName) {
 }
 const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 function logSafeError(error: unknown) { console.error('VCL API error', error instanceof Error ? { name: error.name, message: error.message } : { name: typeof error, message: String(error) }); }
+function recordFailureState(stage: 'localization' | 'vision' | 'commerce', reason: string, retryable: boolean) {
+  console.warn?.('Scoop failure state', { stage, reason: reason.slice(0, 80), retryable });
+}
 
 async function readAnalysisBody(request: Request): Promise<unknown> {
   const limit = 8_500_000;
@@ -470,7 +473,10 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
             ? [groq38, groq36, openrouter, gemini, cloudflare]
             : [gemini, openrouter, groq38, groq36, cloudflare];
       const visionProviders: NamedVisionProvider[] = preferred.filter((entry): entry is NamedVisionProvider => entry !== null);
-      if (!visionProviders.length) return jsonResponse({ error: 'No configured vision provider' }, 500);
+      if (!visionProviders.length) {
+        recordFailureState('vision', 'NO_CONFIGURED_PROVIDER', false);
+        return jsonResponse({ error: 'Object analysis is temporarily unavailable', reason: 'NO_CONFIGURED_PROVIDER', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: false }, 503);
+      }
 
       const visionRouting: Array<{ provider: VisionProviderName; status: 'SUCCESS' | 'FAILED' | 'SKIPPED'; reason?: string }> = [];
       const tryVision = async <T>(operation: (provider: ActiveVisionProvider) => Promise<T>) => {
@@ -516,7 +522,8 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
         }
         catch (error) {
           const reason = error instanceof TargetLocalizationError ? error.reason : error instanceof VisionProviderError ? error.reason : 'localization_unavailable';
-          return jsonResponse({ error: 'Could not isolate the clicked object. Adjust the crop and try again.', reason, vision_routing: visionRouting }, 422);
+          recordFailureState('localization', String(reason), true);
+          return jsonResponse({ error: 'Could not isolate the clicked object. Adjust the crop and try again.', reason, failure_state: 'UNSUPPORTED_SELECTION', retryable: true, vision_routing: visionRouting }, 422);
         }
       }
       if (nearby && primary && typeof timestamp === 'number') {
@@ -526,14 +533,16 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
         }
         catch (error) {
           const reason = error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR';
-          return jsonResponse({ error: 'Object analysis is temporarily unavailable', reason, vision_routing: visionRouting }, 502);
+          recordFailureState('vision', String(reason), true);
+          return jsonResponse({ error: 'Object analysis is temporarily unavailable', reason, failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: true, vision_routing: visionRouting }, 502);
         }
       }
       let description;
       try { description = normalizeObjectDescription(await tryVision((provider) => provider.analyzeSelection(dataUrl, point))); }
       catch (error) {
         const reason = error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR';
-        return jsonResponse({ error: 'Object analysis is temporarily unavailable', reason, vision_routing: visionRouting }, 502);
+        recordFailureState('vision', String(reason), true);
+        return jsonResponse({ error: 'Object analysis is temporarily unavailable', reason, failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: true, vision_routing: visionRouting }, 502);
       }
       const analyzed = timestamp === undefined ? description : mergeFrameEvidence(description, timestamp as number, []);
       return jsonResponse({ ...(analyzed as object), vision_routing: visionRouting });
@@ -547,7 +556,10 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const description = normalizeObjectDescription(record.description);
       const context = normalizeContext(record.context);
       const providers = commerceProviders(env);
-      if (!providers.length) return jsonResponse({ error: 'No configured commerce provider' }, 503);
+      if (!providers.length) {
+        recordFailureState('commerce', 'NO_CONFIGURED_PROVIDER', false);
+        return jsonResponse({ error: 'Shopping sources are temporarily unavailable', reason: 'NO_CONFIGURED_PROVIDER', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: false }, 503);
+      }
       const queries = buildProductQueryVariants(description, context);
       let routing: Parameters<typeof resolveProducts>[7];
       if (env.JEV_DECISION_ROUTER === 'true') {
@@ -567,7 +579,11 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const started = Date.now();
       const resolved = await resolveProducts(routedProviders, routedQueries, description, env, context, sourceImage, compareCandidateImages, routing);
       const total_ms = Date.now() - started;
-      return jsonResponse({ ...resolved, latency_ms: total_ms, timing: { ...resolved.timing, total_ms } });
+      if (resolved.state === 'TEMPORARILY_UNAVAILABLE') recordFailureState('commerce', 'PROVIDER_UNAVAILABLE', true);
+      else if (resolved.state === 'NO_RESULTS') recordFailureState('commerce', 'NO_RESULTS', false);
+      return jsonResponse({ ...resolved, latency_ms: total_ms, timing: { ...resolved.timing, total_ms },
+        ...(resolved.state === 'TEMPORARILY_UNAVAILABLE' ? { failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: true } :
+          resolved.state === 'NO_RESULTS' ? { failure_state: 'NO_RESULTS', retryable: false } : {}) });
     }
     return jsonResponse({ error: 'Not found' }, 404);
   } catch (error) {

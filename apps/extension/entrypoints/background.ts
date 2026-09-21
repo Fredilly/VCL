@@ -1,10 +1,11 @@
-function friendlyError(responseStatus?: number, providerMessage?: string) {
-  const detail = (providerMessage ?? '').toLowerCase();
-  const temporarilyUnavailable = responseStatus === 429 || responseStatus === 503 ||
-    detail.includes('temporarily unavailable') || detail.includes('rate limit') || detail.includes('quota') || detail.includes('too many requests');
-  return temporarilyUnavailable
-    ? 'Scoop is temporarily busy. Try again in a moment.'
-    : 'Something went wrong. Try again.';
+function friendlyError(responseStatus?: number, providerMessage?: string, reason?: string) {
+  const detail = `${providerMessage ?? ''} ${reason ?? ''}`.toLowerCase();
+  const temporarilyUnavailable = [429, 502, 503, 504].includes(responseStatus ?? 0) ||
+    detail.includes('temporarily unavailable') || detail.includes('rate limit') || detail.includes('quota') ||
+    detail.includes('timeout') || detail.includes('provider');
+  if (temporarilyUnavailable) return { error: 'Scoop is temporarily unavailable. Try again in a moment.', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: true };
+  if (responseStatus === 400 || responseStatus === 422) return { error: 'Scoop could not use this selection. Adjust the crop and try again.', failure_state: 'UNSUPPORTED_SELECTION', retryable: true };
+  return { error: 'Scoop hit an unexpected error. Try again.', failure_state: 'REQUEST_FAILED', retryable: true };
 }
 
 function localizationFallback(reason?: string) {
@@ -67,7 +68,8 @@ export default defineBackground(() => {
         return;
       }
       if (!response.ok) {
-        sendResponse({ error: friendlyError(response.status, typeof payload?.error === 'string' ? payload.error : undefined) });
+        sendResponse(friendlyError(response.status, typeof payload?.error === 'string' ? payload.error : undefined,
+          typeof payload?.reason === 'string' ? payload.reason : undefined));
         return;
       }
       sendResponse(payload);
@@ -76,7 +78,7 @@ export default defineBackground(() => {
         sendResponse(localizationFallback('request_failed'));
         return;
       }
-      sendResponse({ error: 'Something went wrong. Try again.' });
+      sendResponse({ error: 'Scoop could not reach the service. Check your connection and try again.', failure_state: 'NETWORK_ERROR', retryable: true });
     });
 
     return true;
