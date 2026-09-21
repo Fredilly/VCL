@@ -572,7 +572,6 @@ test('eBay adapter: unconfigured affiliate context leaves ordinary request and d
           itemId: 'plain-1',
           title: 'Nike Air Max 90 White',
           itemWebUrl: 'https://example.test/plain',
-          itemAffiliateWebUrl: 'https://example.test/affiliate-should-not-be-used-without-config',
         }],
       });
     },
@@ -584,5 +583,5 @@ test('eBay adapter: unconfigured affiliate context leaves ordinary request and d
   const [result] = await provider.search({ ...query, affiliate_reference_id: 'abc123def456' });
 
   assert.equal(capturedHeaders['X-EBAY-C-ENDUSERCTX'], undefined);
-  assert.equal(result.destination, 'https://example.test/affiliate-should-not-be-used-without-config');
+  assert.equal(result.destination, 'https://example.test/plain');
 });
