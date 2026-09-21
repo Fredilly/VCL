@@ -4,7 +4,7 @@ This document describes what the closed-alpha browser extension does with page a
 
 ## What Scoop can access
 
-Scoop's extension uses only the `activeTab` browser permission.
+Scoop's extension uses `activeTab` and `storage` browser permissions.
 
 Its content script is limited to:
 - `https://www.youtube.com/*`
@@ -13,7 +13,9 @@ Its content script is limited to:
 The extension has network permission only for:
 - `https://api.vcl.article6.org/*`
 
-It does not request broad `<all_urls>`, browsing-history, cookies, downloads, clipboard, or persistent-storage permissions.
+It does not request broad `<all_urls>`, browsing-history, cookies, downloads, or clipboard permissions.
+
+`storage` is used only to persist one random anonymous alpha install ID so the API can enforce per-install usage limits. It is not used for browsing history, screenshots, product history, or page content.
 
 ## When capture happens
 
@@ -38,6 +40,8 @@ For a normal Scoop request, the extension may send:
 - derived object attributes used for product resolution.
 
 The full page URL is not sent as commerce context.
+
+A random anonymous install ID is sent in an API request header for alpha rate limiting. It is not tied to an account, email address, page URL, or viewing history.
 
 For candidate verification, the selected crop may also be sent with the derived description so Scoop can compare candidate products against the selected object.
 

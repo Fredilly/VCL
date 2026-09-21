@@ -46,11 +46,14 @@ export interface Env {
   BRAVE_SEARCH_API_KEY?: string;
   JEV_DECISION_ROUTER?: string;
   AI_GATEWAY_API_KEY?: string;
+  ALPHA_ENABLED?: string;
+  ALPHA_INSTALL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
+  ALPHA_GLOBAL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
   AI?: WorkersAiBinding & CloudflareVisionBinding;
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
-const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
+const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type,x-scoop-install-id', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 
 type VisionProviderName = 'openrouter' | 'gemini' | 'groq-3.8' | 'groq-3.6' | 'cloudflare';
 const visionCooldownUntil = new Map<VisionProviderName, number>();
@@ -433,6 +436,9 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
   const path = new URL(request.url).pathname;
   if (request.method !== 'POST') return jsonResponse({ error: 'Not found' }, 404);
+  if (env.ALPHA_ENABLED === 'false' && path !== '/feedback') {
+    return jsonResponse({ error: 'Scoop alpha is temporarily paused', reason: 'ALPHA_DISABLED', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: false }, 503);
+  }
   try {
     if (path === '/analyze-selection' || path === '/locate-selection') {
       let parsed: unknown;
@@ -557,6 +563,19 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       }
     }
     if (path === '/resolve-products') {
+      const installId = request.headers.get('x-scoop-install-id') ?? '';
+      const alphaGuardrailsEnabled = Boolean(env.ALPHA_INSTALL_RATE_LIMITER || env.ALPHA_GLOBAL_RATE_LIMITER);
+      if (alphaGuardrailsEnabled && !/^[a-f0-9-]{36}$/i.test(installId)) {
+        return jsonResponse({ error: 'Missing alpha install identifier', reason: 'ALPHA_INSTALL_ID_REQUIRED' }, 400);
+      }
+      if (env.ALPHA_INSTALL_RATE_LIMITER) {
+        const { success } = await env.ALPHA_INSTALL_RATE_LIMITER.limit({ key: installId });
+        if (!success) return jsonResponse({ error: 'Too many Scoop requests. Try again shortly.', reason: 'ALPHA_INSTALL_RATE_LIMIT', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: true }, 429);
+      }
+      if (env.ALPHA_GLOBAL_RATE_LIMITER) {
+        const { success } = await env.ALPHA_GLOBAL_RATE_LIMITER.limit({ key: 'alpha-global' });
+        if (!success) return jsonResponse({ error: 'Scoop alpha is at its temporary usage limit. Try again shortly.', reason: 'ALPHA_GLOBAL_RATE_LIMIT', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: true }, 429);
+      }
       const parsed: unknown = await request.json();
       const wrapped = Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'description' in parsed);
       const record = wrapped ? parsed as { description: unknown; context?: unknown; source_image?: unknown; multi_frame_available?: unknown; telemetry?: unknown } : { description: parsed, context: undefined, source_image: undefined, multi_frame_available: undefined, telemetry: undefined };

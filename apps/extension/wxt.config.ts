@@ -16,7 +16,7 @@ export default defineConfig({
       48: 'icons/scoop-extension-48.png',
       128: 'icons/scoop-extension-128.png',
     },
-    permissions: ['activeTab'],
+    permissions: ['activeTab', 'storage'],
     host_permissions: ['https://api.vcl.article6.org/*'],
     action: {
       default_title: 'Scoop this item',

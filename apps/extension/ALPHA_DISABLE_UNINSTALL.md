@@ -4,7 +4,7 @@ Scoop is user-triggered. It does not continuously scan pages or poll in the back
 
 ## Disable
 
-When the extension is disabled, its background/content-script execution and API requests stop. Scoop does not request persistent storage permission and does not keep browsing history, screenshots, or frame crops in extension storage.
+When the extension is disabled, its background/content-script execution and API requests stop. Scoop uses extension storage only for one random anonymous alpha install ID used for usage guardrails. It does not keep browsing history, screenshots, frame crops, or product history there.
 
 ## Re-enable
 
@@ -22,12 +22,12 @@ Scoop removes its overlay/result UI and aborts active work when:
 
 Browsers do not provide an installed content script with a reliable final callback after the extension itself has been removed. Uninstall immediately stops Scoop code and future network activity, but an already-injected DOM panel on an already-open page can remain visually present until that page is refreshed or navigated.
 
-Scoop stores no local product/session database that needs uninstall migration or deletion.
+Uninstall removes the extension's stored anonymous install ID with the extension. Scoop has no local product/session database.
 
 ## Regression contract
 
 The extension regression suite verifies:
-- no storage permission is requested;
+- storage is limited to the anonymous install ID;
 - no broad host permission is requested;
 - cleanup removes both overlay and result UI;
 - cleanup aborts active work;

@@ -1,3 +1,16 @@
+const INSTALL_ID_KEY = 'scoop_alpha_install_id';
+let cachedInstallId: string | undefined;
+
+async function getInstallId() {
+  if (cachedInstallId) return cachedInstallId;
+  const stored = await browser.storage.local.get(INSTALL_ID_KEY);
+  const existing = typeof stored?.[INSTALL_ID_KEY] === 'string' ? stored[INSTALL_ID_KEY] : '';
+  if (/^[a-f0-9-]{36}$/i.test(existing)) return cachedInstallId = existing;
+  const created = crypto.randomUUID();
+  await browser.storage.local.set({ [INSTALL_ID_KEY]: created });
+  return cachedInstallId = created;
+}
+
 function friendlyError(responseStatus?: number, providerMessage?: string, reason?: string) {
   const detail = `${providerMessage ?? ''} ${reason ?? ''}`.toLowerCase();
   const temporarilyUnavailable = [429, 502, 503, 504].includes(responseStatus ?? 0) ||
@@ -53,11 +66,11 @@ export default defineBackground(() => {
         point: message.point, ...(isLocate ? { focusDataUrl: message.focusDataUrl } : {}) }
       : { description: message.description, context: message.context ?? null, source_image: message.source_image, telemetry: message.telemetry ?? null };
 
-    void fetch(`https://api.vcl.article6.org/${endpoint}`, {
+    void getInstallId().then((installId) => fetch(`https://api.vcl.article6.org/${endpoint}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Scoop-Install-Id': installId },
       body: JSON.stringify(body),
-    }).then(async (response) => {
+    })).then(async (response) => {
       const payload = await response.json();
       if (isLocate) {
         if (!response.ok || !validLocalization(payload, message.point)) {
