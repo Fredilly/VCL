@@ -41,7 +41,7 @@ function utf8String(bytes: Uint8Array): string {
 function safeId(value: unknown, field: string, max = 120): string {
   if (typeof value !== 'string') throw new Error(`${field} must be a string`);
   const trimmed = value.trim();
-  if (!trimmed || trimmed.length > max || !/^[A-Za-z0-9._:-]+$/.test(trimmed)) throw new Error(`${field} is invalid`);
+  if (!trimmed || trimmed.length > max || !/^[A-Za-z0-9._:|/-]+$/.test(trimmed)) throw new Error(`${field} is invalid`);
   return trimmed;
 }
 
