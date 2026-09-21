@@ -7,6 +7,10 @@ on:
         description: Number of frozen Jev cases to run (1-8)
         required: false
         default: '8'
+      vision_provider:
+        description: Vision provider for this benchmark (cloudflare/openrouter/gemini/groq)
+        required: false
+        default: 'cloudflare'
 
 permissions:
   contents: read
@@ -23,6 +27,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       JEV_CASE_LIMIT: ${{ inputs.case_limit || '8' }}
+      BENCHMARK_VISION_PROVIDER: ${{ inputs.vision_provider || 'cloudflare' }}
 
     steps:
       - name: Checkout main
@@ -81,6 +86,7 @@ jobs:
             --config "apps/api/.jev-wrangler.jsonc" \
             --name vcl-api \
             --var JEV_DECISION_ROUTER:false \
+            --var VISION_PROVIDER:"$BENCHMARK_VISION_PROVIDER" \
             --preview-alias jev-off \
             --tag jev-off-${GITHUB_SHA} \
             --message "Jev benchmark OFF ${GITHUB_SHA}" | tee jev-off-upload.log
@@ -93,6 +99,7 @@ jobs:
             --config "apps/api/.jev-wrangler.jsonc" \
             --name vcl-api \
             --var JEV_DECISION_ROUTER:true \
+            --var VISION_PROVIDER:"$BENCHMARK_VISION_PROVIDER" \
             --preview-alias jev-on \
             --tag jev-on-${GITHUB_SHA} \
             --message "Jev benchmark ON ${GITHUB_SHA}" | tee jev-on-upload.log
@@ -131,9 +138,9 @@ jobs:
           export VCL_PREPARED_OUTPUT="$GITHUB_WORKSPACE/jev-prepared.json"
           export VCL_CDP_PORT=9334
           export VCL_COST_PROFILE="$RUNNER_TEMP/jev-browser-prep"
-          # Vision is shared by OFF and ON, so prepare it against the stable production API.
-          # Preview Workers are reserved for the commerce/Jev comparison only.
-          export VCL_API_ORIGIN="https://api.vcl.article6.org"
+          # Vision is shared by OFF and ON. Prepare against the ON preview so the
+          # benchmark can safely test a provider without changing production.
+          export VCL_API_ORIGIN="$(cat jev-on-origin.txt)"
 
           printf '{"schema_version":1,"rows":[]}' > "$VCL_PREPARED_OUTPUT"
           printf '{"attempts":[]}' > "$GITHUB_WORKSPACE/jev-vision-attempts.json"
@@ -258,11 +265,25 @@ jobs:
             const useful = rows.filter(r => r.notes?.includes('state=RESULTS')).length;
             const commerce = rows.reduce((n,r) => n + Object.values(r.commerce_calls ?? {}).reduce((a,b)=>a+Number(b||0),0),0);
             const verification = rows.reduce((n,r) => n + Number(r.verification_usage?.requests ?? 0),0);
+            const usageCost = (usage) => Number.isFinite(Number(usage?.cost_usd)) ? Number(usage.cost_usd) : 0;
+            const totalAiCost = rows.reduce((n,r) => n + usageCost(r.localization_usage) + usageCost(r.vision_usage) + usageCost(r.verification_usage), 0);
             const falseExactValues = rows.map(r => r.false_exact).filter(v => Number.isFinite(v));
             const unsupportedLikelyValues = rows.map(r => r.unsupported_likely).filter(v => Number.isFinite(v));
             const falseExact = falseExactValues.length === rows.length ? falseExactValues.reduce((a,b)=>a+b,0) : null;
             const unsupportedLikely = unsupportedLikelyValues.length === rows.length ? unsupportedLikelyValues.reduce((a,b)=>a+b,0) : null;
-            const out = { successful_cases: rows.length, useful_rate: rows.length ? useful/rows.length : null, p50_latency_ms: percentile(latencies,.5), p95_latency_ms: percentile(latencies,.95), verification_calls: verification, commerce_calls: commerce, false_exact: falseExact, unsupported_likely: unsupportedLikely };
+            const out = {
+              successful_cases: rows.length,
+              useful_rate: rows.length ? useful/rows.length : null,
+              p50_latency_ms: percentile(latencies,.5),
+              p95_latency_ms: percentile(latencies,.95),
+              verification_calls: verification,
+              commerce_calls: commerce,
+              total_ai_cost_usd: totalAiCost,
+              cost_per_scoop_usd: rows.length ? totalAiCost / rows.length : null,
+              cost_per_useful_scoop_usd: useful ? totalAiCost / useful : null,
+              false_exact: falseExact,
+              unsupported_likely: unsupportedLikely,
+            };
             if (includeJev) {
               out.jev_route_choices = {};
               out.jev_latency_ms = [];
