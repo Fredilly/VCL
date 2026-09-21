@@ -21,6 +21,7 @@ import { resolveBraveCredentials } from './brave-credentials.js';
 import { routeWithJev, routerInput, type JevRouterTelemetry } from './jev-router.js';
 import type { WorkersAiBinding } from './jev.js';
 import { resolveJevBinding } from './jev-binding.js';
+import { normalizeAlphaTelemetry, recordAlphaFeedback, recordAlphaScoop } from './alpha-telemetry.js';
 
 export interface Env {
   GEMINI_API_KEY?: string;
@@ -547,10 +548,22 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const analyzed = timestamp === undefined ? description : mergeFrameEvidence(description, timestamp as number, []);
       return jsonResponse({ ...(analyzed as object), vision_routing: visionRouting });
     }
+    if (path === '/feedback') {
+      try {
+        const feedback = recordAlphaFeedback(await request.json());
+        return jsonResponse({ accepted: true, event_id: feedback.event_id });
+      } catch {
+        return jsonResponse({ error: 'Invalid feedback' }, 400);
+      }
+    }
     if (path === '/resolve-products') {
       const parsed: unknown = await request.json();
       const wrapped = Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'description' in parsed);
-      const record = wrapped ? parsed as { description: unknown; context?: unknown; source_image?: unknown; multi_frame_available?: unknown } : { description: parsed, context: undefined, source_image: undefined, multi_frame_available: undefined };
+      const record = wrapped ? parsed as { description: unknown; context?: unknown; source_image?: unknown; multi_frame_available?: unknown; telemetry?: unknown } : { description: parsed, context: undefined, source_image: undefined, multi_frame_available: undefined, telemetry: undefined };
+      let alphaTelemetry = null;
+      try { alphaTelemetry = normalizeAlphaTelemetry(record.telemetry); }
+      catch { return jsonResponse({ error: 'Invalid telemetry envelope' }, 400); }
+      const rawDescription = record.description as Record<string, unknown> | null;
       const sourceImage = parseSourceImage(record.source_image);
       if (record.source_image != null && !sourceImage) return jsonResponse({ error: 'source_image must be a base64 JPEG, PNG, WebP or GIF crop under 2 MB' }, 400);
       const description = normalizeObjectDescription(record.description);
@@ -579,8 +592,20 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const started = Date.now();
       const resolved = await resolveProducts(routedProviders, routedQueries, description, env, context, sourceImage, compareCandidateImages, routing);
       const total_ms = Date.now() - started;
+      const failureState = resolved.state === 'TEMPORARILY_UNAVAILABLE' ? 'TEMPORARILY_UNAVAILABLE' : resolved.state === 'NO_RESULTS' ? 'NO_RESULTS' : undefined;
       if (resolved.state === 'TEMPORARILY_UNAVAILABLE') recordFailureState('commerce', 'PROVIDER_UNAVAILABLE', true);
       else if (resolved.state === 'NO_RESULTS') recordFailureState('commerce', 'NO_RESULTS', false);
+      recordAlphaScoop({
+        telemetry: alphaTelemetry,
+        state: resolved.state,
+        totalMs: total_ms,
+        providersUsed: resolved.providers_used,
+        resultRows: resolved.products.map((product) => ({ id: product.id, result_class: product.result_class })),
+        verificationUsage: resolved.cost_usage?.verification_usage,
+        commerceCalls: resolved.cost_usage?.commerce_calls,
+        visionUsage: rawDescription?.provider_usage,
+        failureState,
+      });
       return jsonResponse({ ...resolved, latency_ms: total_ms, timing: { ...resolved.timing, total_ms },
         ...(resolved.state === 'TEMPORARILY_UNAVAILABLE' ? { failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: true } :
           resolved.state === 'NO_RESULTS' ? { failure_state: 'NO_RESULTS', retryable: false } : {}) });
