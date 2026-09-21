@@ -72,7 +72,15 @@ function surfaceContext() {
 }
 
 function removeOverlay() { document.getElementById(OVERLAY_ID)?.remove(); }
-function removeResult() { activeCapture?.abort(); document.getElementById(RESULT_ID)?.remove(); }
+function removeResult() {
+  activeCapture?.abort();
+  activeCapture = undefined;
+  document.getElementById(RESULT_ID)?.remove();
+}
+function cleanupScoopUi() {
+  removeOverlay();
+  removeResult();
+}
 
 function basePanel(titleText: string) {
   removeResult();
@@ -379,7 +387,7 @@ function showSelectionPreview(clientX: number, clientY: number) {
 }
 
 function showOverlay() {
-  removeOverlay(); removeResult();
+  cleanupScoopUi();
   const root = document.createElement('div');
   root.id = OVERLAY_ID;
   Object.assign(root.style, { position: 'fixed', inset: '0', zIndex: '2147483647', background: 'rgba(0,0,0,0.12)', cursor: 'crosshair' });
@@ -403,6 +411,8 @@ export default defineContentScript({
     browser.runtime.onMessage.addListener((message) => {
       if (message?.type === 'VCL_TOGGLE_OVERLAY') document.getElementById(OVERLAY_ID) ? removeOverlay() : showOverlay();
     });
-    window.addEventListener('keydown', (event) => { if (event.key === 'Escape') { removeOverlay(); removeResult(); } });
+    window.addEventListener('keydown', (event) => { if (event.key === 'Escape') cleanupScoopUi(); });
+    window.addEventListener('pagehide', cleanupScoopUi, { once: true });
+    window.addEventListener('beforeunload', cleanupScoopUi, { once: true });
   },
 });
