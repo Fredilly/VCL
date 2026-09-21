@@ -16,4 +16,12 @@ Spike 0: Chromium extension shell.
 - pnpm workspaces
 - Hono + Cloudflare Workers when backend work is required
 
+## Alpha tester onboarding
+
+The canonical closed-alpha instructions are in:
+
+- `apps/extension/ALPHA_TESTER_GUIDE.md`
+- `apps/extension/ALPHA_PRIVACY.md`
+- `apps/extension/ALPHA_DISABLE_UNINSTALL.md`
+
 See `project-system/AGENTS.md` before making architectural or product decisions.
