@@ -11,12 +11,16 @@ const image = 'data:image/png;base64,aGVsbG8=';
 
 test('uses the configured model without assuming the development model', async (t) => {
   let requestedUrl;
-  t.mock.method(globalThis, 'fetch', async (url) => {
+  let requestedBody;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
     requestedUrl = String(url);
+    requestedBody = JSON.parse(options.body);
     return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify(expected) }] } }] });
   });
-  await new GeminiVisionProvider('test-key', 'gemini-2.5-flash-lite').analyzeSelection(image);
+  const detail = 'data:image/png;base64,ZGV0YWls';
+  await new GeminiVisionProvider('test-key', 'gemini-2.5-flash-lite').analyzeSelection(image, undefined, detail);
   assert.match(requestedUrl, /models\/gemini-2\.5-flash-lite:generateContent/);
+  assert.equal(requestedBody.contents[0].parts.filter((part) => part.inlineData).length, 2);
   await new GeminiVisionProvider('test-key', 'gemini-3.6-flash').analyzeSelection(image);
   assert.match(requestedUrl, /models\/gemini-3\.6-flash:generateContent/);
 });

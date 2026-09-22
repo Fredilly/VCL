@@ -21,17 +21,20 @@ test('uses OpenRouter Gemini Flash Lite with image input and reports cost', asyn
     });
   });
 
-  const result = await new OpenRouterVisionProvider('test-key').analyzeSelection(image);
+  const detail = 'data:image/png;base64,ZGV0YWls';
+  const result = await new OpenRouterVisionProvider('test-key').analyzeSelection(image, undefined, detail);
   assert.equal(request.url, 'https://openrouter.ai/api/v1/chat/completions');
   assert.equal(request.options.headers.Authorization, 'Bearer test-key');
   const body = JSON.parse(request.options.body);
   assert.equal(body.model, 'google/gemini-2.5-flash-lite');
   assert.equal(body.messages[0].content[1].image_url.url, image);
+  assert.equal(body.messages[0].content[2].image_url.url, detail);
   const prompt = body.messages[0].content[0].text;
   assert.match(prompt, /visible_text should contain readable words\/letters\/numbers actually visible/);
   assert.match(prompt, /logos_markings should describe visible logos, emblems, monograms, patches, labels, or symbols/);
   assert.match(prompt, /distinctive_features should capture unusual graphics, patterns, construction details/);
   assert.match(prompt, /search_terms should be 1-4 concise purchase-search queries that use the strongest visible identity evidence first/);
+  assert.match(prompt, /IMAGE 2 is a magnified detail around the user click/);
   assert.equal(result.brand_candidate, 'Adidas');
   assert.equal(result.provider_usage.provider, 'openrouter');
   assert.equal(result.provider_usage.cost_usd, 0.0002);

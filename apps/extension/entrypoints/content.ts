@@ -214,10 +214,12 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
   addClose(panel);
 
   try {
+    let focusDataUrl: string | undefined;
     if (!supplied && result.crop) {
       panel.firstElementChild!.textContent = 'VCL locating the clicked object…';
       const localizationStarted = Date.now();
       const focus = await cropFrozenSelection(result, focusBox(result));
+      focusDataUrl = focus.dataUrl;
       if (controller.signal.aborted) return;
       const located = await browser.runtime.sendMessage({ type: 'VCL_LOCATE_SELECTION', requestId: crypto.randomUUID(),
         dataUrl: result.dataUrl, focusDataUrl: focus.dataUrl, point: selectionPoint(result) });
@@ -233,7 +235,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     }
     const requestId = crypto.randomUUID();
     const visionStarted = Date.now();
-    const response: unknown = supplied ?? await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', requestId, dataUrl: result.dataUrl, timestamp: result.currentTime,
+    const response: unknown = supplied ?? await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', requestId, dataUrl: result.dataUrl, focusDataUrl, timestamp: result.currentTime,
       point: result.crop ? selectionPoint(result) : undefined });
     if (!supplied) stageTiming.vision_ms = Date.now() - visionStarted;
     if (controller.signal.aborted) return;
