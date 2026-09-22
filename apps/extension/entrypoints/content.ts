@@ -214,12 +214,11 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
   addClose(panel);
 
   try {
-    let focusDataUrl: string | undefined;
+    let detailDataUrl: string | undefined;
     if (!supplied && result.crop) {
       panel.firstElementChild!.textContent = 'VCL locating the clicked object…';
       const localizationStarted = Date.now();
       const focus = await cropFrozenSelection(result, focusBox(result));
-      focusDataUrl = focus.dataUrl;
       if (controller.signal.aborted) return;
       const located = await browser.runtime.sendMessage({ type: 'VCL_LOCATE_SELECTION', requestId: crypto.randomUUID(),
         dataUrl: result.dataUrl, focusDataUrl: focus.dataUrl, point: selectionPoint(result) });
@@ -228,14 +227,16 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       // Validate the localized target, but keep the user's selected crop for analysis.
       // Destructively recropping to the model's box can remove garment/object context
       // and amplify localization errors into bad product understanding.
-      validatedTargetBox(located, result);
+      const targetBox = validatedTargetBox(located, result);
+      const targetDetail = await cropFrozenSelection(result, targetBox);
+      detailDataUrl = targetDetail.dataUrl;
       stageTiming.localization_ms = Date.now() - localizationStarted;
       if (controller.signal.aborted) return;
       panel.firstElementChild!.textContent = 'VCL analyzing the clicked object…';
     }
     const requestId = crypto.randomUUID();
     const visionStarted = Date.now();
-    const response: unknown = supplied ?? await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', requestId, dataUrl: result.dataUrl, focusDataUrl, timestamp: result.currentTime,
+    const response: unknown = supplied ?? await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', requestId, dataUrl: result.dataUrl, focusDataUrl: detailDataUrl, timestamp: result.currentTime,
       point: result.crop ? selectionPoint(result) : undefined });
     if (!supplied) stageTiming.vision_ms = Date.now() - visionStarted;
     if (controller.signal.aborted) return;
