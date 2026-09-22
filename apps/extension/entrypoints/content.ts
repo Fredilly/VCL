@@ -1,4 +1,4 @@
-import { captureSelectionAtClientPoint, cropFrozenSelection, focusBox, selectionPoint, validatedTargetBox, type FrameCaptureResult } from '../lib/frame-capture';
+import { captureSelectionAtClientPoint, selectionPoint, type FrameCaptureResult } from '../lib/frame-capture';
 import { captureNearbyFrames, nearbyCaptureLimitation } from '../lib/nearby-frame-capture';
 
 const OVERLAY_ID = 'vcl-overlay-root';
@@ -214,29 +214,14 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
   addClose(panel);
 
   try {
-    let detailDataUrl: string | undefined;
-    if (!supplied && result.crop) {
-      panel.firstElementChild!.textContent = 'VCL locating the clicked object…';
-      const localizationStarted = Date.now();
-      const focus = await cropFrozenSelection(result, focusBox(result));
-      if (controller.signal.aborted) return;
-      const located = await browser.runtime.sendMessage({ type: 'VCL_LOCATE_SELECTION', requestId: crypto.randomUUID(),
-        dataUrl: result.dataUrl, focusDataUrl: focus.dataUrl, point: selectionPoint(result) });
-      if (controller.signal.aborted) return;
-      if (located?.error) throw new Error(located.error + (__VCL_DEBUG_PROVENANCE__ && located.reason ? ` (${located.reason})` : ''));
-      // Validate the localized target, but keep the user's selected crop for analysis.
-      // Destructively recropping to the model's box can remove garment/object context
-      // and amplify localization errors into bad product understanding.
-      const targetBox = validatedTargetBox(located, result);
-      const targetDetail = await cropFrozenSelection(result, targetBox);
-      detailDataUrl = targetDetail.dataUrl;
-      stageTiming.localization_ms = Date.now() - localizationStarted;
-      if (controller.signal.aborted) return;
-      panel.firstElementChild!.textContent = 'VCL analyzing the clicked object…';
-    }
+    // Alpha baseline: analyze the user-approved 50% crop directly.
+    // Model localization/detail crops are intentionally bypassed because they can
+    // redirect attention away from the pixels the user actually selected.
+    stageTiming.localization_ms = null;
+    panel.firstElementChild!.textContent = 'VCL analyzing the clicked object…';
     const requestId = crypto.randomUUID();
     const visionStarted = Date.now();
-    const response: unknown = supplied ?? await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', requestId, dataUrl: result.dataUrl, focusDataUrl: detailDataUrl, timestamp: result.currentTime,
+    const response: unknown = supplied ?? await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', requestId, dataUrl: result.dataUrl, timestamp: result.currentTime,
       point: result.crop ? selectionPoint(result) : undefined });
     if (!supplied) stageTiming.vision_ms = Date.now() - visionStarted;
     if (controller.signal.aborted) return;
