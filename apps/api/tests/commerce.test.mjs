@@ -88,6 +88,24 @@ test('missing identity evidence does not invent a brand or model', () => {
   assert.doesNotMatch(query.query, /Nike|Apple|Yankees/);
 });
 
+test('fragrance identity survives commerce query and candidate verification', () => {
+  const desc = {
+    category: 'Fragrance', subcategory: 'Perfume Bottle', brand_candidate: 'Creed', model_candidate: 'Delphinus',
+    color: 'orange', material: 'glass', style_attributes: [], visible_text: ['CREED', 'DELPHINUS'],
+    logos_markings: ['CREED wordmark'], distinctive_features: [], hardware_details: [], shape_silhouette: ['rectangular perfume bottle'],
+    search_terms: ['Creed Delphinus Eau de Parfum'], confidence: 0.9, identity_confidence: 0.9,
+  };
+  const query = buildProductQuery(desc);
+  assert.match(query.query, /Creed/);
+  assert.match(query.query, /Delphinus/);
+  assert.match(query.query, /Perfume Bottle/);
+
+  const result = verifyProductCandidate(desc, candidate('Creed Delphinus Eau de Parfum 100ml', {
+    brand: 'Creed', category: 'Fragrances',
+  }));
+  assert.ok(result, 'a matching fragrance candidate must not be rejected just because the verifier taxonomy lacks apparel-style subtypes');
+});
+
 test('commerce errors expose stable resolver codes', () => {
   assert.equal(new CommerceNoResultsError().code, 'NO_RESULTS');
   assert.equal(new CommerceProviderError('failed').code, 'COMMERCE_PROVIDER_ERROR');
