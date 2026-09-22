@@ -75,7 +75,7 @@ test('click point and focus reach localization while analysis and commerce prese
   assert.deepEqual(requestBodies[0].point, { x: 0.75, y: 0.25 });
   assert.equal(requestBodies[0].focusDataUrl, 'focus-pixels');
   assert.equal(requestBodies[1].dataUrl, 'data:image/png;base64,test');
-  assert.equal(requestBodies[1].focusDataUrl, 'focus-pixels');
+  assert.equal(requestBodies[1].focusDataUrl, 'target-pixels');
   assert.deepEqual(requestBodies[1].point, { x: 0.75, y: 0.25 });
   assert.equal(requestBodies[2].source_image, 'data:image/png;base64,test');
 });
