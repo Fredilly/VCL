@@ -176,7 +176,7 @@ function filterByCategory(providers: NamedCommerceProvider[], query: ProductQuer
 const LIKELY_CANDIDATE_THRESHOLD = 3;
 const SUFFICIENT_CANDIDATE_THRESHOLD = 3;
 
-export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages, routing?: { commerce_action: 'SKIP' | 'SEARCH_NORMAL' | 'SEARCH_BROAD'; verification_action: 'LIGHT' | 'FULL'; telemetry: JevRouterTelemetry }) {
+export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages, routing?: { commerce_action: 'SKIP' | 'SEARCH_NORMAL' | 'SEARCH_BROAD'; verification_action: 'LIGHT' | 'FULL'; telemetry: JevRouterTelemetry; broad_search_on_miss?: boolean }) {
   const routingActive = Boolean(routing && !routing.telemetry.failed);
   let attempts = 0;
   let sawProviderFailure = false;
@@ -434,6 +434,10 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     }
 
     if (accepted.filter((product) => product.result_class === 'LIKELY').length >= 3) return respond(query);
+
+    // FABRIC may pre-authorize a broader query, but only spend that extra work when
+    // the first normal search produced zero acceptable candidates.
+    if (routingActive && routing?.broad_search_on_miss && attempts === 1 && accepted.length > 0) return respond(query);
   }
 
   return respond(queries[Math.max(0, Math.min(attempts - 1, queries.length - 1))]);
@@ -638,14 +642,21 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
           const routed = jevMode === 'fabric'
             ? await routeWithJevFabric(input, jevBinding)
             : await routeWithJev(input, jevBinding);
-          routing = { ...routed.decision, telemetry: routed.telemetry };
+          const broadSearchOnMiss = jevMode === 'fabric'
+            && 'broad_search_on_miss' in routed.telemetry
+            && routed.telemetry.broad_search_on_miss === true;
+          routing = {
+            ...routed.decision,
+            telemetry: routed.telemetry,
+            ...(broadSearchOnMiss ? { broad_search_on_miss: true } : {}),
+          };
         }
       }
       const routingActive = Boolean(routing && !routing.telemetry.failed);
       const routedProviders = routingActive && routing?.commerce_action === 'SKIP' ? [] : providers;
       const routedQueries = !routingActive
         ? queries
-        : routing?.commerce_action === 'SEARCH_BROAD'
+        : routing?.commerce_action === 'SEARCH_BROAD' || routing?.broad_search_on_miss
           ? queries
           : queries.slice(0, 1);
       const started = Date.now();
