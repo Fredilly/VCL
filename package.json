@@ -13,7 +13,9 @@
     "benchmark:replay": "node tests/benchmark/spike-4f/run.mjs replay",
     "cost:run": "node tests/cost/run-live.mjs",
     "cost:summary": "node tests/cost/summarize.mjs",
-    "cost:compare": "node tests/cost/compare.mjs"
+    "cost:compare": "node tests/cost/compare.mjs",
+    "secret:add": "node tools/secrets.mjs add",
+    "secrets:check": "node tools/secrets.mjs check"
   },
   "devDependencies": {
     "wrangler": "^4.131.0"
