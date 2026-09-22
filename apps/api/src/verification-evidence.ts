@@ -31,6 +31,7 @@ const typeAliases: Record<string, string[]> = {
   tank: ['tank', 'tank top', 'vest top'], sneakers: ['sneakers', 'trainers'],
   boots: ['boots'], shoes: ['shoes'], bag: ['bag', 'handbag', 'backpack'],
   sunglasses: ['sunglasses'], watch: ['watch'], mug: ['mug', 'cup'], lamp: ['lamp'],
+  fragrance: ['perfume', 'perfumes', 'fragrance', 'fragrances', 'eau de parfum', 'eau de toilette', 'cologne'],
 };
 
 export function productType(text: string): string | null {
@@ -90,7 +91,7 @@ export function canonical(attribute: Attribute, value: string | null | undefined
     if (/^(apparel|clothing|garment|top|tops|bottoms|outerwear)$/.test(text)) return 'apparel';
     const type = productType(text);
     if (type) return ['sneakers', 'boots', 'shoes'].includes(type) ? 'shoes'
-      : ['bag', 'sunglasses', 'watch', 'mug', 'lamp'].includes(type) ? type : 'apparel';
+      : ['bag', 'sunglasses', 'watch', 'mug', 'lamp', 'fragrance'].includes(type) ? type : 'apparel';
     return null;
   }
   return text;
