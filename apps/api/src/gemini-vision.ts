@@ -36,8 +36,11 @@ function imagePart(dataUrl: string) {
 export class GeminiVisionProvider implements VisionProvider {
   constructor(private readonly apiKey: string, private readonly model = DEFAULT_GEMINI_MODEL) {}
 
-  async analyzeSelection(dataUrl: string, point?: SelectionPoint): Promise<ObjectDescription> {
-    return normalizeObjectDescription(await this.generate(PROMPT + FIELD_CONFIDENCE_PROMPT + clickedObjectPrompt(point), [dataUrl]));
+  async analyzeSelection(dataUrl: string, point?: SelectionPoint, detailDataUrl?: string): Promise<ObjectDescription> {
+    const detailPrompt = detailDataUrl
+      ? ' IMAGE 1 is the selected object with context. IMAGE 2 is a magnified detail around the user click. Use IMAGE 2 to read small text, logos, markings, stitching, hardware, and distinctive details, but keep IMAGE 1 authoritative for the object identity and overall shape.'
+      : '';
+    return normalizeObjectDescription(await this.generate(PROMPT + detailPrompt + FIELD_CONFIDENCE_PROMPT + clickedObjectPrompt(point), detailDataUrl ? [dataUrl, detailDataUrl] : [dataUrl]));
   }
 
   async locateSelection(dataUrl: string, focusDataUrl: string, point: SelectionPoint) {
