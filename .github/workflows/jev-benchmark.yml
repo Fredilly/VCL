@@ -62,7 +62,7 @@ jobs:
         run: |
           pnpm check
           pnpm build
-          node --test apps/api/tests/jev-router.test.mjs
+          node --test apps/api/tests/jev-router.test.mjs apps/api/tests/jev-fabric.test.mjs
 
       - name: Prepare preview-only Wrangler config
         run: |
@@ -85,6 +85,7 @@ jobs:
           pnpm exec wrangler versions upload \
             --config "apps/api/.jev-wrangler.jsonc" \
             --name vcl-api \
+            --var JEV_MODE:off \
             --var JEV_DECISION_ROUTER:false \
             --var VISION_PROVIDER:"$BENCHMARK_VISION_PROVIDER" \
             --var OPENROUTER_MODEL:"google/gemini-2.5-flash-lite" \
@@ -99,6 +100,7 @@ jobs:
           pnpm exec wrangler versions upload \
             --config "apps/api/.jev-wrangler.jsonc" \
             --name vcl-api \
+            --var JEV_MODE:router \
             --var JEV_DECISION_ROUTER:true \
             --var VISION_PROVIDER:"$BENCHMARK_VISION_PROVIDER" \
             --var OPENROUTER_MODEL:"google/gemini-2.5-flash-lite" \
