@@ -69,23 +69,13 @@ test('valid vision response continues through commerce resolution', async () => 
   assert.equal(requestBodies[1].source_image, requestBodies[0].dataUrl, 'the same selected crop reaches candidate verification');
 });
 
-test('click point and focus reach localization while analysis and commerce preserve the selected crop', async () => {
+test('targeted analysis sends the exact user-approved crop directly to vision and commerce', async () => {
   const { requestBodies, requests } = await run({ targeted: true });
-  assert.equal(requests, 3);
+  assert.equal(requests, 2);
+  assert.equal(requestBodies[0].dataUrl, 'data:image/png;base64,test');
+  assert.equal(requestBodies[0].focusDataUrl, undefined);
   assert.deepEqual(requestBodies[0].point, { x: 0.75, y: 0.25 });
-  assert.equal(requestBodies[0].focusDataUrl, 'focus-pixels');
-  assert.equal(requestBodies[1].dataUrl, 'data:image/png;base64,test');
-  assert.equal(requestBodies[1].focusDataUrl, 'target-pixels');
-  assert.deepEqual(requestBodies[1].point, { x: 0.75, y: 0.25 });
-  assert.equal(requestBodies[2].source_image, 'data:image/png;base64,test');
-});
-
-test('failed localization falls back non-blockingly and continues analysis', async () => {
-  const { requests, requestBodies, panel } = await run({ targeted: true, locateFails: true });
-  assert.equal(requests, 3);
-  assert.equal(requestBodies[1].dataUrl, 'data:image/png;base64,test');
-  assert.equal(requestBodies[2].source_image, 'data:image/png;base64,test');
-  assert.equal(panel.firstElementChild.textContent, 'VCL object understanding: success');
+  assert.equal(requestBodies[1].source_image, 'data:image/png;base64,test');
 });
 
 test('background listener delivers callback response and returns true to keep channel open', async () => {
@@ -127,7 +117,7 @@ test('true no-results stays distinct from provider failure', async () => {
 test('a complete high-confidence identity can send nearby evidence without changing the selected target or confidence', async () => {
   const complete = { ...description, brand_candidate: 'Example', model_candidate: 'M1', confidence: 0.99, identity_confidence: 0.99 };
   const { panel, requestBodies, requests } = await run({ targeted: true, visionPayload: complete, improve: true });
-  assert.equal(requests, 4);
+  assert.equal(requests, 3);
   const nearby = requestBodies.at(-1);
   assert.equal(nearby.dataUrl, 'data:image/png;base64,test');
   assert.deepEqual(nearby.point, { x: 0.75, y: 0.25 });
