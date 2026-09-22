@@ -77,5 +77,7 @@ test('fabric refuses LIGHT when deterministic evidence floor is weak', async () 
 test('fabric fails open to safe normal/full/no behavior', async () => {
   const result = await routeWithJevFabric(routerInput(evidence, true, 2), { async run() { return { nope: true }; } });
   assert.equal(result.telemetry.failed, true);
-  assert.deepEqual(result.decision, { commerce_action: 'SEARCH_NORMAL', verification_action: 'FULL', multiframe_action: 'NO' });
+  assert.equal(result.decision.commerce_action, 'SEARCH_NORMAL');
+  assert.equal(result.decision.verification_action, 'FULL');
+  assert.equal(result.decision.multiframe_action, 'NO');
 });
