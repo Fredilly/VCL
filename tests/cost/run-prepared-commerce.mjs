@@ -38,7 +38,10 @@ function trustCounts(products, expected) {
 async function postJson(path, body) {
   const response = await fetch(`${apiOrigin}/${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-scoop-install-id': '00000000-0000-4000-8000-000000000001',
+    },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(120000),
   });
