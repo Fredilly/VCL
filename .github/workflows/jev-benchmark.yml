@@ -110,6 +110,21 @@ jobs:
           awk '/Version Preview Alias URL:/ { print $NF }' jev-on-upload.log > jev-on-origin.txt
           test -s jev-on-origin.txt
 
+      - name: Create FABRIC Worker version preview
+        run: |
+          pnpm exec wrangler versions upload \
+            --config "apps/api/.jev-wrangler.jsonc" \
+            --name vcl-api \
+            --var JEV_MODE:fabric \
+            --var JEV_DECISION_ROUTER:true \
+            --var VISION_PROVIDER:"$BENCHMARK_VISION_PROVIDER" \
+            --var OPENROUTER_MODEL:"google/gemini-2.5-flash-lite" \
+            --preview-alias jev-fabric \
+            --tag jev-fabric-${GITHUB_SHA} \
+            --message "Jev benchmark FABRIC ${GITHUB_SHA}" | tee jev-fabric-upload.log
+          awk '/Version Preview Alias URL:/ { print $NF }' jev-fabric-upload.log > jev-fabric-origin.txt
+          test -s jev-fabric-origin.txt
+
       - name: Freeze valid benchmark cases
         run: |
           node --input-type=module <<'NODE'
@@ -142,9 +157,9 @@ jobs:
           export VCL_PREPARED_OUTPUT="$GITHUB_WORKSPACE/jev-prepared.json"
           export VCL_CDP_PORT=9334
           export VCL_COST_PROFILE="$RUNNER_TEMP/jev-browser-prep"
-          # Vision is shared by OFF and ON. Prepare against the ON preview so the
-          # benchmark can safely test a provider without changing production.
-          export VCL_API_ORIGIN="$(cat jev-on-origin.txt)"
+          # Vision is shared by OFF, ROUTER and FABRIC. Prepare once against the
+          # FABRIC preview so all three modes reuse identical Gemini vision output.
+          export VCL_API_ORIGIN="$(cat jev-fabric-origin.txt)"
 
           printf '{"schema_version":1,"rows":[]}' > "$VCL_PREPARED_OUTPUT"
           printf '{"attempts":[]}' > "$GITHUB_WORKSPACE/jev-vision-attempts.json"
@@ -232,11 +247,12 @@ jobs:
           console.log(`Prepared ${preparedCount}/${requested} vision inputs; continuing Jev comparison with available cases.`);
           NODE
 
-      - name: Run identical OFF and ON commerce from shared vision
+      - name: Run identical OFF, ROUTER and FABRIC commerce from shared vision
         run: |
           set +e
           printf '{"runs":[]}' > "$GITHUB_WORKSPACE/jev-off.json"
           printf '{"runs":[]}' > "$GITHUB_WORKSPACE/jev-on.json"
+          printf '{"runs":[]}' > "$GITHUB_WORKSPACE/jev-fabric.json"
 
           prepared_count="$(cat jev-prepared-count.txt)"
           VCL_PREPARED_CASE_COUNT="$prepared_count" \
@@ -253,6 +269,13 @@ jobs:
           node tests/cost/run-prepared-commerce.mjs
           echo $? > jev-on-status.txt
 
+          VCL_PREPARED_CASE_COUNT="$prepared_count" \
+          VCL_PREPARED_INPUT="$GITHUB_WORKSPACE/jev-prepared.json" \
+          VCL_API_ORIGIN="$(cat jev-fabric-origin.txt)" \
+          VCL_COST_OUTPUT="$GITHUB_WORKSPACE/jev-fabric.json" \
+          node tests/cost/run-prepared-commerce.mjs
+          echo $? > jev-fabric-status.txt
+
       - name: Produce OFF vs ON report
         run: |
           node --input-type=module <<'NODE'
@@ -260,6 +283,7 @@ jobs:
           const load = (path) => JSON.parse(readFileSync(path, 'utf8'));
           const off = load('jev-off.json');
           const on = load('jev-on.json');
+          const fabric = load('jev-fabric.json');
           const prepared = load('jev-prepared.json');
           const visionAttempts = load('jev-vision-attempts.json');
           const percentile = (values, p) => { const v = values.filter(Number.isFinite).sort((a,b)=>a-b); return v.length ? v[Math.min(v.length-1, Math.ceil(v.length*p)-1)] : null; };
@@ -351,17 +375,64 @@ jobs:
             scout_retry_recovered: scoutRetryRecovered,
             measured_operations: visionRoutes.length,
           };
-          const O=metric(off,false), N=metric(on,true);
+          const O=metric(off,false), N=metric(on,true), F=metric(fabric,true);
           const delta=(a,b)=>a==null||b==null?null:b-a;
           const pct=(a,b)=>a==null||b==null||a===0?null:(b-a)/a*100;
-          const runStatus={off:Number(readFileSync('jev-off-status.txt','utf8')),on:Number(readFileSync('jev-on-status.txt','utf8'))};
+          const runStatus={
+            off:Number(readFileSync('jev-off-status.txt','utf8')),
+            router:Number(readFileSync('jev-on-status.txt','utf8')),
+            fabric:Number(readFileSync('jev-fabric-status.txt','utf8')),
+          };
           const requested=Number(process.env.JEV_CASE_LIMIT || 8);
           const expected=(prepared.rows ?? []).length;
           const visionComplete=expected===requested;
-          const complete=runStatus.off===0&&runStatus.on===0&&O.successful_cases===expected&&N.successful_cases===expected;
-          const report={commit:readFileSync('benchmark-commit.txt','utf8').trim(),case_limit:requested,prepared_case_count:expected,vision_complete:visionComplete,vision_reliability:visionReliability,off:O,on:N,run_status:runStatus,sample_complete:complete,delta:{useful_rate:delta(O.useful_rate,N.useful_rate),p50_latency_pct:pct(O.p50_latency_ms,N.p50_latency_ms),p95_latency_pct:pct(O.p95_latency_ms,N.p95_latency_ms),verification_calls_pct:pct(O.verification_calls,N.verification_calls),commerce_calls_pct:pct(O.commerce_calls,N.commerce_calls)},trust_gates:{false_exact:O.false_exact===0&&N.false_exact===0,unsupported_likely:O.unsupported_likely===0&&N.unsupported_likely===0,measured:complete&&Number.isFinite(O.false_exact)&&Number.isFinite(N.false_exact)&&Number.isFinite(O.unsupported_likely)&&Number.isFinite(N.unsupported_likely)}};
+          const complete=runStatus.off===0&&runStatus.router===0&&runStatus.fabric===0
+            &&O.successful_cases===expected&&N.successful_cases===expected&&F.successful_cases===expected;
+          const report={
+            commit:readFileSync('benchmark-commit.txt','utf8').trim(),
+            case_limit:requested,
+            prepared_case_count:expected,
+            vision_complete:visionComplete,
+            vision_reliability:visionReliability,
+            off:O,
+            router:N,
+            fabric:F,
+            run_status:runStatus,
+            sample_complete:complete,
+            delta:{
+              router_vs_off:{
+                useful_rate:delta(O.useful_rate,N.useful_rate),
+                p50_latency_pct:pct(O.p50_latency_ms,N.p50_latency_ms),
+                p95_latency_pct:pct(O.p95_latency_ms,N.p95_latency_ms),
+                verification_calls_pct:pct(O.verification_calls,N.verification_calls),
+                commerce_calls_pct:pct(O.commerce_calls,N.commerce_calls),
+                cost_per_scoop_pct:pct(O.cost_per_scoop_usd,N.cost_per_scoop_usd),
+              },
+              fabric_vs_off:{
+                useful_rate:delta(O.useful_rate,F.useful_rate),
+                p50_latency_pct:pct(O.p50_latency_ms,F.p50_latency_ms),
+                p95_latency_pct:pct(O.p95_latency_ms,F.p95_latency_ms),
+                verification_calls_pct:pct(O.verification_calls,F.verification_calls),
+                commerce_calls_pct:pct(O.commerce_calls,F.commerce_calls),
+                cost_per_scoop_pct:pct(O.cost_per_scoop_usd,F.cost_per_scoop_usd),
+              },
+              fabric_vs_router:{
+                useful_rate:delta(N.useful_rate,F.useful_rate),
+                p50_latency_pct:pct(N.p50_latency_ms,F.p50_latency_ms),
+                p95_latency_pct:pct(N.p95_latency_ms,F.p95_latency_ms),
+                verification_calls_pct:pct(N.verification_calls,F.verification_calls),
+                commerce_calls_pct:pct(N.commerce_calls,F.commerce_calls),
+                cost_per_scoop_pct:pct(N.cost_per_scoop_usd,F.cost_per_scoop_usd),
+              },
+            },
+            trust_gates:{
+              false_exact:O.false_exact===0&&N.false_exact===0&&F.false_exact===0,
+              unsupported_likely:O.unsupported_likely===0&&N.unsupported_likely===0&&F.unsupported_likely===0,
+              measured:complete&&[O,N,F].every(x=>Number.isFinite(x.false_exact)&&Number.isFinite(x.unsupported_likely)),
+            },
+          };
           writeFileSync('jev-report.json',JSON.stringify(report,null,2)+'\n');
-          writeFileSync('jev-report.md', '# Jev OFF vs ON\\n\\nCommit: ' + report.commit + '\\n\\n## VISION RELIABILITY\\n\\n' + JSON.stringify(visionReliability,null,2) + '\\n\\n## OFF\\n\\n' + JSON.stringify(O,null,2) + '\\n\\n## ON\\n\\n' + JSON.stringify(N,null,2) + '\\n\\n## DELTA\\n\\n' + JSON.stringify(report.delta,null,2) + '\\n\\nTrust gates: false EXACT=' + (report.trust_gates.false_exact ? 0 : 'FAIL') + ', unsupported LIKELY=' + (report.trust_gates.unsupported_likely ? 0 : 'FAIL') + '\\n');
+          writeFileSync('jev-report.md', '# Jev OFF vs ROUTER vs FABRIC\\n\\nCommit: ' + report.commit + '\\n\\n## VISION RELIABILITY\\n\\n' + JSON.stringify(visionReliability,null,2) + '\\n\\n## OFF\\n\\n' + JSON.stringify(O,null,2) + '\\n\\n## ROUTER\\n\\n' + JSON.stringify(N,null,2) + '\\n\\n## FABRIC\\n\\n' + JSON.stringify(F,null,2) + '\\n\\n## DELTA\\n\\n' + JSON.stringify(report.delta,null,2) + '\\n\\nTrust gates: false EXACT=' + (report.trust_gates.false_exact ? 0 : 'FAIL') + ', unsupported LIKELY=' + (report.trust_gates.unsupported_likely ? 0 : 'FAIL') + '\\n');
           console.log(JSON.stringify(report,null,2));
           if (!report.trust_gates.measured || !report.trust_gates.false_exact || !report.trust_gates.unsupported_likely) process.exitCode=1;
           NODE
