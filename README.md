@@ -26,3 +26,22 @@ The canonical closed-alpha instructions are in:
 - `docs/ALPHA_LAUNCH_RUNBOOK.md`
 
 See `project-system/AGENTS.md` before making architectural or product decisions.
+
+
+## API keys and secrets
+
+Add or rotate a known Worker secret with one command:
+
+```bash
+pnpm secret:add OPENROUTER_API_KEY
+```
+
+Wrangler securely prompts for the value, so the secret is not stored in git or typed into the command itself. After the update, Scoop checks the production `/health` endpoint automatically.
+
+See which known secrets are configured:
+
+```bash
+pnpm secrets:check
+```
+
+The canonical secret-name registry is `apps/api/secrets.registry.json`. Add new provider secret names there when a provider is introduced.
