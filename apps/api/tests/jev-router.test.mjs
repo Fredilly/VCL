@@ -176,3 +176,25 @@ test('LIGHT is preserved only for high-confidence corroborated evidence', async 
   assert.equal(result.decision.verification_action, 'LIGHT');
   assert.equal(result.telemetry.verification_action, 'LIGHT');
 });
+
+
+test('apparel never uses LIGHT verification even with high-confidence brand evidence', async () => {
+  const apparel = {
+    category: 'Apparel',
+    subcategory: 'Sweater',
+    confidence: 0.96,
+    identity_confidence: 0.94,
+    visible_text: ['BOSS'],
+    logos_markings: ['BOSS'],
+    distinctive_features: ['long sleeve', 'crew neck'],
+  };
+  const result = await routeWithJev(routerInput(apparel, false, 2), ai({
+    answers: {
+      commerce_action: { type: 'choice', choice: 'SEARCH_NORMAL' },
+      verification_action: { type: 'choice', choice: 'LIGHT' },
+      multiframe_action: { type: 'choice', choice: 'NO' },
+    },
+  }));
+  assert.equal(result.decision.verification_action, 'FULL');
+  assert.equal(result.telemetry.verification_action, 'FULL');
+});
