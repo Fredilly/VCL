@@ -43,6 +43,17 @@ test('fabric batches atomic judgments into one call and chooses LIGHT for strong
   assert.equal(result.telemetry.calls, 1);
 });
 
+test('fabric records broad-search permission without broadening upfront', async () => {
+  const result = await routeWithJevFabric(routerInput(evidence, false, 2), ai({
+    commerce_needed: answer('YES', 0.99),
+    broad_search_needed: answer('YES', 0.99),
+    verification_needed: answer('YES', 0.9),
+    multiframe_needed: answer('NO', 0.9),
+  }));
+  assert.equal(result.decision.commerce_action, 'SEARCH_NORMAL');
+  assert.equal(result.telemetry.broad_search_on_miss, true);
+});
+
 test('fabric skips commerce only on a high-confidence NO', async () => {
   const result = await routeWithJevFabric(routerInput(evidence, false, 2), ai({
     commerce_needed: answer('NO', 0.95),
