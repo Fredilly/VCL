@@ -77,6 +77,7 @@ const TYPE_TERMS: Record<string, string[]> = {
   bag: ['bag', 'bags', 'handbag', 'handbags', 'backpack', 'backpacks', 'purse', 'purses'],
   watch: ['watch', 'watches'],
   mug: ['mug', 'mugs', 'cup', 'cups'],
+  fragrance: ['perfume', 'perfumes', 'fragrance', 'fragrances', 'eau de parfum', 'eau de toilette', 'cologne'],
 };
 
 const COLORS = ['black', 'white', 'grey', 'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'navy', 'purple', 'pink', 'brown', 'beige', 'cream', 'gold', 'silver'];
