@@ -19,6 +19,7 @@ import { SerpApiCommerceProvider } from './serpapi-commerce.js';
 import { BraveCommerceProvider } from './brave-commerce.js';
 import { resolveBraveCredentials } from './brave-credentials.js';
 import { routeWithJev, routerInput, type JevRouterTelemetry } from './jev-router.js';
+import { routeWithJevFabric } from './jev-fabric.js';
 import type { WorkersAiBinding } from './jev.js';
 import { resolveJevBinding } from './jev-binding.js';
 import { normalizeAlphaTelemetry, recordAlphaFeedback, recordAlphaScoop } from './alpha-telemetry.js';
@@ -47,6 +48,7 @@ export interface Env {
   ETSY_SHARED_SECRET?: string;
   BRAVE_SEARCH_API_KEY?: string;
   JEV_DECISION_ROUTER?: string;
+  JEV_MODE?: string;
   AI_GATEWAY_API_KEY?: string;
   ALPHA_ENABLED?: string;
   ALPHA_ATTRIBUTION_SECRET?: string;
@@ -624,10 +626,16 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
         ? { ...query, affiliate_reference_id: affiliateClickRef }
         : query);
       let routing: Parameters<typeof resolveProducts>[7];
-      if (env.JEV_DECISION_ROUTER === 'true') {
+      const jevMode = env.JEV_MODE === 'off' || env.JEV_MODE === 'router' || env.JEV_MODE === 'fabric'
+        ? env.JEV_MODE
+        : env.JEV_DECISION_ROUTER === 'true' ? 'router' : 'off';
+      if (jevMode !== 'off') {
         const jevBinding = resolveJevBinding(env);
         if (jevBinding) {
-          const routed = await routeWithJev(routerInput(description, Boolean(record.multi_frame_available), providers.length), jevBinding);
+          const input = routerInput(description, Boolean(record.multi_frame_available), providers.length);
+          const routed = jevMode === 'fabric'
+            ? await routeWithJevFabric(input, jevBinding)
+            : await routeWithJev(input, jevBinding);
           routing = { ...routed.decision, telemetry: routed.telemetry };
         }
       }
