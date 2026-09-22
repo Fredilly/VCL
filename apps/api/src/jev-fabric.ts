@@ -18,6 +18,7 @@ export type JevFabricTelemetry = JevRouterTelemetry & {
     light_verification: number;
     multiframe: number;
   };
+  broad_search_on_miss: boolean;
 };
 
 const REQUEST_SCHEMA_VERSION = 'jev-fabric-v1';
@@ -99,6 +100,7 @@ export async function routeWithJevFabric(
     request_schema_version: REQUEST_SCHEMA_VERSION,
     signals: defaultSignals,
     thresholds: THRESHOLDS,
+    broad_search_on_miss: false,
   };
   const started = Date.now();
   let responseShape: string | undefined;
@@ -150,9 +152,7 @@ export async function routeWithJevFabric(
     const decision: JevRoutingDecision = {
       commerce_action: s.commerce_needed.choice === 'NO' && s.commerce_needed.confidence >= THRESHOLDS.skip_commerce
         ? 'SKIP'
-        : s.broad_search_needed.choice === 'YES' && s.broad_search_needed.confidence >= THRESHOLDS.broad_search
-          ? 'SEARCH_BROAD'
-          : 'SEARCH_NORMAL',
+        : 'SEARCH_NORMAL',
       verification_action: s.verification_needed.choice === 'NO'
           && s.verification_needed.confidence >= THRESHOLDS.light_verification
           && strongEnoughForLight(input)
@@ -166,6 +166,8 @@ export async function routeWithJevFabric(
     };
 
     telemetry.signals = s;
+    telemetry.broad_search_on_miss = s.broad_search_needed.choice === 'YES'
+      && s.broad_search_needed.confidence >= THRESHOLDS.broad_search;
     telemetry.input_tokens = tokenUsage(raw.usage, 'input_tokens');
     telemetry.output_tokens = tokenUsage(raw.usage, 'output_tokens');
     Object.assign(telemetry, decision);
