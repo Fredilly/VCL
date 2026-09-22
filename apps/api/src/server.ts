@@ -468,6 +468,9 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
         catch { return jsonResponse({ error: 'A normalized click point is required' }, 400); }
         if (path === '/locate-selection' && !parseSourceImage(record.focusDataUrl)) return jsonResponse({ error: 'A bounded focus crop is required' }, 400);
       }
+      const focusDataUrl = typeof record.focusDataUrl === 'string' && parseSourceImage(record.focusDataUrl)
+        ? record.focusDataUrl
+        : undefined;
       const timestamp = record.timestamp;
       if (timestamp !== undefined && (typeof timestamp !== 'number' || !Number.isFinite(timestamp) || timestamp < 0)) return jsonResponse({ error: 'Invalid primary timestamp' }, 400);
       let nearby;
@@ -559,7 +562,12 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
         }
       }
       let description;
-      try { description = normalizeObjectDescription(await tryVision((provider) => provider.analyzeSelection(dataUrl, point))); }
+      try {
+        description = normalizeObjectDescription(await tryVision((provider) =>
+          provider instanceof OpenRouterVisionProvider || provider instanceof GeminiVisionProvider
+            ? provider.analyzeSelection(dataUrl, point, focusDataUrl)
+            : provider.analyzeSelection(dataUrl, point)));
+      }
       catch (error) {
         const reason = error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR';
         recordFailureState('vision', String(reason), true);
