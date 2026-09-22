@@ -79,3 +79,10 @@ jobs:
 
       - name: Deploy API to Cloudflare
         run: pnpm exec wrangler deploy --config apps/api/wrangler.jsonc
+
+      - name: Verify production API health
+        run: |
+          curl --fail --silent --show-error \
+            --retry 5 --retry-delay 2 --retry-all-errors \
+            https://api.vcl.article6.org/health \
+            | grep -q '"status":"ok"'
