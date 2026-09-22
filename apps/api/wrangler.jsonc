@@ -11,7 +11,8 @@
     "traces": { "enabled": true, "head_sampling_rate": 0.01 }
   },
   "vars": {
-    "VISION_PROVIDER": "cloudflare",
+    "VISION_PROVIDER": "openrouter",
+    "OPENROUTER_MODEL": "google/gemini-2.5-flash-lite",
     "GEMINI_MODEL": "gemini-3.5-flash-lite",
     "COMMERCE_ELIGIBILITY_GATE": "1",
     "EBAY_ENVIRONMENT": "production",
