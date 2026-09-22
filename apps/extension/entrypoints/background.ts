@@ -63,8 +63,8 @@ export default defineBackground(() => {
     const requestId = message.requestId;
     const endpoint = isLocate ? 'locate-selection' : isVision ? 'analyze-selection' : isAttribution ? 'commerce-click' : 'resolve-products';
     const body = isVision
-      ? { dataUrl: message.dataUrl, timestamp: message.timestamp, nearby_frames: message.nearby_frames, primary_description: message.primary_description,
-        point: message.point, ...(isLocate ? { focusDataUrl: message.focusDataUrl } : {}) }
+      ? { dataUrl: message.dataUrl, focusDataUrl: message.focusDataUrl, timestamp: message.timestamp, nearby_frames: message.nearby_frames, primary_description: message.primary_description,
+        point: message.point }
       : isAttribution
         ? { attribution_token: message.attribution_token }
         : { description: message.description, context: message.context ?? null, source_image: message.source_image, telemetry: message.telemetry ?? null };
