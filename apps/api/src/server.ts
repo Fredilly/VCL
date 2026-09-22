@@ -642,10 +642,13 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
           const routed = jevMode === 'fabric'
             ? await routeWithJevFabric(input, jevBinding)
             : await routeWithJev(input, jevBinding);
+          const broadSearchOnMiss = jevMode === 'fabric'
+            && 'broad_search_on_miss' in routed.telemetry
+            && routed.telemetry.broad_search_on_miss === true;
           routing = {
             ...routed.decision,
             telemetry: routed.telemetry,
-            ...(jevMode === 'fabric' ? { broad_search_on_miss: routed.telemetry.broad_search_on_miss } : {}),
+            ...(broadSearchOnMiss ? { broad_search_on_miss: true } : {}),
           };
         }
       }
