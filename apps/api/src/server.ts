@@ -435,9 +435,9 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
 
     if (accepted.filter((product) => product.result_class === 'LIKELY').length >= 3) return respond(query);
 
-    // FABRIC may pre-authorize a broader query, but only spend that extra work when
-    // the first normal search produced zero acceptable candidates.
-    if (routingActive && routing?.broad_search_on_miss && attempts === 1 && accepted.length > 0) return respond(query);
+    // SEARCH_NORMAL means normal-first, not normal-only. Stop after the first query
+    // when it produces an acceptable candidate; otherwise continue to broader variants.
+    if (routingActive && routing?.commerce_action === 'SEARCH_NORMAL' && attempts === 1 && accepted.length > 0) return respond(query);
   }
 
   return respond(queries[Math.max(0, Math.min(attempts - 1, queries.length - 1))]);
@@ -656,9 +656,9 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
       const routedProviders = routingActive && routing?.commerce_action === 'SKIP' ? [] : providers;
       const routedQueries = !routingActive
         ? queries
-        : routing?.commerce_action === 'SEARCH_BROAD' || routing?.broad_search_on_miss
-          ? queries
-          : queries.slice(0, 1);
+        : routing?.commerce_action === 'SKIP'
+          ? queries.slice(0, 1)
+          : queries;
       const started = Date.now();
       const resolved = await resolveProducts(routedProviders, routedQueries, description, env, context, sourceImage, compareCandidateImages, routing);
       const total_ms = Date.now() - started;
