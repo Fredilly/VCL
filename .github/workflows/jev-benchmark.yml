@@ -88,6 +88,7 @@ jobs:
             --var JEV_MODE:off \
             --var JEV_DECISION_ROUTER:false \
             --var VISION_PROVIDER:"$BENCHMARK_VISION_PROVIDER" \
+            --var BENCHMARK_MODE:true \
             --var OPENROUTER_MODEL:"google/gemini-2.5-flash-lite" \
             --preview-alias jev-off \
             --tag jev-off-${GITHUB_SHA} \
@@ -103,6 +104,7 @@ jobs:
             --var JEV_MODE:router \
             --var JEV_DECISION_ROUTER:true \
             --var VISION_PROVIDER:"$BENCHMARK_VISION_PROVIDER" \
+            --var BENCHMARK_MODE:true \
             --var OPENROUTER_MODEL:"google/gemini-2.5-flash-lite" \
             --preview-alias jev-on \
             --tag jev-on-${GITHUB_SHA} \
@@ -118,6 +120,7 @@ jobs:
             --var JEV_MODE:fabric \
             --var JEV_DECISION_ROUTER:true \
             --var VISION_PROVIDER:"$BENCHMARK_VISION_PROVIDER" \
+            --var BENCHMARK_MODE:true \
             --var OPENROUTER_MODEL:"google/gemini-2.5-flash-lite" \
             --preview-alias jev-fabric \
             --tag jev-fabric-${GITHUB_SHA} \
