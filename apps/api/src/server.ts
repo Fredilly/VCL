@@ -49,6 +49,7 @@ export interface Env {
   BRAVE_SEARCH_API_KEY?: string;
   JEV_DECISION_ROUTER?: string;
   JEV_MODE?: string;
+  BENCHMARK_MODE?: string;
   AI_GATEWAY_API_KEY?: string;
   ALPHA_ENABLED?: string;
   ALPHA_ATTRIBUTION_SECRET?: string;
@@ -584,15 +585,16 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
     }
     if (path === '/resolve-products') {
       const installId = request.headers.get('x-scoop-install-id') ?? '';
-      const alphaGuardrailsEnabled = Boolean(env.ALPHA_INSTALL_RATE_LIMITER || env.ALPHA_GLOBAL_RATE_LIMITER);
+      const benchmarkMode = env.BENCHMARK_MODE === 'true';
+      const alphaGuardrailsEnabled = !benchmarkMode && Boolean(env.ALPHA_INSTALL_RATE_LIMITER || env.ALPHA_GLOBAL_RATE_LIMITER);
       if (alphaGuardrailsEnabled && !/^[a-f0-9-]{36}$/i.test(installId)) {
         return jsonResponse({ error: 'Missing alpha install identifier', reason: 'ALPHA_INSTALL_ID_REQUIRED' }, 400);
       }
-      if (env.ALPHA_INSTALL_RATE_LIMITER) {
+      if (!benchmarkMode && env.ALPHA_INSTALL_RATE_LIMITER) {
         const { success } = await env.ALPHA_INSTALL_RATE_LIMITER.limit({ key: installId });
         if (!success) return jsonResponse({ error: 'Too many Scoop requests. Try again shortly.', reason: 'ALPHA_INSTALL_RATE_LIMIT', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: true }, 429);
       }
-      if (env.ALPHA_GLOBAL_RATE_LIMITER) {
+      if (!benchmarkMode && env.ALPHA_GLOBAL_RATE_LIMITER) {
         const { success } = await env.ALPHA_GLOBAL_RATE_LIMITER.limit({ key: 'alpha-global' });
         if (!success) return jsonResponse({ error: 'Scoop alpha is at its temporary usage limit. Try again shortly.', reason: 'ALPHA_GLOBAL_RATE_LIMIT', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: true }, 429);
       }
