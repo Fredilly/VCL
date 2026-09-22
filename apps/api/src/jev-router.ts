@@ -54,6 +54,13 @@ function validDecision(value: unknown): value is JevRoutingDecision {
 
 function strongEnoughForLight(input: JevRouterInput): boolean {
   const d = input.description;
+  // Apparel needs pixel-level verification because sleeve, subtype, color, and other
+  // structural attributes are easy to omit or misstate in merchant titles. LIGHT
+  // can otherwise let metadata-only candidates survive without checking the images.
+  if (/^(apparel|clothing|garment|top|tops|outerwear)$/i.test(d.category)
+    || /\b(sweater|jumper|pullover|cardigan|hoodie|sweatshirt|polo|t[- ]?shirt|shirt|jacket|coat|dress|skirt|shorts|jeans|trousers|pants|leggings|tank)\b/i.test(d.subcategory)) {
+    return false;
+  }
   const corroboratingEvidence =
     (d.visible_text?.length ?? 0) +
     (d.logos_markings?.length ?? 0) +
