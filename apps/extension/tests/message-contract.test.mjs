@@ -63,7 +63,7 @@ async function run({ visionStatus = 200, visionPayload = description, commerceSt
 
 test('valid vision response continues through commerce resolution', async () => {
   const { panel, requests, requestBodies } = await run();
-  assert.equal(panel.firstElementChild.textContent, 'VCL object understanding: success');
+  assert.equal(panel.firstElementChild.textContent, 'Scoop found this');
   assert.ok(panel.children.some(child => child.textContent === 'Commercially searchable confidence: 85%'));
   assert.ok(panel.children.some(child => child.textContent === 'Products · 0 · 12ms'));
   assert.equal(requests, 2);
@@ -103,7 +103,7 @@ test('vision provider failure is shown as temporary and recoverable', async () =
 
 test('commerce provider failure does not erase successful object understanding', async () => {
   const { panel, requests } = await run({ commerceStatus: 503, commercePayload: { error: 'Shopping sources are temporarily unavailable', reason: 'NO_CONFIGURED_PROVIDER' } });
-  assert.equal(panel.firstElementChild.textContent, 'VCL object understanding: success');
+  assert.equal(panel.firstElementChild.textContent, 'Scoop found this');
   assert.ok(panel.children.some(child => child.textContent === 'Scoop is temporarily unavailable. Try again in a moment.'));
   assert.equal(requests, 2);
 });
