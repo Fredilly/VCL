@@ -78,7 +78,7 @@ jobs:
       - name: Verify Preview Base secrets mirror production
         run: |
           set -euo pipefail
-          PROD="$(pnpm dlx wrangler@4.135.0 secret list --config apps/api/wrangler.jsonc --json)"
+          PROD="$(pnpm dlx wrangler@4.135.0 secret list --config apps/api/wrangler.jsonc --format json)"
           BASE="$(pnpm dlx wrangler@4.135.0 preview base-config secret list --worker-name vcl-api --json)"
           PROD="$PROD" BASE="$BASE" node --input-type=module <<'NODE'
           const names = (raw) => {
