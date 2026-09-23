@@ -47,6 +47,39 @@ jobs:
       - name: Deterministic tests
         run: pnpm test
 
+  package-extension:
+    name: package-extension
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Package Chrome/Brave extension
+        run: pnpm --filter @vcl/extension zip
+
+      - name: Upload Scoop alpha extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: scoop-alpha-extension
+          path: apps/extension/.output/*.zip
+          if-no-files-found: error
+          retention-days: 14
 
   deploy:
     name: deploy-api
