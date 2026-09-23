@@ -23,7 +23,7 @@ import { routeWithJevFabric } from './jev-fabric.js';
 import type { WorkersAiBinding } from './jev.js';
 import { resolveJevBinding } from './jev-binding.js';
 import { normalizeAlphaTelemetry, recordAlphaFeedback, recordAlphaScoop } from './alpha-telemetry.js';
-import { applyFeedbackPenalties, evidenceFingerprint, feedbackCandidateKey, feedbackPenalties, persistFeedback, persistFeedbackContext, FEEDBACK_RANKING_POLICY, type DurableObjectNamespaceLike } from './feedback-ledger.js';
+import { applyFeedbackPenalties, evidenceFingerprint, feedbackCandidateKey, feedbackPenalties, feedbackReport, persistFeedback, persistFeedbackContext, FEEDBACK_RANKING_POLICY, type DurableObjectNamespaceLike } from './feedback-ledger.js';
 export { FeedbackLedger } from './feedback-ledger.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 
@@ -55,6 +55,7 @@ export interface Env {
   AI_GATEWAY_API_KEY?: string;
   ALPHA_ENABLED?: string;
   ALPHA_ATTRIBUTION_SECRET?: string;
+  ALPHA_FEEDBACK_ADMIN_TOKEN?: string;
   ALPHA_CREATOR_CONTENT_MAP?: string;
   ALPHA_INSTALL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
   ALPHA_GLOBAL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
@@ -63,7 +64,7 @@ export interface Env {
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
-const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type,x-scoop-install-id', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
+const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type,x-scoop-install-id,x-scoop-admin-token', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
 
 type VisionProviderName = 'openrouter' | 'gemini' | 'groq-3.8' | 'groq-3.6' | 'cloudflare';
 const visionCooldownUntil = new Map<VisionProviderName, number>();
@@ -598,6 +599,19 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       } catch (error) {
         logSafeError(error);
         return jsonResponse({ error: 'Invalid feedback' }, 400);
+      }
+    }
+    if (path === '/feedback-report') {
+      const adminToken = env.ALPHA_FEEDBACK_ADMIN_TOKEN || env.ALPHA_ATTRIBUTION_SECRET;
+      if (!adminToken) return jsonResponse({ error: 'Feedback report access is not configured' }, 503);
+      if (request.headers.get('x-scoop-admin-token') !== adminToken) return jsonResponse({ error: 'Unauthorized' }, 401);
+      try {
+        const body = await request.json().catch(() => ({})) as { session_id?: unknown };
+        const sessionId = typeof body.session_id === 'string' ? body.session_id : null;
+        return jsonResponse(await feedbackReport(env, sessionId));
+      } catch (error) {
+        logSafeError(error);
+        return jsonResponse({ error: 'Feedback report unavailable' }, 500);
       }
     }
     if (path === '/resolve-products') {
