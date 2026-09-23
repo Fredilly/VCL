@@ -27,6 +27,7 @@ test('uses OpenRouter Gemini Flash Lite with image input and reports cost', asyn
   assert.equal(request.options.headers.Authorization, 'Bearer test-key');
   const body = JSON.parse(request.options.body);
   assert.equal(body.model, 'google/gemini-2.5-flash-lite');
+  assert.deepEqual(body.provider, { data_collection: 'deny', zdr: true });
   assert.equal(body.messages[0].content[1].image_url.url, image);
   assert.equal(body.messages[0].content[2].image_url.url, detail);
   const prompt = body.messages[0].content[0].text;
