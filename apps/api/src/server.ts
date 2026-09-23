@@ -669,7 +669,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
       const parsed: unknown = await request.json();
       const wrapped = Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'description' in parsed);
-      const record = wrapped ? parsed as { description: unknown; context?: unknown; source_image?: unknown; multi_frame_available?: unknown; telemetry?: unknown } : { description: parsed, context: undefined, source_image: undefined, multi_frame_available: undefined, telemetry: undefined };
+      const record = wrapped ? parsed as { description: unknown; context?: unknown; source_image?: unknown; multi_frame_available?: unknown; telemetry?: unknown; benchmark_visible_text_query_v2?: unknown } : { description: parsed, context: undefined, source_image: undefined, multi_frame_available: undefined, telemetry: undefined, benchmark_visible_text_query_v2: undefined };
       let alphaTelemetry = null;
       try { alphaTelemetry = normalizeAlphaTelemetry(record.telemetry); }
       catch { return jsonResponse({ error: 'Invalid telemetry envelope' }, 400); }
@@ -693,7 +693,8 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             event_id: alphaTelemetry.event_id,
           })
         : null;
-      const queries = buildProductQueryVariants(description, context, env.VISIBLE_TEXT_QUERY_V2 === 'true').map((query) => affiliateClickRef
+      const visibleTextQueryV2 = env.VISIBLE_TEXT_QUERY_V2 === 'true' || record.benchmark_visible_text_query_v2 === true;
+      const queries = buildProductQueryVariants(description, context, visibleTextQueryV2).map((query) => affiliateClickRef
         ? { ...query, affiliate_reference_id: affiliateClickRef }
         : query);
       let routing: Parameters<typeof resolveProducts>[7];
