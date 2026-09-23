@@ -128,3 +128,22 @@ test('a complete high-confidence identity can send nearby evidence without chang
   assert.ok(panel.children.some(child => child.textContent === 'Identity confidence: 99%'));
   assert.ok(panel.children.some(child => child.textContent === 'Nearby evidence did not change the selected-object hypothesis.'));
 });
+
+
+test('feedback messages are forwarded to the feedback endpoint', async () => {
+  let listener;
+  let seen;
+  const storageState = {};
+  const browser = { action: { onClicked: { addListener() {} } }, commands: { onCommand: { addListener() {} } }, tabs: { query: async () => [], sendMessage: async () => undefined },
+    storage: { local: { get: async (key) => ({ [key]: storageState[key] }), set: async (value) => Object.assign(storageState, value) } }, runtime: { onMessage: { addListener(fn) { listener = fn; } } } };
+  const context = vm.createContext({ exports: {}, browser, defineBackground: fn => fn(), console, crypto: { randomUUID: () => '123e4567-e89b-12d3-a456-426614174000' },
+    fetch: async (url, options) => { seen = { url: String(url), body: JSON.parse(options.body) }; return Response.json({ accepted: true, event_id: 'evt-1' }); } });
+  vm.runInContext(compile(background), context);
+  let response;
+  const keepChannelOpen = listener({ type: 'VCL_FEEDBACK', event_id: 'evt-1', result_id: 'result-1', feedback_type: 'correct_match' }, {}, value => { response = value; });
+  assert.equal(keepChannelOpen, true);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(seen.url.endsWith('/feedback'));
+  assert.deepEqual(seen.body, { event_id: 'evt-1', result_id: 'result-1', feedback_type: 'correct_match' });
+  assert.equal(response.accepted, true);
+});
