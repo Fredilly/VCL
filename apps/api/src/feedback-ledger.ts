@@ -105,6 +105,10 @@ export async function persistFeedback(env: FeedbackLedgerEnv, value: unknown): P
   return result?.feedback ?? feedback;
 }
 
+export async function feedbackReport(env: FeedbackLedgerEnv, session_id?: string | null): Promise<unknown> {
+  return await postJson(env, '/report', { session_id: session_id ? bounded(session_id, 160) : null });
+}
+
 export async function feedbackPenalties(
   env: FeedbackLedgerEnv,
   evidence_key: string,
@@ -288,13 +292,30 @@ export class FeedbackLedger {
     }
 
     if (path === '/report') {
+      const body = await request.json().catch(() => ({})) as { session_id?: unknown };
+      const sessionId = bounded(body.session_id, 160);
+      const sessionFilter = sessionId ? ' AND c.session_id = ?' : '';
+      const sessionBindings = sessionId ? [sessionId] : [];
       const totals = this.rows(`
         SELECT
           COUNT(*) AS feedback_count,
-          SUM(CASE WHEN feedback_type IN ('wrong_item','wrong_category','not_similar') THEN 1 ELSE 0 END) AS wrong_count,
-          SUM(CASE WHEN feedback_type IN ('correct_match','useful') THEN 1 ELSE 0 END) AS correct_count
-        FROM feedback
-      `)[0] ?? {};
+          SUM(CASE WHEN f.feedback_type IN ('wrong_item','wrong_category','not_similar') THEN 1 ELSE 0 END) AS wrong_count,
+          SUM(CASE WHEN f.feedback_type IN ('correct_match','useful') THEN 1 ELSE 0 END) AS correct_count
+        FROM feedback f
+        LEFT JOIN result_context c ON c.event_id = f.event_id AND c.result_id = f.result_id
+        WHERE 1 = 1${sessionFilter}
+      `, ...sessionBindings)[0] ?? {};
+      const corrections = this.rows(`
+        SELECT f.event_id, f.result_id, f.feedback_type, f.created_at,
+               c.session_id, c.provider, c.provenance, c.result_class, c.query_text,
+               c.category, c.subcategory, c.brand, c.model, c.evidence_key, c.candidate_key,
+               c.vision_model, c.ranking_policy
+        FROM feedback f
+        LEFT JOIN result_context c ON c.event_id = f.event_id AND c.result_id = f.result_id
+        WHERE 1 = 1${sessionFilter}
+        ORDER BY f.created_at DESC
+        LIMIT 100
+      `, ...sessionBindings);
       const repeated = this.rows(`
         SELECT evidence_key, candidate_key, wrong_count, correct_count
         FROM mapping_signal
@@ -306,12 +327,12 @@ export class FeedbackLedger {
         SELECT c.provider, c.query_text, COUNT(*) AS corrections
         FROM feedback f
         JOIN result_context c ON c.event_id = f.event_id AND c.result_id = f.result_id
-        WHERE f.feedback_type IN ('wrong_item','wrong_category','not_similar')
+        WHERE f.feedback_type IN ('wrong_item','wrong_category','not_similar')${sessionFilter}
         GROUP BY c.provider, c.query_text
         ORDER BY corrections DESC
         LIMIT 25
-      `);
-      return Response.json({ totals, repeated_bad_candidates: repeated, provider_query_patterns: providerPatterns });
+      `, ...sessionBindings);
+      return Response.json({ session_id: sessionId || null, totals, corrections, repeated_bad_candidates: repeated, provider_query_patterns: providerPatterns });
     }
 
     return Response.json({ error: 'Not found' }, { status: 404 });
