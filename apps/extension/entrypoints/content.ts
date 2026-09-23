@@ -238,19 +238,22 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
   const controller = new AbortController();
   activeCapture = controller;
   const imageWrap = document.createElement('div');
-  Object.assign(imageWrap.style, { position: 'relative', overflow: 'hidden', borderRadius: '10px', background: '#000', marginBottom: '10px' });
+  Object.assign(imageWrap.style, { display: 'flex', justifyContent: 'center', marginBottom: '10px' });
+  const scanSurface = document.createElement('div');
+  Object.assign(scanSurface.style, { position: 'relative', display: 'inline-block', overflow: 'hidden', borderRadius: '10px', background: '#000' });
   const image = document.createElement('img');
   image.src = result.dataUrl;
   image.alt = 'Selected object crop';
-  Object.assign(image.style, { display: 'block', width: '100%', maxHeight: '180px', objectFit: 'contain' });
+  Object.assign(image.style, { display: 'block', maxWidth: '100%', maxHeight: '180px', width: 'auto', height: 'auto' });
   const scanLine = document.createElement('div');
-  Object.assign(scanLine.style, { position: 'absolute', left: '6%', right: '6%', top: '8%', height: '2px', borderRadius: '999px',
-    background: 'rgba(109,177,255,.9)', boxShadow: '0 0 10px rgba(109,177,255,.85)', pointerEvents: 'none' });
-  imageWrap.append(image, scanLine);
+  Object.assign(scanLine.style, { position: 'absolute', left: '4%', right: '4%', top: '6%', height: '1px', borderRadius: '999px',
+    background: 'rgba(255,255,255,.82)', boxShadow: '0 0 8px rgba(255,255,255,.6)', pointerEvents: 'none' });
+  scanSurface.append(image, scanLine);
+  imageWrap.appendChild(scanSurface);
   panel.appendChild(imageWrap);
   const scanAnimation = typeof (scanLine as any).animate === 'function' ? (scanLine as any).animate(
-    [{ transform: 'translateY(0)', opacity: 0.25 }, { transform: 'translateY(145px)', opacity: 0.9 }, { transform: 'translateY(0)', opacity: 0.25 }],
-    { duration: 1800, iterations: Infinity, easing: 'ease-in-out' },
+    [{ top: '6%', opacity: 0.2 }, { top: '92%', opacity: 0.85 }, { top: '6%', opacity: 0.2 }],
+    { duration: 3400, iterations: Infinity, easing: 'ease-in-out' },
   ) : null;
   addClose(panel);
 
@@ -399,8 +402,8 @@ function showSelectionPreview(clientX: number, clientY: number) {
   const pointMarker = document.createElement('span');
   Object.assign(pointMarker.style, { position: 'absolute', width: '54px', height: '54px', transform: 'translate(-50%, -50%)',
     pointerEvents: 'none', borderRadius: '12px',
-    background: 'linear-gradient(#6db1ff,#6db1ff) left top/15px 3px no-repeat, linear-gradient(#6db1ff,#6db1ff) left top/3px 15px no-repeat, linear-gradient(#6db1ff,#6db1ff) right top/15px 3px no-repeat, linear-gradient(#6db1ff,#6db1ff) right top/3px 15px no-repeat, linear-gradient(#6db1ff,#6db1ff) left bottom/15px 3px no-repeat, linear-gradient(#6db1ff,#6db1ff) left bottom/3px 15px no-repeat, linear-gradient(#6db1ff,#6db1ff) right bottom/15px 3px no-repeat, linear-gradient(#6db1ff,#6db1ff) right bottom/3px 15px no-repeat',
-    filter: 'drop-shadow(0 0 5px rgba(74,155,255,.95)) drop-shadow(0 0 12px rgba(74,155,255,.5))' });
+    background: 'linear-gradient(#fff,#fff) left top/15px 3px no-repeat, linear-gradient(#fff,#fff) left top/3px 15px no-repeat, linear-gradient(#fff,#fff) right top/15px 3px no-repeat, linear-gradient(#fff,#fff) right top/3px 15px no-repeat, linear-gradient(#fff,#fff) left bottom/15px 3px no-repeat, linear-gradient(#fff,#fff) left bottom/3px 15px no-repeat, linear-gradient(#fff,#fff) right bottom/15px 3px no-repeat, linear-gradient(#fff,#fff) right bottom/3px 15px no-repeat',
+    filter: 'drop-shadow(0 1px 2px rgba(0,0,0,.9)) drop-shadow(0 0 5px rgba(255,255,255,.55))' });
   preview.append(image, pointMarker); panel.appendChild(preview);
 
   const cropLabel = document.createElement('div');
