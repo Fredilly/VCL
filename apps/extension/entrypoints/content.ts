@@ -133,9 +133,15 @@ function showFailure(result: Extract<FrameCaptureResult, { ok: false }>) {
   addClose(panel);
 }
 
+function formatLatency(ms: number) {
+  const seconds = Math.max(0, ms) / 1000;
+  const value = seconds < 10 ? seconds.toFixed(1).replace(/\.0$/, '') : Math.round(seconds).toString();
+  return `${value}s`;
+}
+
 function renderProducts(panel: HTMLElement, commerce: CommerceResponse, eventId: string) {
   const heading = document.createElement('div');
-  heading.textContent = `Products · ${commerce.products.length} · ${commerce.latency_ms}ms`;
+  heading.textContent = `Products · ${commerce.products.length} · ${formatLatency(commerce.latency_ms)}`;
   Object.assign(heading.style, { fontWeight: '700', margin: '12px 0 8px' });
   panel.appendChild(heading);
 

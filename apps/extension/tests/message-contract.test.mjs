@@ -65,7 +65,7 @@ test('valid vision response continues through commerce resolution', async () => 
   const { panel, requests, requestBodies } = await run();
   assert.equal(panel.firstElementChild.textContent, 'Scoop found this');
   assert.ok(panel.children.some(child => child.textContent === 'Commercially searchable confidence: 85%'));
-  assert.ok(panel.children.some(child => child.textContent === 'Products · 0 · 12ms'));
+  assert.ok(panel.children.some(child => child.textContent === 'Products · 0 · 0s'));
   assert.equal(requests, 2);
   assert.equal(requestBodies[1].source_image, requestBodies[0].dataUrl, 'the same selected crop reaches candidate verification');
 });
