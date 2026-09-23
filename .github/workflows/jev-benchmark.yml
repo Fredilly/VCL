@@ -75,6 +75,19 @@ jobs:
           pnpm build
           node --test apps/api/tests/jev-router.test.mjs apps/api/tests/jev-fabric.test.mjs
 
+      - name: Strip benchmark-unused Durable Object exports
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const path = 'apps/api/src/server.ts';
+          const input = readFileSync(path, 'utf8');
+          const output = input
+            .replace(/export \{ FeedbackLedger \} from '\.\/feedback-ledger\.js';\n/g, '')
+            .replace(/export \{ AlphaAccessLedger \} from '\.\/alpha-access\.js';\n/g, '');
+          if (output === input) throw new Error('Expected Durable Object exports were not found');
+          writeFileSync(path, output);
+          NODE
+
       - name: Prepare preview-only Wrangler config
         run: |
           node --input-type=module <<'NODE'
