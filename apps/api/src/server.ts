@@ -54,6 +54,7 @@ export interface Env {
   JEV_DECISION_ROUTER?: string;
   JEV_MODE?: string;
   BENCHMARK_MODE?: string;
+  VISIBLE_TEXT_QUERY_V2?: string;
   AI_GATEWAY_API_KEY?: string;
   ALPHA_ENABLED?: string;
   ALPHA_ATTRIBUTION_SECRET?: string;
@@ -692,7 +693,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             event_id: alphaTelemetry.event_id,
           })
         : null;
-      const queries = buildProductQueryVariants(description, context).map((query) => affiliateClickRef
+      const queries = buildProductQueryVariants(description, context, env.VISIBLE_TEXT_QUERY_V2 === 'true').map((query) => affiliateClickRef
         ? { ...query, affiliate_reference_id: affiliateClickRef }
         : query);
       let routing: Parameters<typeof resolveProducts>[7];
