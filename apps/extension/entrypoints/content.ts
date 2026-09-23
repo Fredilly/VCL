@@ -212,12 +212,12 @@ function renderProducts(panel: HTMLElement, commerce: CommerceResponse, eventId:
     no.setAttribute('aria-label', 'Wrong match');
     yes.setAttribute('title', 'Correct match');
     no.setAttribute('title', 'Wrong match');
-    const thumbUp = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M7 10v10H4V10h3Zm2 10V9.5l3.6-5.1c.6-.9 2-.5 2 .6v3h3.7c1.3 0 2.3 1.2 2 2.5l-1.3 6.8A3.4 3.4 0 0 1 15.7 20H9Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
-    const thumbDown = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M7 14V4H4v10h3Zm2-10v10.5l3.6 5.1c.6.9 2 .5 2-.6v-3h3.7c1.3 0 2.3-1.2 2-2.5L19 6.7A3.4 3.4 0 0 0 15.7 4H9Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+    const thumbUp = '<svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M8.5 20H5V10h3.5v10Zm2-10 3.2-5.2c.5-.8 1.8-.5 1.8.5V9h3.3c1.2 0 2.1 1.1 1.8 2.3l-1.2 5.8A3.5 3.5 0 0 1 16 20h-5.5V10Z" fill="currentColor"/></svg>';
+    const thumbDown = '<svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M8.5 4H5v10h3.5V4Zm2 10 3.2 5.2c.5.8 1.8.5 1.8-.5V15h3.3c1.2 0 2.1-1.1 1.8-2.3l-1.2-5.8A3.5 3.5 0 0 0 16 4h-5.5v10Z" fill="currentColor"/></svg>';
     yes.innerHTML = thumbUp;
     no.innerHTML = thumbDown;
-    Object.assign(yes.style, { padding: '6px 9px', color: '#fff' });
-    Object.assign(no.style, { padding: '6px 9px', color: '#fff', opacity: '0.82' });
+    Object.assign(yes.style, { width: '34px', height: '32px', padding: '0', display: 'grid', placeItems: 'center', color: '#fff' });
+    Object.assign(no.style, { width: '34px', height: '32px', padding: '0', display: 'grid', placeItems: 'center', color: '#fff', opacity: '0.82' });
     const submit = async (feedback_type: 'correct_match' | 'wrong_item') => {
       yes.disabled = true; no.disabled = true;
       const response = await browser.runtime.sendMessage({ type: 'VCL_FEEDBACK', event_id: eventId, result_id: product.id, feedback_type }).catch(() => null);
@@ -380,14 +380,10 @@ function showSelectionPreview(clientX: number, clientY: number) {
   const preview = document.createElement('div');
   Object.assign(preview.style, { position: 'relative', width: '220px', height: '220px', margin: '0 auto 10px' });
   const pointMarker = document.createElement('span');
-  Object.assign(pointMarker.style, { position: 'absolute', width: '34px', height: '34px', transform: 'translate(-50%, -50%)',
-    pointerEvents: 'none', borderRadius: '8px',
-    background: 'linear-gradient(#fff,#fff) left top/10px 2px no-repeat, linear-gradient(#fff,#fff) left top/2px 10px no-repeat, linear-gradient(#fff,#fff) right top/10px 2px no-repeat, linear-gradient(#fff,#fff) right top/2px 10px no-repeat, linear-gradient(#fff,#fff) left bottom/10px 2px no-repeat, linear-gradient(#fff,#fff) left bottom/2px 10px no-repeat, linear-gradient(#fff,#fff) right bottom/10px 2px no-repeat, linear-gradient(#fff,#fff) right bottom/2px 10px no-repeat',
-    filter: 'drop-shadow(0 1px 2px rgba(0,0,0,.85))' });
-  const focusDot = document.createElement('span');
-  Object.assign(focusDot.style, { position: 'absolute', left: '50%', top: '50%', width: '5px', height: '5px',
-    borderRadius: '50%', background: '#fff', transform: 'translate(-50%, -50%)', boxShadow: '0 1px 2px rgba(0,0,0,.9)' });
-  pointMarker.appendChild(focusDot);
+  Object.assign(pointMarker.style, { position: 'absolute', width: '54px', height: '54px', transform: 'translate(-50%, -50%)',
+    pointerEvents: 'none', borderRadius: '12px',
+    background: 'linear-gradient(#6db1ff,#6db1ff) left top/15px 3px no-repeat, linear-gradient(#6db1ff,#6db1ff) left top/3px 15px no-repeat, linear-gradient(#6db1ff,#6db1ff) right top/15px 3px no-repeat, linear-gradient(#6db1ff,#6db1ff) right top/3px 15px no-repeat, linear-gradient(#6db1ff,#6db1ff) left bottom/15px 3px no-repeat, linear-gradient(#6db1ff,#6db1ff) left bottom/3px 15px no-repeat, linear-gradient(#6db1ff,#6db1ff) right bottom/15px 3px no-repeat, linear-gradient(#6db1ff,#6db1ff) right bottom/3px 15px no-repeat',
+    filter: 'drop-shadow(0 0 5px rgba(74,155,255,.95)) drop-shadow(0 0 12px rgba(74,155,255,.5))' });
   preview.append(image, pointMarker); panel.appendChild(preview);
 
   const cropLabel = document.createElement('div');
