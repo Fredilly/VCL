@@ -21,6 +21,20 @@
   "ai": {
     "binding": "AI"
   },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "FEEDBACK_LEDGER",
+        "class_name": "FeedbackLedger"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1-feedback-ledger",
+      "new_sqlite_classes": ["FeedbackLedger"]
+    }
+  ],
   "ratelimits": [
     {
       "name": "ALPHA_INSTALL_RATE_LIMITER",
