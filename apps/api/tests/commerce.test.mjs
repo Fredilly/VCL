@@ -106,6 +106,35 @@ test('fragrance identity survives commerce query and candidate verification', ()
   assert.ok(result, 'a matching fragrance candidate must not be rejected just because the verifier taxonomy lacks apparel-style subtypes');
 });
 
+
+test('visible-text-first is opt-in, preserves three-query budget and generic fallback', () => {
+  const branded = description({
+    subcategory: 'T-shirt', brand_candidate: null, model_candidate: null, color: 'black', material: 'cotton',
+    visible_text: ['MINNESOTA GREY DUCK'], distinctive_features: ['large centered duck graphic'],
+  });
+  const baseline = buildProductQueryVariants(branded);
+  const experiment = buildProductQueryVariants(branded, undefined, true);
+  assert.equal(baseline.length, 3);
+  assert.equal(experiment.length, 3, 'no additional commerce query attempts');
+  assert.equal(baseline[0].query, buildProductQuery(branded).query, 'default pipeline is unchanged');
+  assert.match(experiment[0].query, /^MINNESOTA GREY DUCK T-shirt black$/);
+  assert.equal(experiment[1].query, baseline[1].query, 'identity fallback unchanged');
+  assert.equal(experiment[2].query, baseline[2].query, 'visual fallback unchanged');
+});
+
+test('visible-text-first does not invent logos or change items without readable text', () => {
+  const unbranded = description({ brand_candidate: null, visible_text: [], logos_markings: ['possible swoosh'] });
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(buildProductQueryVariants(unbranded, undefined, true))),
+    JSON.parse(JSON.stringify(buildProductQueryVariants(unbranded))),
+  );
+  const nike = description({ subcategory: 'sleeveless hoodie', brand_candidate: 'Nike', visible_text: ['NIKE'],
+    logos_markings: ['red Swoosh on chest'], color: 'black' });
+  const variants = buildProductQueryVariants(nike, undefined, true);
+  assert.match(variants[0].query, /^Nike sleeveless hoodie black$/);
+  assert.equal(variants.length, 3);
+});
+
 test('commerce errors expose stable resolver codes', () => {
   assert.equal(new CommerceNoResultsError().code, 'NO_RESULTS');
   assert.equal(new CommerceProviderError('failed').code, 'COMMERCE_PROVIDER_ERROR');
