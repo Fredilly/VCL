@@ -417,6 +417,7 @@ function showSelectionPreview(clientX: number, clientY: number) {
   panel.appendChild(controls);
 
   const setPointReticle = () => {
+    if (!capture.ok) return;
     const point = selectionPoint(capture);
     pointMarker.style.left = `${point.x * 100}%`; pointMarker.style.top = `${point.y * 100}%`;
     pointMarker.style.width = '54px'; pointMarker.style.height = '54px'; pointMarker.style.transform = 'translate(-50%, -50%)';
