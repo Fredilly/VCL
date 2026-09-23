@@ -93,9 +93,11 @@ function basePanel(titleText: string) {
   const panel = document.createElement('div');
   panel.id = RESULT_ID;
   Object.assign(panel.style, {
-    position: 'fixed', right: '20px', bottom: '20px', zIndex: '2147483647', width: '380px',
-    maxWidth: 'calc(100vw - 40px)', maxHeight: '75vh', overflowY: 'auto', padding: '14px', borderRadius: '14px', background: '#111',
-    color: '#fff', boxShadow: '0 12px 40px rgba(0,0,0,0.35)', font: '13px system-ui, sans-serif',
+    position: 'fixed', right: '20px', bottom: '20px', zIndex: '2147483647', width: '360px',
+    maxWidth: 'calc(100vw - 40px)', maxHeight: '75vh', overflowY: 'auto', padding: '14px', borderRadius: '18px',
+    background: 'rgba(18,18,22,0.76)', backdropFilter: 'blur(24px) saturate(140%)', WebkitBackdropFilter: 'blur(24px) saturate(140%)',
+    border: '1px solid rgba(255,255,255,0.16)', color: '#fff', boxShadow: '0 18px 50px rgba(0,0,0,0.32)',
+    font: '13px system-ui, sans-serif',
   });
   const title = document.createElement('div');
   title.textContent = titleText;
@@ -108,13 +110,17 @@ function basePanel(titleText: string) {
 function button(text: string) {
   const element = document.createElement('button');
   element.textContent = text;
-  Object.assign(element.style, { padding: '7px 10px', border: '0', borderRadius: '8px', cursor: 'pointer' });
+  Object.assign(element.style, { padding: '7px 10px', border: '1px solid rgba(255,255,255,.12)', borderRadius: '999px',
+    cursor: 'pointer', background: 'rgba(255,255,255,.10)', color: '#fff', backdropFilter: 'blur(12px)' });
   return element;
 }
 
 function addClose(panel: HTMLElement) {
   const close = button('Close');
-  Object.assign(close.style, { marginTop: '12px' });
+  close.textContent = '×';
+  close.setAttribute('aria-label', 'Close');
+  Object.assign(close.style, { position: 'absolute', top: '10px', right: '10px', margin: '0', width: '30px', height: '30px',
+    padding: '0', fontSize: '18px', lineHeight: '28px', background: 'rgba(255,255,255,.08)' });
   close.addEventListener('click', removeResult);
   panel.appendChild(close);
 }
@@ -127,7 +133,7 @@ function showFailure(result: Extract<FrameCaptureResult, { ok: false }>) {
   addClose(panel);
 }
 
-function renderProducts(panel: HTMLElement, commerce: CommerceResponse) {
+function renderProducts(panel: HTMLElement, commerce: CommerceResponse, eventId: string) {
   const heading = document.createElement('div');
   heading.textContent = `Products · ${commerce.products.length} · ${commerce.latency_ms}ms`;
   Object.assign(heading.style, { fontWeight: '700', margin: '12px 0 8px' });
@@ -170,7 +176,7 @@ function renderProducts(panel: HTMLElement, commerce: CommerceResponse) {
     }
     Object.assign((row as HTMLElement).style, {
       display: 'grid', gridTemplateColumns: product.image_reference ? '56px 1fr' : '1fr', gap: '8px',
-      padding: '8px 0', borderTop: '1px solid rgba(255,255,255,.12)', color: '#fff', textDecoration: 'none',
+      padding: '10px 0', borderTop: '1px solid rgba(255,255,255,.10)', color: '#fff', textDecoration: 'none',
     });
     if (product.image_reference) {
       const img = document.createElement('img');
@@ -197,6 +203,23 @@ function renderProducts(panel: HTMLElement, commerce: CommerceResponse) {
     }
     row.appendChild(text);
     panel.appendChild(row);
+
+    const feedback = document.createElement('div');
+    Object.assign(feedback.style, { display: 'flex', gap: '6px', margin: '-2px 0 8px 64px' });
+    const yes = button('✓ This is it');
+    const no = button('× Wrong');
+    Object.assign(yes.style, { padding: '5px 9px', fontSize: '11px' });
+    Object.assign(no.style, { padding: '5px 9px', fontSize: '11px', opacity: '0.82' });
+    const submit = async (feedback_type: 'correct_match' | 'wrong_item') => {
+      yes.disabled = true; no.disabled = true;
+      const response = await browser.runtime.sendMessage({ type: 'VCL_FEEDBACK', event_id: eventId, result_id: product.id, feedback_type }).catch(() => null);
+      feedback.textContent = response?.accepted ? 'Thanks — this helps Scoop learn.' : 'Feedback could not be saved.';
+      Object.assign(feedback.style, { opacity: '0.65', fontSize: '11px' });
+    };
+    yes.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void submit('correct_match'); });
+    no.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void submit('wrong_item'); });
+    feedback.append(yes, no);
+    panel.appendChild(feedback);
   }
 }
 
@@ -231,7 +254,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
 
     const summary = document.createElement('div');
     summary.textContent = [analysis.brand_candidate, analysis.model_candidate, analysis.subcategory || analysis.category].filter(Boolean).join(' · ') || analysis.category;
-    Object.assign(summary.style, { fontWeight: '700', marginBottom: '6px' });
+    Object.assign(summary.style, { fontWeight: '700', marginBottom: '6px', paddingRight: '34px', fontSize: '14px' });
     panel.appendChild(summary);
 
     const attrs = document.createElement('div');
@@ -323,7 +346,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       Object.assign(timing.style, { opacity: '0.6', fontSize: '11px', marginTop: '8px' });
       panel.appendChild(timing);
     }
-    renderProducts(panel, commerce);
+    renderProducts(panel, commerce, scoopEventId);
   } catch (error) {
     if (controller.signal.aborted) return;
     const message = document.createElement('div');
