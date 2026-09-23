@@ -80,6 +80,12 @@ export class OpenRouterVisionProvider implements VisionProvider {
               ...images.map((url) => ({ type: 'image_url', image_url: { url } })),
             ],
           }],
+          // Production privacy guardrail: route only to endpoints that do not
+          // collect prompts for training/storage and that support zero data retention.
+          provider: {
+            data_collection: 'deny',
+            zdr: true,
+          },
           response_format: { type: 'json_object' },
           temperature: 0.2,
           usage: { include: true },
