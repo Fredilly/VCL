@@ -71,6 +71,7 @@ for (const row of rows) {
       description: row.description,
       context: row.context,
       source_image: row.source_image,
+      ...(process.env.VCL_VISIBLE_TEXT_QUERY_V2 === '1' ? { benchmark_visible_text_query_v2: true } : {}),
     });
 
     const commerceLatency = Date.now() - started;
