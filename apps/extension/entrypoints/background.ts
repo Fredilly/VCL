@@ -1,4 +1,5 @@
 const INSTALL_ID_KEY = 'scoop_alpha_install_id';
+const ALPHA_TOKEN_KEY = 'scoop_alpha_token';
 let cachedInstallId: string | undefined;
 
 async function getInstallId() {
@@ -54,6 +55,29 @@ export default defineBackground(() => {
   });
 
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message?.type === 'VCL_ALPHA_STATUS') {
+      void Promise.all([getInstallId(), browser.storage.local.get(ALPHA_TOKEN_KEY)]).then(async ([installId, stored]) => {
+        const token = typeof stored?.[ALPHA_TOKEN_KEY] === 'string' ? stored[ALPHA_TOKEN_KEY] : '';
+        const response = await fetch('https://api.vcl.article6.org/alpha/status', {
+          headers: { 'X-Scoop-Install-Id': installId, ...(token ? { 'X-Scoop-Alpha-Token': token } : {}) },
+        });
+        sendResponse(await response.json());
+      }).catch(() => sendResponse({ required: true, active: false }));
+      return true;
+    }
+    if (message?.type === 'VCL_ALPHA_ACTIVATE' && typeof message.token === 'string') {
+      void getInstallId().then(async (installId) => {
+        const response = await fetch('https://api.vcl.article6.org/alpha/activate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: message.token.trim(), install_id: installId }),
+        });
+        const payload = await response.json();
+        if (response.ok && payload?.accepted) await browser.storage.local.set({ [ALPHA_TOKEN_KEY]: message.token.trim() });
+        sendResponse({ ok: response.ok, ...payload });
+      }).catch(() => sendResponse({ ok: false, error: 'Could not activate Scoop alpha invite.' }));
+      return true;
+    }
     const isLocate = message?.type === 'VCL_LOCATE_SELECTION' && typeof message.dataUrl === 'string';
     const isVision = (message?.type === 'VCL_ANALYZE_SELECTION' || isLocate) && typeof message.dataUrl === 'string';
     const isCommerce = message?.type === 'VCL_RESOLVE_PRODUCTS' && message.description && typeof message.description === 'object';
@@ -73,11 +97,13 @@ export default defineBackground(() => {
           ? { event_id: message.event_id, result_id: message.result_id, feedback_type: message.feedback_type }
           : { description: message.description, context: message.context ?? null, source_image: message.source_image, telemetry: message.telemetry ?? null };
 
-    void getInstallId().then((installId) => fetch(`https://api.vcl.article6.org/${endpoint}`, {
+    void Promise.all([getInstallId(), browser.storage.local.get(ALPHA_TOKEN_KEY)]).then(([installId, stored]) => {
+      const token = typeof stored?.[ALPHA_TOKEN_KEY] === 'string' ? stored[ALPHA_TOKEN_KEY] : '';
+      return fetch(`https://api.vcl.article6.org/${endpoint}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Scoop-Install-Id': installId },
+      headers: { 'Content-Type': 'application/json', 'X-Scoop-Install-Id': installId, ...(token ? { 'X-Scoop-Alpha-Token': token } : {}) },
       body: JSON.stringify(body),
-    })).then(async (response) => {
+    }); }).then(async (response) => {
       const payload = await response.json();
       if (isLocate) {
         if (!response.ok || !validLocalization(payload, message.point)) {
