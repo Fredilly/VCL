@@ -26,6 +26,8 @@ import { normalizeAlphaTelemetry, recordAlphaFeedback, recordAlphaScoop } from '
 import { applyFeedbackPenalties, evidenceFingerprint, feedbackCandidateKey, feedbackPenalties, feedbackReport, persistFeedback, persistFeedbackContext, FEEDBACK_RANKING_POLICY, type DurableObjectNamespaceLike } from './feedback-ledger.js';
 export { FeedbackLedger } from './feedback-ledger.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
+import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
+export { AlphaAccessLedger } from './alpha-access.js';
 
 export interface Env {
   GEMINI_API_KEY?: string;
@@ -61,10 +63,13 @@ export interface Env {
   ALPHA_GLOBAL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
   AI?: WorkersAiBinding & CloudflareVisionBinding;
   FEEDBACK_LEDGER?: DurableObjectNamespaceLike;
+  ALPHA_INVITE_REQUIRED?: string;
+  ALPHA_INVITE_SECRET?: string;
+  ALPHA_ACCESS_LEDGER?: AlphaAccessNamespaceLike;
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
-const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type,x-scoop-install-id,x-scoop-admin-token', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
+const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type,x-scoop-install-id,x-scoop-admin-token,x-scoop-alpha-token', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
 
 type VisionProviderName = 'openrouter' | 'gemini' | 'groq-3.8' | 'groq-3.6' | 'cloudflare';
 const visionCooldownUntil = new Map<VisionProviderName, number>();
@@ -453,11 +458,43 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
   if (request.method === 'GET' && path === '/health') {
     return jsonResponse({ service: 'vcl-api', status: 'ok' });
   }
+  if (request.method === 'GET' && path === '/alpha/status') {
+    if (!alphaInviteRequired(env)) return jsonResponse({ required: false, active: true });
+    const active = await authorizeAlphaRequest(env, request);
+    return jsonResponse({ required: true, active });
+  }
   if (request.method !== 'POST') return jsonResponse({ error: 'Not found' }, 404);
   if (env.ALPHA_ENABLED === 'false' && path !== '/feedback' && path !== '/commerce-click') {
     return jsonResponse({ error: 'Scoop alpha is temporarily paused', reason: 'ALPHA_DISABLED', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: false }, 503);
   }
   try {
+    if (path === '/alpha/activate') {
+      const body = await request.json() as Record<string, unknown>;
+      const token = typeof body.token === 'string' ? body.token : '';
+      const installId = typeof body.install_id === 'string' ? body.install_id : '';
+      const activated = await activateAlphaInvite(env, token, installId);
+      return activated.accepted
+        ? jsonResponse({ accepted: true, invite_id: activated.invite_id, expires_at: activated.expires_at })
+        : jsonResponse({ error: 'Invalid, expired, or already-used invite', reason: 'ALPHA_INVITE_REJECTED' }, 403);
+    }
+    if (path === '/alpha/admin/invite') {
+      const adminToken = env.ALPHA_FEEDBACK_ADMIN_TOKEN || env.ALPHA_ATTRIBUTION_SECRET;
+      if (!adminToken || request.headers.get('x-scoop-admin-token') !== adminToken) return jsonResponse({ error: 'Unauthorized' }, 401);
+      const body = await request.json() as Record<string, unknown>;
+      const inviteId = typeof body.invite_id === 'string' ? body.invite_id : '';
+      const ttlDays = Number(body.ttl_days ?? 7);
+      const maxInstalls = Number(body.max_installs ?? 2);
+      try {
+        const invite = await createAlphaInvite(env, inviteId, ttlDays, maxInstalls);
+        return jsonResponse({ ...invite, invite_url: `https://scoop.article6.org/alpha?code=${encodeURIComponent(invite.token)}` });
+      } catch (error) {
+        return jsonResponse({ error: error instanceof Error ? error.message : 'Could not create invite' }, 400);
+      }
+    }
+    if (alphaInviteRequired(env)) {
+      const allowed = await authorizeAlphaRequest(env, request);
+      if (!allowed) return jsonResponse({ error: 'This Scoop alpha install needs a valid invite', reason: 'ALPHA_INVITE_REQUIRED', failure_state: 'ALPHA_INVITE_REQUIRED', retryable: false }, 401);
+    }
     if (path === '/analyze-selection' || path === '/locate-selection') {
       let parsed: unknown;
       try { parsed = await readAnalysisBody(request); }
