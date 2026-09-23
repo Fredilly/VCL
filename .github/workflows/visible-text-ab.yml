@@ -1,0 +1,145 @@
+name: Visible-text A/B benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      case_limit:
+        description: Number of frozen cases to run (1-8)
+        required: false
+        default: '8'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visible-text-ab-benchmark
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CASE_LIMIT: ${{ inputs.case_limit || '8' }}
+      VCL_API_ORIGIN: https://api.vcl.article6.org
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Record refs
+        run: |
+          git rev-parse HEAD | tee benchmark-main-commit.txt
+          git ls-remote origin refs/heads/v0.1 | awk '{print $1}' | tee benchmark-v0.1-commit.txt
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install headless Chromium
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes chromium-browser || sudo apt-get install --yes chromium
+
+      - name: Verify
+        run: |
+          pnpm --filter @vcl/extension exec wxt prepare
+          pnpm check
+          pnpm build
+          pnpm test
+
+      - name: Freeze benchmark cases
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const f = JSON.parse(readFileSync('tests/manual/spike-5/cases-v2.json', 'utf8'));
+          const identities = {
+            's5-01': { brand: 'Patagonia', model: 'Better Sweater' },
+            's5-02': { brand: 'Patagonia', model: 'Better Sweater' },
+            's5-03': { brand: 'Seiko', model: 'SKX007' },
+            's5-04': { brand: 'Seiko', model: 'SKX007' },
+            's5-05': { brand: 'Coach', model: null },
+            's5-06': { brand: 'Coach', model: null },
+            's5-07': { brand: 'Adidas', model: 'Samba OG' },
+            's5-08': { brand: 'Adidas', model: 'Samba OG' },
+          };
+          f.cases = f.cases.filter((c) => c.valid !== false).map((c) => ({ ...c, expected_identity: identities[c.id] ?? null }));
+          writeFileSync(process.env.RUNNER_TEMP + '/visible-text-cases.json', JSON.stringify(f));
+          NODE
+
+      - name: Prepare shared production vision once
+        run: |
+          export VCL_COST_CASES="$RUNNER_TEMP/visible-text-cases.json"
+          export VCL_COST_LIMIT="$CASE_LIMIT"
+          export VCL_HEADLESS=1
+          export VCL_FROZEN_FRAME_DIR="$GITHUB_WORKSPACE/tests/benchmark/jev/frames"
+          export VCL_PREPARE_ONLY=1
+          export VCL_PREPARED_OUTPUT="$GITHUB_WORKSPACE/visible-text-prepared.json"
+          export VCL_CDP_PORT=9334
+          export VCL_COST_PROFILE="$RUNNER_TEMP/visible-text-browser"
+          node tests/cost/run-live.mjs
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const prepared = JSON.parse(readFileSync('visible-text-prepared.json', 'utf8'));
+          const count = prepared.rows?.length ?? 0;
+          if (!count) throw new Error('No prepared production vision rows');
+          writeFileSync('visible-text-prepared-count.txt', String(count));
+          NODE
+
+      - name: Run baseline against production
+        run: |
+          VCL_PREPARED_INPUT="$GITHUB_WORKSPACE/visible-text-prepared.json"           VCL_PREPARED_CASE_COUNT="$(cat visible-text-prepared-count.txt)"           VCL_COST_OUTPUT="$GITHUB_WORKSPACE/visible-text-baseline.json"           node tests/cost/run-prepared-commerce.mjs
+
+      - name: Run visible-text experiment against same production backend
+        run: |
+          VCL_VISIBLE_TEXT_QUERY_V2=1           VCL_PREPARED_INPUT="$GITHUB_WORKSPACE/visible-text-prepared.json"           VCL_PREPARED_CASE_COUNT="$(cat visible-text-prepared-count.txt)"           VCL_COST_OUTPUT="$GITHUB_WORKSPACE/visible-text-experiment.json"           node tests/cost/run-prepared-commerce.mjs
+
+      - name: Compare
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const load = p => JSON.parse(readFileSync(p,'utf8'));
+          const B=load('visible-text-baseline.json'), E=load('visible-text-experiment.json');
+          const pct=(a,b)=>a===0?null:(b-a)/a*100;
+          const p=(rows,q)=>{const v=rows.map(r=>r.latency_ms).filter(Number.isFinite).sort((a,b)=>a-b);return v.length?v[Math.min(v.length-1,Math.ceil(v.length*q)-1)]:null};
+          const m=d=>{const r=d.runs??[];return {
+            cases:r.length,
+            useful_rate:r.length?r.filter(x=>x.notes?.includes('state=RESULTS')).length/r.length:null,
+            p50_ms:p(r,.5), p95_ms:p(r,.95),
+            commerce_calls:r.reduce((n,x)=>n+Object.values(x.commerce_calls??{}).reduce((a,b)=>a+Number(b||0),0),0),
+            verification_calls:r.reduce((n,x)=>n+Number(x.verification_usage?.requests??0),0),
+            false_exact:r.reduce((n,x)=>n+Number(x.false_exact??0),0),
+            unsupported_likely:r.reduce((n,x)=>n+Number(x.unsupported_likely??0),0),
+          }};
+          const b=m(B),e=m(E);
+          const report={v0_1_commit:readFileSync('benchmark-v0.1-commit.txt','utf8').trim(),main_commit:readFileSync('benchmark-main-commit.txt','utf8').trim(),baseline:b,experiment:e,delta:{
+            useful_rate:e.useful_rate-b.useful_rate,p50_pct:pct(b.p50_ms,e.p50_ms),p95_pct:pct(b.p95_ms,e.p95_ms),
+            commerce_calls_pct:pct(b.commerce_calls,e.commerce_calls),verification_calls_pct:pct(b.verification_calls,e.verification_calls)
+          },pass:e.false_exact===0&&e.unsupported_likely===0&&e.useful_rate>=b.useful_rate&&(e.p50_ms??Infinity)<=((b.p50_ms??0)*1.05)};
+          writeFileSync('visible-text-report.json',JSON.stringify(report,null,2)+'\n');
+          console.log(JSON.stringify(report,null,2));
+          if (!report.pass) process.exitCode=1;
+          NODE
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visible-text-ab-${{ github.run_id }}
+          path: |
+            benchmark-*.txt
+            visible-text-prepared.json
+            visible-text-prepared-count.txt
+            visible-text-baseline.json
+            visible-text-experiment.json
+            visible-text-report.json
