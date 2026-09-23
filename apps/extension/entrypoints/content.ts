@@ -1,4 +1,4 @@
-import { captureSelectionAtClientPoint, selectionPoint, type FrameCaptureResult } from '../lib/frame-capture';
+import { captureSelectionAtClientPoint, cropFrozenSelection, focusBox, selectionPoint, validatedAutoFocusBox, type FrameCaptureResult } from '../lib/frame-capture';
 import { captureNearbyFrames, nearbyCaptureLimitation } from '../lib/nearby-frame-capture';
 
 const OVERLAY_ID = 'vcl-overlay-root';
@@ -237,11 +237,21 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
   const panel = basePanel('Scoop is looking…');
   const controller = new AbortController();
   activeCapture = controller;
+  const imageWrap = document.createElement('div');
+  Object.assign(imageWrap.style, { position: 'relative', overflow: 'hidden', borderRadius: '10px', background: '#000', marginBottom: '10px' });
   const image = document.createElement('img');
   image.src = result.dataUrl;
   image.alt = 'Selected object crop';
-  Object.assign(image.style, { display: 'block', width: '100%', maxHeight: '180px', objectFit: 'contain', borderRadius: '10px', background: '#000', marginBottom: '10px' });
-  panel.appendChild(image);
+  Object.assign(image.style, { display: 'block', width: '100%', maxHeight: '180px', objectFit: 'contain' });
+  const scanLine = document.createElement('div');
+  Object.assign(scanLine.style, { position: 'absolute', left: '6%', right: '6%', top: '8%', height: '2px', borderRadius: '999px',
+    background: 'rgba(109,177,255,.9)', boxShadow: '0 0 10px rgba(109,177,255,.85)', pointerEvents: 'none' });
+  imageWrap.append(image, scanLine);
+  panel.appendChild(imageWrap);
+  const scanAnimation = typeof (scanLine as any).animate === 'function' ? (scanLine as any).animate(
+    [{ transform: 'translateY(0)', opacity: 0.25 }, { transform: 'translateY(145px)', opacity: 0.9 }, { transform: 'translateY(0)', opacity: 0.25 }],
+    { duration: 1800, iterations: Infinity, easing: 'ease-in-out' },
+  ) : null;
   addClose(panel);
 
   try {
@@ -356,9 +366,13 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       Object.assign(timing.style, { opacity: '0.6', fontSize: '11px', marginTop: '8px' });
       panel.appendChild(timing);
     }
+    scanAnimation?.cancel();
+    scanLine.remove();
     renderProducts(panel, commerce, scoopEventId);
   } catch (error) {
     if (controller.signal.aborted) return;
+    scanAnimation?.cancel();
+    scanLine.remove();
     const message = document.createElement('div');
     message.textContent = error instanceof Error ? error.message : 'VCL request failed.';
     Object.assign(message.style, { lineHeight: '1.4', opacity: '0.9', marginTop: '10px' });
@@ -368,6 +382,9 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
 
 function showSelectionPreview(clientX: number, clientY: number) {
   let cropFraction = 0.5;
+  let manualOverride = false;
+  let analysisCapture: Extract<FrameCaptureResult, { ok: true }> | null = null;
+  let localizationRun = 0;
   const captureStarted = Date.now();
   let capture = captureSelectionAtClientPoint(clientX, clientY, cropFraction);
   const captureMs = Date.now() - captureStarted;
@@ -399,27 +416,63 @@ function showSelectionPreview(clientX: number, clientY: number) {
   controls.append(tighter, wider, analyze);
   panel.appendChild(controls);
 
+  const setPointReticle = () => {
+    if (!capture.ok) return;
+    const point = selectionPoint(capture);
+    pointMarker.style.left = `${point.x * 100}%`; pointMarker.style.top = `${point.y * 100}%`;
+    pointMarker.style.width = '54px'; pointMarker.style.height = '54px'; pointMarker.style.transform = 'translate(-50%, -50%)';
+  };
+
   const refresh = () => {
     const next = captureSelectionAtClientPoint(clientX, clientY, cropFraction);
     if (!next.ok) { showFailure(next); return; }
     capture = next;
+    analysisCapture = null;
     image.src = capture.dataUrl;
-    const point = selectionPoint(capture);
-    pointMarker.style.left = `${point.x * 100}%`; pointMarker.style.top = `${point.y * 100}%`;
+    setPointReticle();
     cropLabel.textContent = `Focus on the whole item you want. Use − / + only if Scoop needs more or less context. ${Math.round(cropFraction * 100)}% view.`;
   };
 
+  const tryAutoFocus = async () => {
+    if (manualOverride || !capture.ok || !capture.crop) return;
+    const run = ++localizationRun;
+    try {
+      const localView = await cropFrozenSelection(capture, focusBox(capture));
+      const located = await browser.runtime.sendMessage({ type: 'VCL_LOCATE_SELECTION', requestId: crypto.randomUUID(),
+        dataUrl: capture.dataUrl, focusDataUrl: localView.dataUrl, point: selectionPoint(capture) });
+      if (run !== localizationRun || manualOverride || located?.error) return;
+      const box = validatedAutoFocusBox(located, capture);
+      if (!box) return;
+      const focused = await cropFrozenSelection(capture, box);
+      if (run !== localizationRun || manualOverride) return;
+      analysisCapture = focused;
+      pointMarker.style.left = `${box.x * 100}%`; pointMarker.style.top = `${box.y * 100}%`;
+      pointMarker.style.width = `${box.width * 100}%`; pointMarker.style.height = `${box.height * 100}%`;
+      pointMarker.style.transform = 'none';
+      pointMarker.style.transition = 'left .24s ease, top .24s ease, width .24s ease, height .24s ease, transform .24s ease';
+      cropLabel.textContent = 'Scoop focused on this item. Widen only if it missed part of what you meant.';
+    } catch {
+      // Keep the known-good broad crop when localization is unavailable or uncertain.
+    }
+  };
+
   tighter.addEventListener('click', () => {
+    manualOverride = true; localizationRun++;
     cropFraction = Math.max(0.22, Math.round((cropFraction - 0.1) * 100) / 100);
     refresh();
   });
   wider.addEventListener('click', () => {
+    manualOverride = true; localizationRun++;
     cropFraction = Math.min(0.9, Math.round((cropFraction + 0.1) * 100) / 100);
     refresh();
   });
-  analyze.addEventListener('click', () => { if (capture.ok) void showAnalysis(capture, undefined, undefined, { capture_ms: captureMs }); });
+  analyze.addEventListener('click', () => {
+    const selected = analysisCapture ?? (capture.ok ? capture : null);
+    if (selected) void showAnalysis(selected, undefined, undefined, { capture_ms: captureMs });
+  });
 
   refresh();
+  void tryAutoFocus();
   addClose(panel);
 }
 

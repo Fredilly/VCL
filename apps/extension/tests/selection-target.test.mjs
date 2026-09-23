@@ -91,3 +91,19 @@ test('click coordinates follow object-fit cover rather than treating clipped pix
   assert.equal(result.crop.clickX, 800, 'the centre client point maps to the centre decoded pixel');
   assert.equal(result.crop.clickY, 450);
 });
+
+
+test('auto-focus accepts only high-confidence click-containing whole-object boxes', () => {
+  const s = setup();
+  const accepted = s.validatedAutoFocusBox({ x: 0.38, y: 0.25, width: 0.25, height: 0.5, confidence: 0.96 }, s.selection);
+  assert.ok(accepted);
+  assert.ok(accepted.width > 0.25 && accepted.height > 0.5, 'adds context around the whole object');
+  assert.equal(s.validatedAutoFocusBox({ x: 0.38, y: 0.25, width: 0.25, height: 0.5, confidence: 0.88 }, s.selection), null);
+  assert.equal(s.validatedAutoFocusBox({ x: 0.1, y: 0.1, width: 0.2, height: 0.2, confidence: 0.99 }, s.selection), null);
+});
+
+test('auto-focus refuses tiny fragments and near-full-scene boxes', () => {
+  const s = setup();
+  assert.equal(s.validatedAutoFocusBox({ x: 0.505, y: 0.505, width: 0.02, height: 0.02, confidence: 0.99 }, s.selection), null);
+  assert.equal(s.validatedAutoFocusBox({ x: 0.02, y: 0.02, width: 0.96, height: 0.96, confidence: 0.99 }, s.selection), null);
+});
