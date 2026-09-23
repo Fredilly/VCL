@@ -9,6 +9,53 @@ const IDENTITY_VISUAL = 0.9;
 const critical = new Set<Attribute>(['category', 'subtype', 'gender', 'age_group', 'color', 'sleeve', 'brand']);
 export type VerificationDecision = { product: ProductCandidate | null; reasons: string[] };
 
+const GENERIC_MARKING_TOKENS = new Set(['logo','logos','mark','marking','markings','wordmark','emblem','patch','symbol','graphic','print','printed','embroidered','embroidery','chest','front','center','centred','centered','red','black','white','blue','green','yellow','orange','pink','purple','grey','gray']);
+
+function markingEvidenceScore(description: ObjectDescription, candidate: ProductCandidate, comparison?: ImageComparison): { score: number; reasons: string[] } {
+  const candidateText = normalize([
+    candidate.title,
+    candidate.brand,
+    candidate.model,
+    candidate.metadata?.brand,
+    candidate.metadata?.model,
+    candidate.metadata?.description,
+  ].filter(Boolean).join(' '));
+  if (!candidateText) return { score: 0, reasons: [] };
+
+  let score = 0;
+  const reasons: string[] = [];
+  const seen = new Set<string>();
+
+  for (const raw of description.visible_text.slice(0, 4)) {
+    const text = normalize(raw);
+    if (text.length < 3 || seen.has(text)) continue;
+    seen.add(text);
+    if (phrase(candidateText, text)) {
+      score += 5;
+      reasons.push(`visible text agrees: ${raw}`);
+    }
+    if (score >= 10) break;
+  }
+
+  const candidateDetailText = normalize((comparison?.matching_details ?? []).join(' '));
+  for (const raw of description.logos_markings.slice(0, 4)) {
+    const tokens = normalize(raw).split(' ').filter((token) => token.length >= 4 && !GENERIC_MARKING_TOKENS.has(token));
+    if (!tokens.length) continue;
+    const hitsInCandidate = tokens.filter((token) => phrase(candidateText, token)).length;
+    const hitsInDetails = candidateDetailText ? tokens.filter((token) => phrase(candidateDetailText, token)).length : 0;
+    if (hitsInCandidate >= Math.max(1, Math.ceil(tokens.length * 0.5))) {
+      score += 4;
+      reasons.push(`logo/marking agrees with candidate metadata: ${raw}`);
+    } else if (hitsInDetails >= Math.max(1, Math.ceil(tokens.length * 0.5))) {
+      score += 3;
+      reasons.push(`logo/marking agrees visually: ${raw}`);
+    }
+    if (score >= 12) break;
+  }
+
+  return { score: Math.min(score, 12), reasons: reasons.slice(0, 3) };
+}
+
 export function sourceEvidence(description: ObjectDescription): Evidence {
   const visual = [description.subcategory, ...description.style_attributes, ...description.shape_silhouette, ...description.distinctive_features].join(' ');
   const evidence: Evidence = {};
@@ -92,7 +139,7 @@ function groundedIdentity(description: ObjectDescription, observed: Evidence, co
 
 export function verifyCandidate(
   description: ObjectDescription, candidate: ProductCandidate,
-  comparison?: ImageComparison, context?: ProductContext,
+  comparison?: ImageComparison, context?: ProductContext, useMarkingEvidence = false,
 ): VerificationDecision {
   const accessoryConflict = accessoryContradiction(description, candidate);
   if (accessoryConflict) return { product: null, reasons: [accessoryConflict] };
@@ -151,6 +198,14 @@ export function verifyCandidate(
   const detailCount = visual >= 0.6 ? Math.min(new Set(details.map(normalize)).size, 3) : 0;
   score += detailCount * 3;
   if (detailCount) reasons.push(...details.slice(0, 3).map((detail) => `visual detail: ${detail}`));
+  // Experiment: use already-extracted OCR/logo evidence only as a bounded
+  // verification/reranking bonus. It cannot create candidates, add provider/model
+  // calls, override contradictions, or independently qualify a result as LIKELY.
+  if (useMarkingEvidence) {
+    const marking = markingEvidenceScore(description, candidate, comparison);
+    score += marking.score;
+    reasons.push(...marking.reasons);
+  }
   // Context is a tie-breaker only when it corroborates existing visual identity; never a gate.
   if (visual >= 0.6 && matched.has('brand') && matched.has('subtype') && context?.title && expected.brand?.value && phrase(context.title, expected.brand.value)) {
     score += 2; reasons.push('context corroborates visual identity');
