@@ -265,3 +265,24 @@ export function captureSelectionAtClientPoint(
     canvas.height = 0;
   }
 }
+
+
+export function validatedAutoFocusBox(value: unknown, selection: Selection): SelectionBox | null {
+  const b = value as SelectionBox & { confidence: number };
+  const point = selectionPoint(selection);
+  if (!b || ![b.x, b.y, b.width, b.height, b.confidence].every(Number.isFinite) ||
+    b.confidence < 0.92 || b.confidence > 1 || b.x < 0 || b.y < 0 || b.width <= 0 || b.height <= 0 ||
+    b.x + b.width > 1.001 || b.y + b.height > 1.001 ||
+    point.x < b.x || point.y < b.y || point.x > b.x + b.width || point.y > b.y + b.height) return null;
+
+  const area = b.width * b.height;
+  if (area < 0.006 || area > 0.85 || b.width < 0.06 || b.height < 0.06) return null;
+
+  const padX = b.width * 0.14;
+  const padY = b.height * 0.14;
+  const x = Math.max(0, b.x - padX);
+  const y = Math.max(0, b.y - padY);
+  const right = Math.min(1, b.x + b.width + padX);
+  const bottom = Math.min(1, b.y + b.height + padY);
+  return { x, y, width: right - x, height: bottom - y };
+}
