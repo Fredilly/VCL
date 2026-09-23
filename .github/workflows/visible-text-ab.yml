@@ -1,6 +1,8 @@
 name: Visible-text A/B benchmark
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       case_limit:
@@ -17,6 +19,7 @@ concurrency:
 
 jobs:
   benchmark:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
