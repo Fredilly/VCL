@@ -71,7 +71,7 @@ test('repeated comparable wrong corrections suppress a known-bad mapping', () =>
 
   const result = applyFeedbackPenalties([a], penalties);
   assert.equal(result.suppressed, 1);
-  assert.deepEqual(result.products, []);
+  assert.equal(result.products.length, 0);
 });
 
 test('positive feedback can cancel a negative penalty but never boosts the verification score', () => {
