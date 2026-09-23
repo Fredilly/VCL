@@ -26,6 +26,10 @@
       {
         "name": "FEEDBACK_LEDGER",
         "class_name": "FeedbackLedger"
+      },
+      {
+        "name": "ALPHA_ACCESS_LEDGER",
+        "class_name": "AlphaAccessLedger"
       }
     ]
   },
@@ -33,6 +37,10 @@
     {
       "tag": "v1-feedback-ledger",
       "new_sqlite_classes": ["FeedbackLedger"]
+    },
+    {
+      "tag": "v2-alpha-access",
+      "new_sqlite_classes": ["AlphaAccessLedger"]
     }
   ],
   "ratelimits": [

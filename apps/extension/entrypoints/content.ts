@@ -504,11 +504,26 @@ function showOverlay() {
   document.documentElement.appendChild(root);
 }
 
+async function ensureAlphaAccess(): Promise<boolean> {
+  const status = await browser.runtime.sendMessage({ type: 'VCL_ALPHA_STATUS' }).catch(() => ({ required: true, active: false }));
+  if (!status?.required || status?.active) return true;
+  const token = window.prompt('Paste your personal Scoop alpha invite code');
+  if (!token?.trim()) return false;
+  const activated = await browser.runtime.sendMessage({ type: 'VCL_ALPHA_ACTIVATE', token: token.trim() }).catch(() => ({ ok: false }));
+  if (activated?.ok) return true;
+  window.alert('That Scoop invite is invalid, expired, or already used on the maximum number of installs.');
+  return false;
+}
+
 export default defineContentScript({
   matches: ['https://www.youtube.com/*', 'http://localhost/*', 'http://127.0.0.1/*'],
   main() {
     browser.runtime.onMessage.addListener((message) => {
-      if (message?.type === 'VCL_TOGGLE_OVERLAY') document.getElementById(OVERLAY_ID) ? removeOverlay() : showOverlay();
+      if (message?.type === 'VCL_TOGGLE_OVERLAY') {
+        void ensureAlphaAccess().then((allowed) => {
+          if (allowed) document.getElementById(OVERLAY_ID) ? removeOverlay() : showOverlay();
+        });
+      }
     });
     window.addEventListener('keydown', (event) => { if (event.key === 'Escape') cleanupScoopUi(); });
     window.addEventListener('pagehide', cleanupScoopUi, { once: true });
