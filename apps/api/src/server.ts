@@ -186,7 +186,7 @@ function filterByCategory(providers: NamedCommerceProvider[], query: ProductQuer
 const LIKELY_CANDIDATE_THRESHOLD = 3;
 const SUFFICIENT_CANDIDATE_THRESHOLD = 3;
 
-export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages, routing?: { commerce_action: 'SKIP' | 'SEARCH_NORMAL' | 'SEARCH_BROAD'; verification_action: 'LIGHT' | 'FULL'; telemetry: JevRouterTelemetry; broad_search_on_miss?: boolean }) {
+export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages, routing?: { commerce_action: 'SKIP' | 'SEARCH_NORMAL' | 'SEARCH_BROAD'; verification_action: 'LIGHT' | 'FULL'; telemetry: JevRouterTelemetry; broad_search_on_miss?: boolean }, useMarkingEvidence = false) {
   const routingActive = Boolean(routing && !routing.telemetry.failed);
   let attempts = 0;
   let sawProviderFailure = false;
@@ -314,11 +314,11 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     const lightMode = routingActive && routing?.verification_action === 'LIGHT';
     if (!lightMode) await runImageVerification();
 
-    let decisions = viable.map((product) => ({ product, decision: verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context) }));
+    let decisions = viable.map((product) => ({ product, decision: verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context, useMarkingEvidence) }));
     if (lightMode && viable.length && !decisions.some(({ decision }) => decision.product) && sourceImage && (useOpenRouterVerification ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY)) {
       verification.light_escalations++;
       await runImageVerification();
-      decisions = viable.map((product) => ({ product, decision: verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context) }));
+      decisions = viable.map((product) => ({ product, decision: verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context, useMarkingEvidence) }));
     }
 
     for (const { decision } of decisions) {
@@ -669,7 +669,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
       const parsed: unknown = await request.json();
       const wrapped = Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'description' in parsed);
-      const record = wrapped ? parsed as { description: unknown; context?: unknown; source_image?: unknown; multi_frame_available?: unknown; telemetry?: unknown; benchmark_visible_text_query_v2?: unknown } : { description: parsed, context: undefined, source_image: undefined, multi_frame_available: undefined, telemetry: undefined, benchmark_visible_text_query_v2: undefined };
+      const record = wrapped ? parsed as { description: unknown; context?: unknown; source_image?: unknown; multi_frame_available?: unknown; telemetry?: unknown; benchmark_visible_text_query_v2?: unknown; benchmark_marking_verify_v1?: unknown } : { description: parsed, context: undefined, source_image: undefined, multi_frame_available: undefined, telemetry: undefined, benchmark_visible_text_query_v2: undefined, benchmark_marking_verify_v1: undefined };
       let alphaTelemetry = null;
       try { alphaTelemetry = normalizeAlphaTelemetry(record.telemetry); }
       catch { return jsonResponse({ error: 'Invalid telemetry envelope' }, 400); }
@@ -726,7 +726,8 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           ? queries.slice(0, 1)
           : queries;
       const started = Date.now();
-      const resolved = await resolveProducts(routedProviders, routedQueries, description, env, context, sourceImage, compareCandidateImages, routing);
+      const markingVerifyV1 = record.benchmark_marking_verify_v1 === true;
+      const resolved = await resolveProducts(routedProviders, routedQueries, description, env, context, sourceImage, compareCandidateImages, routing, markingVerifyV1);
       const feedbackEvidenceKey = evidenceFingerprint(description);
       let feedbackLearning = { penalized: 0, suppressed: 0 };
       if (env.FEEDBACK_LEDGER && resolved.products.length) {
