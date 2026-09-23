@@ -58,16 +58,20 @@ export default defineBackground(() => {
     const isVision = (message?.type === 'VCL_ANALYZE_SELECTION' || isLocate) && typeof message.dataUrl === 'string';
     const isCommerce = message?.type === 'VCL_RESOLVE_PRODUCTS' && message.description && typeof message.description === 'object';
     const isAttribution = message?.type === 'VCL_COMMERCE_CLICK' && typeof message.attribution_token === 'string';
-    if (!isVision && !isCommerce && !isAttribution) return;
+    const isFeedback = message?.type === 'VCL_FEEDBACK' && typeof message.event_id === 'string' && typeof message.result_id === 'string'
+      && typeof message.feedback_type === 'string';
+    if (!isVision && !isCommerce && !isAttribution && !isFeedback) return;
 
     const requestId = message.requestId;
-    const endpoint = isLocate ? 'locate-selection' : isVision ? 'analyze-selection' : isAttribution ? 'commerce-click' : 'resolve-products';
+    const endpoint = isLocate ? 'locate-selection' : isVision ? 'analyze-selection' : isAttribution ? 'commerce-click' : isFeedback ? 'feedback' : 'resolve-products';
     const body = isVision
       ? { dataUrl: message.dataUrl, focusDataUrl: message.focusDataUrl, timestamp: message.timestamp, nearby_frames: message.nearby_frames, primary_description: message.primary_description,
         point: message.point }
       : isAttribution
         ? { attribution_token: message.attribution_token }
-        : { description: message.description, context: message.context ?? null, source_image: message.source_image, telemetry: message.telemetry ?? null };
+        : isFeedback
+          ? { event_id: message.event_id, result_id: message.result_id, feedback_type: message.feedback_type }
+          : { description: message.description, context: message.context ?? null, source_image: message.source_image, telemetry: message.telemetry ?? null };
 
     void getInstallId().then((installId) => fetch(`https://api.vcl.article6.org/${endpoint}`, {
       method: 'POST',
