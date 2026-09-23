@@ -23,6 +23,8 @@ import { routeWithJevFabric } from './jev-fabric.js';
 import type { WorkersAiBinding } from './jev.js';
 import { resolveJevBinding } from './jev-binding.js';
 import { normalizeAlphaTelemetry, recordAlphaFeedback, recordAlphaScoop } from './alpha-telemetry.js';
+import { applyFeedbackPenalties, evidenceFingerprint, feedbackCandidateKey, feedbackPenalties, persistFeedback, persistFeedbackContext, FEEDBACK_RANKING_POLICY, type DurableObjectNamespaceLike } from './feedback-ledger.js';
+export { FeedbackLedger } from './feedback-ledger.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 
 export interface Env {
@@ -57,6 +59,7 @@ export interface Env {
   ALPHA_INSTALL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
   ALPHA_GLOBAL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
   AI?: WorkersAiBinding & CloudflareVisionBinding;
+  FEEDBACK_LEDGER?: DurableObjectNamespaceLike;
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
@@ -443,7 +446,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
   return respond(queries[Math.max(0, Math.min(attempts - 1, queries.length - 1))]);
 }
 
-export default { async fetch(request: Request, env: Env): Promise<Response> {
+export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promise: Promise<unknown>): void }): Promise<Response> {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
   const path = new URL(request.url).pathname;
   if (request.method === 'GET' && path === '/health') {
@@ -590,8 +593,10 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
     if (path === '/feedback') {
       try {
         const feedback = recordAlphaFeedback(await request.json());
-        return jsonResponse({ accepted: true, event_id: feedback.event_id });
-      } catch {
+        const persisted = await persistFeedback(env, feedback);
+        return jsonResponse({ accepted: true, durable: Boolean(env.FEEDBACK_LEDGER), event_id: persisted.event_id });
+      } catch (error) {
+        logSafeError(error);
         return jsonResponse({ error: 'Invalid feedback' }, 400);
       }
     }
@@ -669,6 +674,18 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
           : queries;
       const started = Date.now();
       const resolved = await resolveProducts(routedProviders, routedQueries, description, env, context, sourceImage, compareCandidateImages, routing);
+      const feedbackEvidenceKey = evidenceFingerprint(description);
+      let feedbackLearning = { penalized: 0, suppressed: 0 };
+      if (env.FEEDBACK_LEDGER && resolved.products.length) {
+        try {
+          const penalties = await feedbackPenalties(env, feedbackEvidenceKey, resolved.products);
+          const adjusted = applyFeedbackPenalties(resolved.products, penalties);
+          resolved.products = adjusted.products;
+          feedbackLearning = { penalized: adjusted.penalized, suppressed: adjusted.suppressed };
+        } catch (error) {
+          logSafeError(error);
+        }
+      }
       const total_ms = Date.now() - started;
       const failureState = resolved.state === 'TEMPORARILY_UNAVAILABLE' ? 'TEMPORARILY_UNAVAILABLE' : resolved.state === 'NO_RESULTS' ? 'NO_RESULTS' : undefined;
       if (resolved.state === 'TEMPORARILY_UNAVAILABLE') recordFailureState('commerce', 'PROVIDER_UNAVAILABLE', true);
@@ -684,6 +701,29 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
         visionUsage: rawDescription?.provider_usage,
         failureState,
       });
+      if (alphaTelemetry && env.FEEDBACK_LEDGER && resolved.products.length) {
+        const feedbackWrites = resolved.products.map((product) => persistFeedbackContext(env, {
+          event_id: alphaTelemetry!.event_id,
+          session_id: alphaTelemetry!.session_id,
+          result_id: product.id,
+          candidate_key: feedbackCandidateKey(product),
+          provider: product.provider || product.provenance || 'unknown',
+          provenance: product.provenance || 'unknown',
+          result_class: product.result_class,
+          evidence_key: feedbackEvidenceKey,
+          query: resolved.query.query,
+          category: resolved.query.category,
+          subcategory: resolved.query.subcategory,
+          brand: resolved.query.brand,
+          model: resolved.query.model,
+          vision_model: env.OPENROUTER_MODEL || env.GEMINI_MODEL || env.VISION_PROVIDER || null,
+          ranking_policy: FEEDBACK_RANKING_POLICY,
+          created_at: new Date().toISOString(),
+        }));
+        const writeTask = Promise.all(feedbackWrites).then(() => undefined).catch((error) => { logSafeError(error); });
+        if (ctx?.waitUntil) ctx.waitUntil(writeTask);
+        else await writeTask;
+      }
       let attributedProducts = resolved.products;
       if (env.ALPHA_ATTRIBUTION_SECRET && creatorId && contentRef && alphaTelemetry) {
         attributedProducts = await Promise.all(resolved.products.map(async (product) => {
@@ -701,7 +741,7 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
           return { ...product, attribution_token: attribution.attribution_token, click_ref: attribution.click_ref };
         }));
       }
-      return jsonResponse({ ...resolved, products: attributedProducts, latency_ms: total_ms, timing: { ...resolved.timing, total_ms },
+      return jsonResponse({ ...resolved, products: attributedProducts, feedback_learning: feedbackLearning, latency_ms: total_ms, timing: { ...resolved.timing, total_ms },
         ...(resolved.state === 'TEMPORARILY_UNAVAILABLE' ? { failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: true } :
           resolved.state === 'NO_RESULTS' ? { failure_state: 'NO_RESULTS', retryable: false } : {}) });
     }
