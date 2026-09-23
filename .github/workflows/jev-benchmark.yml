@@ -80,11 +80,21 @@ jobs:
           node --input-type=module <<'NODE'
           import { readFileSync, writeFileSync } from 'node:fs';
           const input = readFileSync('apps/api/wrangler.jsonc', 'utf8');
-          const output = input.replace(
+          let output = input.replace(
             /"workers_dev"\s*:\s*true\s*,/,
             '"workers_dev": true,\n  "preview_urls": true,',
           );
           if (output === input) throw new Error('workers_dev=true not found in Wrangler config');
+
+          // Version URLs are not generated for Worker versions with Durable
+          // Object bindings. The Jev benchmark does not use alpha access,
+          // feedback ledgers, or rate-limit bindings, so remove those from the
+          // temporary benchmark-only config while keeping production secrets
+          // and commerce/vision bindings on the existing vcl-api Worker.
+          output = output
+            .replace(/\n\s*"durable_objects"\s*:\s*\{[\s\S]*?\n\s*\},\n\s*"migrations"\s*:\s*\[[\s\S]*?\n\s*\],/m, '')
+            .replace(/\n\s*"ratelimits"\s*:\s*\[[\s\S]*?\n\s*\],/m, '');
+
           const path = 'apps/api/.jev-wrangler.jsonc';
           writeFileSync(path, output);
           console.log(readFileSync(path, 'utf8'));
