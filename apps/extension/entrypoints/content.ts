@@ -126,7 +126,7 @@ function addClose(panel: HTMLElement) {
 }
 
 function showFailure(result: Extract<FrameCaptureResult, { ok: false }>) {
-  const panel = basePanel('VCL object crop: unsupported');
+  const panel = basePanel('Scoop couldn’t use this selection');
   const message = document.createElement('div');
   message.textContent = `${result.code}: ${result.message}`;
   panel.appendChild(message);
@@ -230,7 +230,7 @@ function renderProducts(panel: HTMLElement, commerce: CommerceResponse, eventId:
 async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, supplied?: ObjectDescription, captureDebug?: unknown, stageTiming: Record<string, number | null> = {}) {
   const scoopEventId = crypto.randomUUID();
   const interactionStarted = Date.now();
-  const panel = basePanel('VCL analyzing selection…');
+  const panel = basePanel('Scoop is looking…');
   const controller = new AbortController();
   activeCapture = controller;
   const image = document.createElement('img');
@@ -245,7 +245,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     // Model localization/detail crops are intentionally bypassed because they can
     // redirect attention away from the pixels the user actually selected.
     stageTiming.localization_ms = null;
-    panel.firstElementChild!.textContent = 'VCL analyzing the clicked object…';
+    panel.firstElementChild!.textContent = 'Scoop is looking…';
     const requestId = crypto.randomUUID();
     const visionStarted = Date.now();
     const response: unknown = supplied ?? await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', requestId, dataUrl: result.dataUrl, timestamp: result.currentTime,
@@ -254,7 +254,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     if (controller.signal.aborted) return;
     if (response && typeof response === 'object' && 'error' in response && typeof response.error === 'string') throw new Error(response.error);
     const analysis = parseObjectDescription(response);
-    panel.firstElementChild!.textContent = 'VCL object understanding: success';
+    panel.firstElementChild!.textContent = 'Scoop found this';
 
     const summary = document.createElement('div');
     summary.textContent = [analysis.brand_candidate, analysis.model_candidate, analysis.subcategory || analysis.category].filter(Boolean).join(' · ') || analysis.category;
@@ -369,15 +369,21 @@ function showSelectionPreview(clientX: number, clientY: number) {
   const captureMs = Date.now() - captureStarted;
   if (!capture.ok) { showFailure(capture); return; }
 
-  const panel = basePanel('VCL selection · adjust before analyzing');
+  const panel = basePanel('Scoop this');
   const image = document.createElement('img');
   image.alt = 'Selected object crop preview';
   Object.assign(image.style, { display: 'block', width: '100%', height: '100%', borderRadius: '10px', background: '#000' });
   const preview = document.createElement('div');
   Object.assign(preview.style, { position: 'relative', width: '220px', height: '220px', margin: '0 auto 10px' });
   const pointMarker = document.createElement('span');
-  Object.assign(pointMarker.style, { position: 'absolute', width: '12px', height: '12px', border: '2px solid #fff',
-    boxShadow: '0 0 0 2px #111', borderRadius: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none' });
+  Object.assign(pointMarker.style, { position: 'absolute', width: '34px', height: '34px', transform: 'translate(-50%, -50%)',
+    pointerEvents: 'none', borderRadius: '8px',
+    background: 'linear-gradient(#fff,#fff) left top/10px 2px no-repeat, linear-gradient(#fff,#fff) left top/2px 10px no-repeat, linear-gradient(#fff,#fff) right top/10px 2px no-repeat, linear-gradient(#fff,#fff) right top/2px 10px no-repeat, linear-gradient(#fff,#fff) left bottom/10px 2px no-repeat, linear-gradient(#fff,#fff) left bottom/2px 10px no-repeat, linear-gradient(#fff,#fff) right bottom/10px 2px no-repeat, linear-gradient(#fff,#fff) right bottom/2px 10px no-repeat',
+    filter: 'drop-shadow(0 1px 2px rgba(0,0,0,.85))' });
+  const focusDot = document.createElement('span');
+  Object.assign(focusDot.style, { position: 'absolute', left: '50%', top: '50%', width: '5px', height: '5px',
+    borderRadius: '50%', background: '#fff', transform: 'translate(-50%, -50%)', boxShadow: '0 1px 2px rgba(0,0,0,.9)' });
+  pointMarker.appendChild(focusDot);
   preview.append(image, pointMarker); panel.appendChild(preview);
 
   const cropLabel = document.createElement('div');
@@ -400,7 +406,7 @@ function showSelectionPreview(clientX: number, clientY: number) {
     image.src = capture.dataUrl;
     const point = selectionPoint(capture);
     pointMarker.style.left = `${point.x * 100}%`; pointMarker.style.top = `${point.y * 100}%`;
-    cropLabel.textContent = `The marked point selects your object. Include its whole outline using − / +. Context size: ${Math.round(cropFraction * 100)}%.`;
+    cropLabel.textContent = `Focus on the whole item you want. Use − / + only if Scoop needs more or less context. ${Math.round(cropFraction * 100)}% view.`;
   };
 
   tighter.addEventListener('click', () => {
@@ -423,7 +429,7 @@ function showOverlay() {
   root.id = OVERLAY_ID;
   Object.assign(root.style, { position: 'fixed', inset: '0', zIndex: '2147483647', background: 'rgba(0,0,0,0.12)', cursor: 'crosshair' });
   const label = document.createElement('div');
-  label.textContent = 'VCL · click the object you want · Esc to close';
+  label.textContent = 'Scoop · click what you want · Esc to close';
   Object.assign(label.style, { position: 'fixed', top: '16px', left: '50%', transform: 'translateX(-50%)', padding: '8px 12px', borderRadius: '999px', background: '#111', color: '#fff', font: '13px system-ui, sans-serif', pointerEvents: 'none' });
   root.appendChild(label);
   root.addEventListener('click', (event) => {
