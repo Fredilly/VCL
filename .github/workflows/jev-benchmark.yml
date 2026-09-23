@@ -75,95 +75,86 @@ jobs:
           pnpm build
           node --test apps/api/tests/jev-router.test.mjs apps/api/tests/jev-fabric.test.mjs
 
-      - name: Strip benchmark-unused Durable Object exports
+      - name: Verify Preview Base secrets mirror production
         run: |
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs';
-          const path = 'apps/api/src/server.ts';
-          const input = readFileSync(path, 'utf8');
-          const output = input
-            .replace(/export \{ FeedbackLedger \} from '\.\/feedback-ledger\.js';\n/g, '')
-            .replace(/export \{ AlphaAccessLedger \} from '\.\/alpha-access\.js';\n/g, '');
-          if (output === input) throw new Error('Expected Durable Object exports were not found');
-          writeFileSync(path, output);
+          set -euo pipefail
+          PROD="$(pnpm dlx wrangler@4.135.0 secret list --config apps/api/wrangler.jsonc --json)"
+          BASE="$(pnpm dlx wrangler@4.135.0 preview base-config secret list --worker-name vcl-api --json)"
+          PROD="$PROD" BASE="$BASE" node --input-type=module <<'NODE'
+          const names = (raw) => {
+            const out = new Set();
+            const walk = (v) => {
+              if (Array.isArray(v)) return v.forEach(walk);
+              if (!v || typeof v !== 'object') return;
+              if (typeof v.name === 'string') out.add(v.name);
+              if (typeof v.key === 'string') out.add(v.key);
+              Object.values(v).forEach(walk);
+            };
+            walk(JSON.parse(raw || '[]'));
+            return out;
+          };
+          const prod = names(process.env.PROD);
+          const base = names(process.env.BASE);
+          const required = [...prod].filter((name) => !name.startsWith('ALPHA_'));
+          const missing = required.filter((name) => !base.has(name));
+          if (missing.length) {
+            console.error('Preview Base is missing production provider secrets: ' + missing.join(', '));
+            console.error('Set each once with: pnpm dlx wrangler@4.135.0 preview base-config secret put <NAME> --worker-name vcl-api');
+            process.exit(1);
+          }
+          console.log('Preview Base provider secrets mirror production names.');
           NODE
 
-      - name: Prepare preview-only Wrangler config
+      - name: Prepare isolated Worker Preview configs
         run: |
           node --input-type=module <<'NODE'
           import { readFileSync, writeFileSync } from 'node:fs';
           const input = readFileSync('apps/api/wrangler.jsonc', 'utf8');
-          let output = input.replace(
-            /"workers_dev"\s*:\s*true\s*,/,
-            '"workers_dev": true,\n  "preview_urls": true,',
-          );
-          if (output === input) throw new Error('workers_dev=true not found in Wrangler config');
-
-          // Version URLs are not generated for Worker versions with Durable
-          // Object bindings. The Jev benchmark does not use alpha access,
-          // feedback ledgers, or rate-limit bindings, so remove those from the
-          // temporary benchmark-only config while keeping production secrets
-          // and commerce/vision bindings on the existing vcl-api Worker.
-          output = output
-            .replace(/\n\s*"durable_objects"\s*:\s*\{[\s\S]*?\n\s*\},\n\s*"migrations"\s*:\s*\[[\s\S]*?\n\s*\],/m, '')
-            .replace(/\n\s*"ratelimits"\s*:\s*\[[\s\S]*?\n\s*\],/m, '');
-
-          const path = 'apps/api/.jev-wrangler.jsonc';
-          writeFileSync(path, output);
-          console.log(readFileSync(path, 'utf8'));
+          const shared = {
+            VISION_PROVIDER: process.env.BENCHMARK_VISION_PROVIDER,
+            OPENROUTER_MODEL: 'google/gemini-2.5-flash-lite',
+            GEMINI_MODEL: 'gemini-3.5-flash-lite',
+            COMMERCE_ELIGIBILITY_GATE: '1',
+            EBAY_ENVIRONMENT: 'production',
+            BENCHMARK_MODE: 'true',
+            VISIBLE_TEXT_QUERY_V2: process.env.VISIBLE_TEXT_QUERY_V2,
+          };
+          const make = (mode) => {
+            const previews = {
+              vars: {
+                ...shared,
+                JEV_MODE: mode,
+                JEV_DECISION_ROUTER: mode === 'off' ? 'false' : 'true',
+              },
+              ai: { binding: 'AI' },
+            };
+            return input.replace(/\n}\s*$/, `,\n  "previews": ${JSON.stringify(previews, null, 2)}\n}\n`);
+          };
+          writeFileSync('apps/api/.jev-off-wrangler.jsonc', make('off'));
+          writeFileSync('apps/api/.jev-router-wrangler.jsonc', make('router'));
+          writeFileSync('apps/api/.jev-fabric-wrangler.jsonc', make('fabric'));
           NODE
-          pnpm exec wrangler versions upload --help >/dev/null
 
-      - name: Create OFF Worker version preview
+      - name: Create isolated OFF Worker Preview
         run: |
-          pnpm exec wrangler versions upload \
-            --config "apps/api/.jev-wrangler.jsonc" \
-            --name vcl-api \
-            --var JEV_MODE:off \
-            --var JEV_DECISION_ROUTER:false \
-            --var VISION_PROVIDER:"$BENCHMARK_VISION_PROVIDER" \
-            --var BENCHMARK_MODE:true \
-            --var VISIBLE_TEXT_QUERY_V2:"$VISIBLE_TEXT_QUERY_V2" \
-            --var OPENROUTER_MODEL:"google/gemini-2.5-flash-lite" \
-            --preview-alias jev-off \
-            --tag jev-off-${GITHUB_SHA} \
-            --message "Jev benchmark OFF ${GITHUB_SHA}" | tee jev-off-upload.log
-          awk '/Version Preview Alias URL:/ { print $NF }' jev-off-upload.log > jev-off-origin.txt
-          test -s jev-off-origin.txt
+          set -euo pipefail
+          output="$(pnpm dlx wrangler@4.135.0 preview --config apps/api/.jev-off-wrangler.jsonc --worker-name vcl-api --name "jev-off-$GITHUB_RUN_ID" --json)"
+          printf '%s\n' "$output" | tee jev-off-upload.log
+          printf '%s' "$output" | jq -er '.preview_urls[0] // .preview.urls[0]' > jev-off-origin.txt
 
-      - name: Create ON Worker version preview
+      - name: Create isolated ROUTER Worker Preview
         run: |
-          pnpm exec wrangler versions upload \
-            --config "apps/api/.jev-wrangler.jsonc" \
-            --name vcl-api \
-            --var JEV_MODE:router \
-            --var JEV_DECISION_ROUTER:true \
-            --var VISION_PROVIDER:"$BENCHMARK_VISION_PROVIDER" \
-            --var BENCHMARK_MODE:true \
-            --var VISIBLE_TEXT_QUERY_V2:"$VISIBLE_TEXT_QUERY_V2" \
-            --var OPENROUTER_MODEL:"google/gemini-2.5-flash-lite" \
-            --preview-alias jev-on \
-            --tag jev-on-${GITHUB_SHA} \
-            --message "Jev benchmark ON ${GITHUB_SHA}" | tee jev-on-upload.log
-          awk '/Version Preview Alias URL:/ { print $NF }' jev-on-upload.log > jev-on-origin.txt
-          test -s jev-on-origin.txt
+          set -euo pipefail
+          output="$(pnpm dlx wrangler@4.135.0 preview --config apps/api/.jev-router-wrangler.jsonc --worker-name vcl-api --name "jev-router-$GITHUB_RUN_ID" --json)"
+          printf '%s\n' "$output" | tee jev-on-upload.log
+          printf '%s' "$output" | jq -er '.preview_urls[0] // .preview.urls[0]' > jev-on-origin.txt
 
-      - name: Create FABRIC Worker version preview
+      - name: Create isolated FABRIC Worker Preview
         run: |
-          pnpm exec wrangler versions upload \
-            --config "apps/api/.jev-wrangler.jsonc" \
-            --name vcl-api \
-            --var JEV_MODE:fabric \
-            --var JEV_DECISION_ROUTER:true \
-            --var VISION_PROVIDER:"$BENCHMARK_VISION_PROVIDER" \
-            --var BENCHMARK_MODE:true \
-            --var VISIBLE_TEXT_QUERY_V2:"$VISIBLE_TEXT_QUERY_V2" \
-            --var OPENROUTER_MODEL:"google/gemini-2.5-flash-lite" \
-            --preview-alias jev-fabric \
-            --tag jev-fabric-${GITHUB_SHA} \
-            --message "Jev benchmark FABRIC ${GITHUB_SHA}" | tee jev-fabric-upload.log
-          awk '/Version Preview Alias URL:/ { print $NF }' jev-fabric-upload.log > jev-fabric-origin.txt
-          test -s jev-fabric-origin.txt
+          set -euo pipefail
+          output="$(pnpm dlx wrangler@4.135.0 preview --config apps/api/.jev-fabric-wrangler.jsonc --worker-name vcl-api --name "jev-fabric-$GITHUB_RUN_ID" --json)"
+          printf '%s\n' "$output" | tee jev-fabric-upload.log
+          printf '%s' "$output" | jq -er '.preview_urls[0] // .preview.urls[0]' > jev-fabric-origin.txt
 
       - name: Freeze valid benchmark cases
         run: |
@@ -484,6 +475,14 @@ jobs:
           console.log(JSON.stringify(report,null,2));
           if (!report.trust_gates.measured || !report.trust_gates.false_exact || !report.trust_gates.unsupported_likely) process.exitCode=1;
           NODE
+
+      - name: Delete isolated Worker Previews
+        if: always()
+        continue-on-error: true
+        run: |
+          pnpm dlx wrangler@4.135.0 preview delete --worker-name vcl-api --name "jev-off-$GITHUB_RUN_ID" --skip-confirmation || true
+          pnpm dlx wrangler@4.135.0 preview delete --worker-name vcl-api --name "jev-router-$GITHUB_RUN_ID" --skip-confirmation || true
+          pnpm dlx wrangler@4.135.0 preview delete --worker-name vcl-api --name "jev-fabric-$GITHUB_RUN_ID" --skip-confirmation || true
 
       - name: Upload benchmark artifacts
         if: always()
