@@ -370,10 +370,25 @@ export function buildProductQuery(description: ObjectDescription, context?: Prod
   };
 }
 
-export function buildProductQueryVariants(description: ObjectDescription, context?: ProductContext): ProductQuery[] {
+export function buildProductQueryVariants(description: ObjectDescription, context?: ProductContext, visibleTextFirst = false): ProductQuery[] {
   const base = buildProductQuery(description, context);
   const type = primaryType(description, context);
-  const variants = [base.query];
+  // Opt-in experiment: exact readable markings can be more discriminating than
+  // generic color/material descriptions. Do not add a model/OCR call or extra
+  // commerce queries, and preserve the existing identity/visual fallbacks.
+  const readableText = description.visible_text.map((value) => value.trim()).filter(Boolean).slice(0, 2);
+  const textFirst = visibleTextFirst && readableText.length
+    ? uniqueNonEmpty([
+        description.brand_candidate,
+        description.model_candidate,
+        ...readableText.filter((text) => ![description.brand_candidate, description.model_candidate].some(
+          (identity) => identity && normalized(identity) === normalized(text),
+        )),
+        type,
+        description.color,
+      ]).join(' ')
+    : null;
+  const variants = [textFirst || base.query];
 
   const identity = uniqueNonEmpty([
     description.brand_candidate,
