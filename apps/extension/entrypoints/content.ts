@@ -206,14 +206,18 @@ function renderProducts(panel: HTMLElement, commerce: CommerceResponse, eventId:
 
     const feedback = document.createElement('div');
     Object.assign(feedback.style, { display: 'flex', gap: '6px', margin: '-2px 0 8px 64px' });
-    const yes = button('👍');
-    const no = button('👎');
+    const yes = button('');
+    const no = button('');
     yes.setAttribute('aria-label', 'Correct match');
     no.setAttribute('aria-label', 'Wrong match');
     yes.setAttribute('title', 'Correct match');
     no.setAttribute('title', 'Wrong match');
-    Object.assign(yes.style, { padding: '5px 9px', fontSize: '14px' });
-    Object.assign(no.style, { padding: '5px 9px', fontSize: '14px', opacity: '0.82' });
+    const thumbUp = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M7 10v10H4V10h3Zm2 10V9.5l3.6-5.1c.6-.9 2-.5 2 .6v3h3.7c1.3 0 2.3 1.2 2 2.5l-1.3 6.8A3.4 3.4 0 0 1 15.7 20H9Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+    const thumbDown = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M7 14V4H4v10h3Zm2-10v10.5l3.6 5.1c.6.9 2 .5 2-.6v-3h3.7c1.3 0 2.3-1.2 2-2.5L19 6.7A3.4 3.4 0 0 0 15.7 4H9Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+    yes.innerHTML = thumbUp;
+    no.innerHTML = thumbDown;
+    Object.assign(yes.style, { padding: '6px 9px', color: '#fff' });
+    Object.assign(no.style, { padding: '6px 9px', color: '#fff', opacity: '0.82' });
     const submit = async (feedback_type: 'correct_match' | 'wrong_item') => {
       yes.disabled = true; no.disabled = true;
       const response = await browser.runtime.sendMessage({ type: 'VCL_FEEDBACK', event_id: eventId, result_id: product.id, feedback_type }).catch(() => null);
