@@ -206,10 +206,14 @@ function renderProducts(panel: HTMLElement, commerce: CommerceResponse, eventId:
 
     const feedback = document.createElement('div');
     Object.assign(feedback.style, { display: 'flex', gap: '6px', margin: '-2px 0 8px 64px' });
-    const yes = button('✓ This is it');
-    const no = button('× Wrong');
-    Object.assign(yes.style, { padding: '5px 9px', fontSize: '11px' });
-    Object.assign(no.style, { padding: '5px 9px', fontSize: '11px', opacity: '0.82' });
+    const yes = button('👍');
+    const no = button('👎');
+    yes.setAttribute('aria-label', 'Correct match');
+    no.setAttribute('aria-label', 'Wrong match');
+    yes.setAttribute('title', 'Correct match');
+    no.setAttribute('title', 'Wrong match');
+    Object.assign(yes.style, { padding: '5px 9px', fontSize: '14px' });
+    Object.assign(no.style, { padding: '5px 9px', fontSize: '14px', opacity: '0.82' });
     const submit = async (feedback_type: 'correct_match' | 'wrong_item') => {
       yes.disabled = true; no.disabled = true;
       const response = await browser.runtime.sendMessage({ type: 'VCL_FEEDBACK', event_id: eventId, result_id: product.id, feedback_type }).catch(() => null);
@@ -287,6 +291,8 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       const improve = button('Improve with nearby frames');
       const note = document.createElement('div');
       note.textContent = 'Check up to two nearby frames (±0.5 seconds), then return to your paused position.';
+      Object.assign(note.style, { marginTop: '10px', lineHeight: '1.35', opacity: '0.78' });
+      Object.assign(improve.style, { marginTop: '8px' });
       panel.append(note, improve);
       improve.addEventListener('click', async () => {
         improve.disabled = true;
