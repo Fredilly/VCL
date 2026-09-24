@@ -17,6 +17,10 @@ function clean(values: unknown, limit = 8): string[] {
   return [...new Set(values.map(String).map((v) => v.trim()).filter(Boolean))].slice(0, limit);
 }
 
+export function ocrRecoveryEnabled(configured: string | undefined, benchmark: unknown): boolean {
+  return configured === 'true' || benchmark === true;
+}
+
 export function shouldRunOcrRecovery(description: ObjectDescription): boolean {
   if (description.brand_candidate || description.model_candidate) return false;
   if (description.identity_confidence >= 0.6) return false;
