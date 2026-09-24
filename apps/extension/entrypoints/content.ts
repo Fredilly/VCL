@@ -14,6 +14,7 @@ type ObjectDescription = {
   color: string;
   material: string;
   style_attributes: string[];
+  visible_text?: string[];
   search_terms: string[];
   confidence: number;
   identity_confidence: number;
@@ -280,7 +281,14 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     panel.firstElementChild!.textContent = 'Scoop found this';
 
     const summary = document.createElement('div');
-    summary.textContent = [analysis.brand_candidate, analysis.model_candidate, analysis.subcategory || analysis.category].filter(Boolean).join(' · ') || analysis.category;
+    const readable = (analysis.visible_text ?? []).map((value) => value.trim()).filter(Boolean);
+    const nameLike = readable.find((value) => /^[A-Z][A-Z\-']{2,}$/.test(value));
+    const numberLike = readable.find((value) => /^\d{1,3}$/.test(value));
+    const conciseIdentity = [analysis.brand_candidate, analysis.model_candidate, nameLike, numberLike, analysis.subcategory || analysis.category, analysis.color]
+      .filter(Boolean)
+      .filter((value, index, arr) => arr.findIndex((other) => String(other).toLowerCase() === String(value).toLowerCase()) === index)
+      .join(' ');
+    summary.textContent = conciseIdentity || analysis.category;
     Object.assign(summary.style, { fontWeight: '700', marginBottom: '6px', paddingRight: '34px', fontSize: '14px' });
     panel.appendChild(summary);
 
