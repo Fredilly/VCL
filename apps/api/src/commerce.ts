@@ -352,7 +352,9 @@ export function buildProductQuery(description: ObjectDescription, context?: Prod
         ...strongestEvidence,
       ]);
 
-  const query = ordered.join(' ').trim();
+  const structuredQuery = ordered.join(' ').trim();
+  const retrievalDescription = (description.retrieval_description ?? '').trim();
+  const query = retrievalDescription || structuredQuery;
 
   return {
     query,
@@ -366,6 +368,7 @@ export function buildProductQuery(description: ObjectDescription, context?: Prod
       description.material,
       ...evidence,
       ...description.style_attributes,
+      description.retrieval_description,
     ]),
   };
 }
