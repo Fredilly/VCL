@@ -107,6 +107,29 @@ test('fragrance identity survives commerce query and candidate verification', ()
 });
 
 
+test('grounded visible identity survives fallback broadening', () => {
+  const durant = description({
+    category: 'Sportswear', subcategory: 'Basketball Jersey', brand_candidate: null, model_candidate: null,
+    color: 'Red', material: 'Polyester', visible_text: ['DURANT', '7', 'KD USED TO', 'THE KICK CLUB'],
+    evidence_confidence: { visible_text: 0.9 },
+  });
+  const variants = buildProductQueryVariants(durant);
+  assert.match(variants[0].query, /DURANT/);
+  assert.match(variants[0].query, /7/);
+  assert.equal(variants[1].query, 'DURANT 7 Basketball Jersey');
+  assert.ok(variants.every((variant) => variant.query !== 'Basketball Jersey Red'),
+    'must not broaden away grounded surname/number identity');
+});
+
+test('weak readable text can still fall back to generic visual retrieval', () => {
+  const weak = description({
+    subcategory: 'Basketball Jersey', brand_candidate: null, model_candidate: null,
+    color: 'Red', material: 'Polyester', visible_text: ['BLURRY'], evidence_confidence: { visible_text: 0.4 },
+  });
+  const variants = buildProductQueryVariants(weak);
+  assert.equal(variants.at(-1).query, 'Basketball Jersey Red');
+});
+
 test('visible-text-first is opt-in, preserves three-query budget and generic fallback', () => {
   const branded = description({
     subcategory: 'T-shirt', brand_candidate: null, model_candidate: null, color: 'black', material: 'cotton',
