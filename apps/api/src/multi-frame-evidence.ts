@@ -109,9 +109,6 @@ export function mergeFrameEvidence(primary: ObjectDescription, timestamp: number
     // Rebuild from accepted values only; nearby search queries may contain rejected guesses.
     description.search_terms = [[description.brand_candidate, description.model_candidate, description.color,
       description.subcategory || description.category, ...description.visible_text.slice(0, 2)].filter(known).join(' ')];
-    description.retrieval_description = [description.brand_candidate, description.model_candidate,
-      ...description.visible_text.slice(0, 2), description.color, description.subcategory || description.category,
-      ...description.distinctive_features.slice(0, 2)].filter(known).join(' ');
     if (changed.includes('brand_candidate') || changed.includes('model_candidate')) {
       description.identity_confidence = Math.min(winners.get('brand_candidate')!.confidence,
         known(description.model_candidate) ? winners.get('model_candidate')!.confidence : 0.7);

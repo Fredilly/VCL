@@ -25,7 +25,6 @@ export type ObjectDescription = {
   hardware_details: string[];
   shape_silhouette: string[];
   search_terms: string[];
-  retrieval_description?: string;
   confidence: number;
   identity_confidence: number;
   evidence_confidence?: Record<string, number>;
@@ -79,7 +78,6 @@ export function normalizeObjectDescription(value: unknown): ObjectDescription {
     hardware_details: stringArray(record.hardware_details, 8),
     shape_silhouette: stringArray(record.shape_silhouette, 8),
     search_terms: stringArray(record.search_terms, 4),
-    retrieval_description: typeof record.retrieval_description === 'string' ? record.retrieval_description.trim().slice(0, 240) : '',
     confidence: Math.max(0, Math.min(1, confidence)),
     identity_confidence: Math.max(0, Math.min(1, identityConfidence)),
   };

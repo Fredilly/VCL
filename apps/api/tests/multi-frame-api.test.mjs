@@ -4,7 +4,7 @@ import { loadModule } from './helpers/load-ts.mjs';
 const image = 'data:image/png;base64,aGVsbG8=';
 const description = { category: 'bottle', subcategory: 'water bottle', brand_candidate: null, model_candidate: null, color: 'blue',
   material: '', style_attributes: [], visible_text: [], logos_markings: [], distinctive_features: [], hardware_details: [], shape_silhouette: [],
-  search_terms: ['blue water bottle'], retrieval_description: '', confidence: 0.9, identity_confidence: 0 };
+  search_terms: ['blue water bottle'], confidence: 0.9, identity_confidence: 0 };
 const nearby = { description: { ...description, visible_text: ['750 ml'], evidence_confidence: { visible_text: 0.95 } }, same_object_confidence: 0.99, identity_support: false };
 const calls = [];
 let fail = false;
