@@ -46,3 +46,14 @@ Compare new sessions against previous `runs/*.json` files rather than overwritin
 ## Scope
 
 Golden is a smoke/regression suite. It should remain fast enough to run manually. Broader quality claims belong in the larger benchmark corpus, not here.
+
+
+## Alpha v1 frozen regression set
+
+`alpha-v1.json` pins the user-visible behavior we are protecting during the `ScoopResolver` hardening work to `baseline/alpha-v1` at commit `aef9f97edc97a40ada0d66ae7417f7dccf680018`.
+
+It contains the seven known alpha cases: Durant #7 Rockets jersey, Lakers #12 white jersey, Nike sleeveless hoodie, Minnesota Grey Duck shirt, fragrance, Funko figure, and sneaker.
+
+Two cases already reuse exact replay metadata from existing frozen tests. The remaining cases are intentionally marked `capture_required` rather than inventing URLs, timestamps, or click coordinates. Their identity/evidence expectations are frozen now; when exact source metadata is captured, only the `replay` block may be completed.
+
+CI validates that the baseline commit, seven case IDs, evidence requirements, and trust invariants remain present. Live/manual runs still belong under `runs/` so provider availability is not confused with deterministic product regression.
