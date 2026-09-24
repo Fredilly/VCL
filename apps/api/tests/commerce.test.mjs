@@ -53,6 +53,20 @@ test('buildProductQuery prioritizes brand/model/search evidence', () => {
   assert.equal(query.model, 'Air Max 90');
 });
 
+
+test('hidden rich retrieval description becomes the primary commerce query', () => {
+  const query = buildProductQuery({
+    category: 'Apparel', subcategory: 'Basketball Jersey', brand_candidate: 'Nike', model_candidate: null,
+    color: 'white', material: '', style_attributes: ['sleeveless', 'v-neck'], visible_text: ['LAKERS', '12'],
+    logos_markings: ['Nike swoosh'], distinctive_features: ['purple and gold trim'], hardware_details: [],
+    shape_silhouette: ['basketball jersey'], search_terms: ['Lakers 12 white basketball jersey'],
+    retrieval_description: 'Nike Lakers 12 white sleeveless basketball jersey purple gold trim',
+    confidence: 0.9, identity_confidence: 0.7,
+  });
+  assert.equal(query.query, 'Nike Lakers 12 white sleeveless basketball jersey purple gold trim');
+  assert.ok(query.attributes.includes('Nike Lakers 12 white sleeveless basketball jersey purple gold trim'));
+});
+
 test('buildProductQuery falls back to visual attributes when search terms are absent', () => {
   const query = buildProductQuery({
     category: 'Home', subcategory: 'Lamp', brand_candidate: null, model_candidate: null,
