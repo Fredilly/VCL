@@ -419,21 +419,72 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       ? commerce.products.find((product) => product.result_class === 'EXACT') ?? commerce.products[0]
       : null;
     if (verifiedProduct) {
-      summary.textContent = verifiedProduct.title;
       const provenance = commerce.verified_mapping?.provenance ?? verifiedProduct.provenance ?? verifiedProduct.provider ?? 'verified_mapping';
       const isTestFixture = provenance === 'test_fixture';
+
+      panel.firstElementChild!.textContent = 'Scoop found the exact item';
+
+      const exactBadge = document.createElement('div');
+      exactBadge.textContent = '✓ Exact match';
+      Object.assign(exactBadge.style, {
+        display: 'inline-flex', alignItems: 'center', gap: '6px', width: 'fit-content',
+        padding: '6px 9px', marginBottom: '8px', borderRadius: '999px',
+        background: 'rgba(255,255,255,.14)', border: '1px solid rgba(255,255,255,.28)',
+        fontWeight: '800', fontSize: '12px', letterSpacing: '.01em',
+      });
+      summary.before(exactBadge);
+
+      summary.textContent = verifiedProduct.title;
+      Object.assign(summary.style, { fontSize: '15px', marginBottom: '4px' });
+
       const verifiedMeta = [
         verifiedProduct.brand,
         verifiedProduct.model ? `SKU ${verifiedProduct.model}` : null,
       ].filter(Boolean).join(' · ');
       attrs.textContent = verifiedMeta || (isTestFixture ? 'Known-SKU test mapping' : 'Verified product mapping');
-      confidence.textContent = isTestFixture
-        ? 'Known-SKU test mapping'
-        : 'Product identity verified from first-party mapping';
+
+      const visualTitle = [
+        analysis.subcategory || analysis.category,
+        analysis.color,
+      ].filter(Boolean).join(' ');
+      const visualDetails = detailParts.join(' · ');
+      confidence.textContent = `Visually detected: ${[visualTitle, visualDetails].filter(Boolean).join(' · ')}`;
       identityConfidence.textContent = isTestFixture
-        ? 'Identity source: test fixture'
-        : 'Identity: Exact · verified mapping';
+        ? 'Identity source: known-SKU test mapping'
+        : 'Identity source: verified product data';
+      Object.assign(confidence.style, { opacity: '0.72', marginTop: '8px' });
+      Object.assign(identityConfidence.style, { opacity: '0.72', marginTop: '3px' });
+
       for (const control of improveControls) control.remove();
+
+      if (typeof (panel as any).animate === 'function') {
+        (panel as any).animate(
+          [{ transform: 'scale(.985)' }, { transform: 'scale(1.012)' }, { transform: 'scale(1)' }],
+          { duration: 650, easing: 'cubic-bezier(.2,.8,.2,1)' },
+        );
+        (exactBadge as any).animate(
+          [{ opacity: 0, transform: 'translateY(4px) scale(.92)' }, { opacity: 1, transform: 'translateY(0) scale(1.06)' }, { opacity: 1, transform: 'scale(1)' }],
+          { duration: 720, easing: 'cubic-bezier(.2,.8,.2,1)' },
+        );
+      }
+
+      const sparkle = document.createElement('div');
+      sparkle.textContent = '✦';
+      sparkle.setAttribute('aria-hidden', 'true');
+      Object.assign(sparkle.style, {
+        position: 'absolute', top: '42px', right: '46px', pointerEvents: 'none',
+        fontSize: '18px', opacity: '0',
+      });
+      panel.appendChild(sparkle);
+      if (typeof (sparkle as any).animate === 'function') {
+        const animation = (sparkle as any).animate(
+          [{ opacity: 0, transform: 'translateY(4px) scale(.5) rotate(-12deg)' }, { opacity: 1, transform: 'translateY(-3px) scale(1.15) rotate(8deg)' }, { opacity: 0, transform: 'translateY(-10px) scale(.8) rotate(18deg)' }],
+          { duration: 800, easing: 'ease-out' },
+        );
+        animation.addEventListener('finish', () => sparkle.remove(), { once: true });
+      } else {
+        sparkle.remove();
+      }
     }
     if (__VCL_DEBUG_PROVENANCE__) {
       const timing = document.createElement('div');
