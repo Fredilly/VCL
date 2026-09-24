@@ -158,6 +158,28 @@ test('visible-text-first does not invent logos or change items without readable 
   assert.equal(variants.length, 3);
 });
 
+
+test('basketball apparel keeps sport context and distinctive gradient evidence in retrieval', () => {
+  const hoodie = description({
+    category: 'Sportswear',
+    subcategory: 'Sleeveless Hoodie',
+    brand_candidate: 'Nike',
+    model_candidate: null,
+    color: 'black',
+    material: 'polyester',
+    visible_text: [],
+    logos_markings: ['Nike Swoosh logo'],
+    distinctive_features: ['red-to-blue gradient chest stripe'],
+    shape_silhouette: ['sleeveless hoodie'],
+  });
+  const context = { platform: 'youtube', title: 'NBA Legends GOING OFF in 2026 Summer Runs!' };
+  const variants = buildProductQueryVariants(hoodie, context);
+  assert.match(variants[0].query, /Nike/i);
+  assert.match(variants[0].query, /basketball/i);
+  assert.match(variants[0].query, /gradient/i);
+  assert.ok(variants.every((variant) => !/\bnfl\b/i.test(variant.query)));
+});
+
 test('commerce errors expose stable resolver codes', () => {
   assert.equal(new CommerceNoResultsError().code, 'NO_RESULTS');
   assert.equal(new CommerceProviderError('failed').code, 'COMMERCE_PROVIDER_ERROR');
