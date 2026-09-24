@@ -83,3 +83,26 @@ test('malformed records are ignored', () => {
   assert.equal(mod.parseVerifiedProductMappings('[{"platform":"youtube"}]').length, 0);
   assert.equal(mod.parseVerifiedProductMappings('not-json').length, 0);
 });
+
+
+test('YouTube raw IDs and canonical youtube: refs resolve to the same video', () => {
+  const rawRegistry = JSON.stringify([{
+    platform: 'youtube',
+    content_ref: 'BR5fQYeqlJo',
+    scope: 'entire_video',
+    object_type: 'shirt',
+    brand: 'Mizzen+Main',
+    product_id: '1WS-1916',
+    title: 'Leeward Dress Shirt',
+    destination: 'https://www.mizzenandmain.com/',
+    provenance: 'test_fixture',
+  }]);
+  const hit = mod.lookupVerifiedProductMapping({
+    rawRegistry,
+    allowTestFixtures: true,
+    platform: 'youtube',
+    contentRef: 'youtube:BR5fQYeqlJo',
+    description: shirt,
+  });
+  assert.equal(hit?.product_id, '1WS-1916');
+});
