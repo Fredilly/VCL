@@ -1,0 +1,147 @@
+name: Description richness A/B benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      case_limit:
+        description: Number of frozen cases to run (1-8)
+        required: false
+        default: '8'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: description-richness-ab
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CASE_LIMIT: ${{ inputs.case_limit || '8' }}
+      VCL_API_ORIGIN: https://api.vcl.article6.org
+
+    steps:
+      - name: Checkout experiment branch
+        uses: actions/checkout@v4
+        with:
+          ref: experiment/description-richness-ab
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install headless Chromium
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes chromium-browser || sudo apt-get install --yes chromium
+
+      - name: Freeze benchmark cases
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const f = JSON.parse(readFileSync('tests/manual/spike-5/cases-v2.json', 'utf8'));
+          const identities = {
+            's5-01': { brand: 'Patagonia', model: 'Better Sweater' },
+            's5-02': { brand: 'Patagonia', model: 'Better Sweater' },
+            's5-03': { brand: 'Seiko', model: 'SKX007' },
+            's5-04': { brand: 'Seiko', model: 'SKX007' },
+            's5-05': { brand: 'Coach', model: null },
+            's5-06': { brand: 'Coach', model: null },
+            's5-07': { brand: 'Adidas', model: 'Samba OG' },
+            's5-08': { brand: 'Adidas', model: 'Samba OG' },
+          };
+          f.cases = f.cases.filter((c) => c.valid !== false).map((c) => ({ ...c, expected_identity: identities[c.id] ?? null }));
+          writeFileSync(process.env.RUNNER_TEMP + '/description-cases.json', JSON.stringify(f));
+          NODE
+
+      - name: Prepare shared production vision once
+        run: |
+          export VCL_COST_CASES="$RUNNER_TEMP/description-cases.json"
+          export VCL_COST_LIMIT="$CASE_LIMIT"
+          export VCL_HEADLESS=1
+          export VCL_FROZEN_FRAME_DIR="$GITHUB_WORKSPACE/tests/benchmark/jev/frames"
+          export VCL_PREPARE_ONLY=1
+          export VCL_PREPARED_OUTPUT="$GITHUB_WORKSPACE/description-prepared.json"
+          export VCL_CDP_PORT=9334
+          export VCL_COST_PROFILE="$RUNNER_TEMP/description-browser"
+          node tests/cost/run-live.mjs
+
+      - name: Run rich description
+        run: |
+          VCL_PREPARED_INPUT="$GITHUB_WORKSPACE/description-prepared.json"           VCL_PREPARED_CASE_COUNT="$CASE_LIMIT"           VCL_COST_OUTPUT="$GITHUB_WORKSPACE/description-rich.json"           node tests/cost/run-prepared-commerce.mjs
+
+      - name: Run compact description
+        run: |
+          VCL_COMPACT_DESCRIPTION=1           VCL_PREPARED_INPUT="$GITHUB_WORKSPACE/description-prepared.json"           VCL_PREPARED_CASE_COUNT="$CASE_LIMIT"           VCL_COST_OUTPUT="$GITHUB_WORKSPACE/description-compact.json"           node tests/cost/run-prepared-commerce.mjs
+
+      - name: Compare retrieval accuracy
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const load = p => JSON.parse(readFileSync(p,'utf8'));
+          const R = load('description-rich.json');
+          const C = load('description-compact.json');
+          const norm = v => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+          const supports = (p,e) => {
+            if (!e) return false;
+            const t = norm([p?.title,p?.brand,p?.model].filter(Boolean).join(' '));
+            const b = norm(e.brand), m = norm(e.model);
+            if (b && !t.includes(b)) return false;
+            if (m && !m.split(' ').filter(Boolean).every(x => t.includes(x))) return false;
+            return true;
+          };
+          const expected = Object.fromEntries((JSON.parse(readFileSync(process.env.RUNNER_TEMP + '/description-cases.json','utf8')).cases ?? []).map(c => [c.id,c.expected_identity]));
+          const summarize = d => {
+            const rows = d.runs ?? [];
+            const per_case = rows.map(r => {
+              const e = expected[r.case_id];
+              const products = r.product_identities ?? [];
+              return {
+                case_id:r.case_id,
+                top1_correct: products.length ? supports(products[0],e) : false,
+                top5_correct: products.slice(0,5).some(p => supports(p,e)),
+                products: products.slice(0,5),
+              };
+            });
+            return {
+              cases: rows.length,
+              useful_rate: rows.length ? rows.filter(r => r.notes?.includes('state=RESULTS')).length / rows.length : 0,
+              top1_accuracy: rows.length ? per_case.filter(x=>x.top1_correct).length / rows.length : 0,
+              top5_accuracy: rows.length ? per_case.filter(x=>x.top5_correct).length / rows.length : 0,
+              per_case,
+            };
+          };
+          const rich = summarize(R), compact = summarize(C);
+          const report = {
+            rich, compact,
+            delta:{
+              useful_rate: rich.useful_rate - compact.useful_rate,
+              top1_accuracy: rich.top1_accuracy - compact.top1_accuracy,
+              top5_accuracy: rich.top5_accuracy - compact.top5_accuracy,
+            }
+          };
+          writeFileSync('description-richness-report.json', JSON.stringify(report,null,2)+'\n');
+          console.log(JSON.stringify(report,null,2));
+          NODE
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: description-richness-ab-${{ github.run_id }}
+          path: |
+            description-prepared.json
+            description-rich.json
+            description-compact.json
+            description-richness-report.json

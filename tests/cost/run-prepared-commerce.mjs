@@ -61,6 +61,21 @@ const expectedRows = Number(process.env.VCL_PREPARED_CASE_COUNT ?? rows.length);
 if (!Number.isInteger(expectedRows) || expectedRows < 1) throw new Error(`Invalid VCL_PREPARED_CASE_COUNT: ${process.env.VCL_PREPARED_CASE_COUNT}`);
 if (rows.length !== expectedRows) throw new Error(`Expected ${expectedRows} prepared rows, got ${rows.length}`);
 
+function compactDescription(description) {
+  if (!description || typeof description !== 'object') return description;
+  return {
+    ...description,
+    material: '',
+    style_attributes: [],
+    search_terms: [],
+    visible_text: [],
+    logos_markings: [],
+    distinctive_features: [],
+    hardware_details: [],
+    shape_silhouette: [],
+  };
+}
+
 const runs = [];
 const failures = [];
 
@@ -68,7 +83,7 @@ for (const row of rows) {
   const started = Date.now();
   try {
     const commerce = await postJson('resolve-products', {
-      description: row.description,
+      description: process.env.VCL_COMPACT_DESCRIPTION === '1' ? compactDescription(row.description) : row.description,
       context: row.context,
       source_image: row.source_image,
       ...(process.env.VCL_VISIBLE_TEXT_QUERY_V2 === '1' ? { benchmark_visible_text_query_v2: true } : {}),
