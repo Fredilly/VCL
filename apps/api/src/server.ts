@@ -4,6 +4,7 @@ import { CloudflareVisionProvider, type CloudflareVisionBinding } from './cloudf
 import { OpenRouterVisionProvider, DEFAULT_OPENROUTER_MODEL } from './openrouter-vision.js';
 import { analyzeWithNearbyFrames, mergeFrameEvidence, parseEvidenceFrames } from './multi-frame-evidence.js';
 import { normalizeObjectDescription } from './types.js';
+import { mergeOcrEvidence, shouldRunOcrPreview } from './ocr-evidence.js';
 import { parseSelectionPoint, TargetLocalizationError, type SelectionPoint } from './selection-target.js';
 import { CommerceNoResultsError, buildProductQueryVariants, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
 import { highConfidenceMetadataContradiction, verifyCandidate, rankVerified } from './candidate-verification.js';
@@ -55,6 +56,7 @@ export interface Env {
   JEV_MODE?: string;
   BENCHMARK_MODE?: string;
   VISIBLE_TEXT_QUERY_V2?: string;
+  OCR_PREVIEW_V1?: string;
   AI_GATEWAY_API_KEY?: string;
   ALPHA_ENABLED?: string;
   ALPHA_ATTRIBUTION_SECRET?: string;
@@ -615,8 +617,29 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         recordFailureState('vision', String(reason), true);
         return jsonResponse({ error: 'Object analysis is temporarily unavailable', reason, failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: true, vision_routing: visionRouting }, 502);
       }
+
+      const ocrPreview = { enabled: env.OCR_PREVIEW_V1 === 'true' || record.preview_ocr_v1 === true, attempted: false, applied: false, visible_text: [] as string[] };
+      if (ocrPreview.enabled && shouldRunOcrPreview(description)) {
+        ocrPreview.attempted = true;
+        const ocrImage = focusDataUrl || dataUrl;
+        for (const { provider } of visionProviders) {
+          if (!(provider instanceof OpenRouterVisionProvider || provider instanceof GeminiVisionProvider)) continue;
+          try {
+            const evidence = await provider.readTextEvidence(ocrImage);
+            const enriched = mergeOcrEvidence(description, evidence);
+            ocrPreview.visible_text = evidence.visible_text;
+            ocrPreview.applied = enriched.visible_text.length > description.visible_text.length
+              || enriched.logos_markings.length > description.logos_markings.length;
+            description = enriched;
+            break;
+          } catch (error) {
+            logSafeError(error);
+          }
+        }
+      }
+
       const analyzed = timestamp === undefined ? description : mergeFrameEvidence(description, timestamp as number, []);
-      return jsonResponse({ ...(analyzed as object), vision_routing: visionRouting });
+      return jsonResponse({ ...(analyzed as object), vision_routing: visionRouting, ocr_preview: ocrPreview });
     }
     if (path === '/commerce-click') {
       if (!env.ALPHA_ATTRIBUTION_SECRET) return jsonResponse({ error: 'Commerce attribution is not configured' }, 503);
