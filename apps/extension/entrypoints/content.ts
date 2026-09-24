@@ -43,7 +43,6 @@ type CommerceResponse = {
   latency_ms: number;
   state?: 'RESULTS' | 'NO_RESULTS' | 'TEMPORARILY_UNAVAILABLE';
   providers_used?: string[];
-  intent?: { summary?: { title?: string; details?: string[] } };
   timing?: { provider_retrieval_ms?: number; candidate_verification_ms?: number; total_ms?: number };
 };
 
@@ -410,9 +409,6 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     if (controller.signal.aborted) return;
     if (commerceRaw && typeof commerceRaw === 'object' && typeof commerceRaw.error === 'string') throw new Error(commerceRaw.error);
     const commerce = parseCommerceResponse(commerceRaw);
-    const canonicalSummary = commerce.intent?.summary;
-    if (canonicalSummary?.title) summary.textContent = canonicalSummary.title;
-    if (Array.isArray(canonicalSummary?.details)) attrs.textContent = canonicalSummary.details.slice(0, 2).join(' · ');
     if (__VCL_DEBUG_PROVENANCE__) {
       const timing = document.createElement('div');
       const total = Object.values(stageTiming).reduce<number>((sum, value) => sum + (value ?? 0), 0) + (commerce.timing?.total_ms ?? commerce.latency_ms);
