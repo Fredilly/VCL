@@ -1,6 +1,7 @@
 import { normalizeObjectDescription, type ObjectDescription, type VisionProvider } from './types.js';
 import { FIELD_CONFIDENCE_PROMPT, nearbyPrompt, normalizeNearbyObservation } from './frame-evidence-prompt.js';
 import { TARGET_BOX_SCHEMA, clickedObjectPrompt, normalizeTargetBox, selectionTargetPrompt, type SelectionPoint } from './selection-target.js';
+import { OCR_PROMPT, normalizeOcrEvidence, type OcrEvidence } from './ocr-evidence.js';
 
 const PROMPT = 'Analyze only the selected object crop. Return JSON only with exactly these fields: category, subcategory, brand_candidate, model_candidate, color, material, style_attributes, visible_text, logos_markings, distinctive_features, hardware_details, shape_silhouette, search_terms, confidence, identity_confidence. Extract only visually supported evidence. category should be broad, but subcategory must be the most specific visible product type you can support. For apparel, do not use generic labels such as Tops when a more specific visible garment type is supported. Prefer concrete subcategories such as Sweater, Jumper, Pullover, Polo, T-shirt, Shirt, Jacket, Coat, Hoodie, Dress, Trousers, Jeans, Shorts, or Cardigan. Use cut, sleeve length, neckline, collar, knit construction, closures, silhouette, and other visible structural cues to choose the specific garment type. visible_text should contain readable words/letters/numbers actually visible. logos_markings should describe visible logos, emblems, monograms, patches, labels, or symbols without guessing a brand unless supported. distinctive_features should capture unusual graphics, patterns, construction details, placements, trims, stitching, motifs, or design elements. hardware_details should capture buckles, clasps, buttons, zippers, fasteners, crowns, bezels, soles, laces, ports, or other product-specific hardware when relevant. shape_silhouette should capture recognizable shape, cut, proportions, collar, neckline, sleeve form, knit structure, case shape, frame, toe shape, bag profile, or other structural cues. confidence is confidence that the description is commercially searchable. identity_confidence is confidence that the proposed brand/model identity is visually supported. If brand/model evidence is weak, use null and keep identity_confidence low. Do not infer a famous brand from style alone. search_terms should be 1-4 concise purchase-search queries that use the strongest visible identity evidence first.';
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
@@ -41,6 +42,10 @@ export class GeminiVisionProvider implements VisionProvider {
       ? ' IMAGE 1 is the selected object with context. IMAGE 2 is a magnified detail around the user click. Use IMAGE 2 to read small text, logos, markings, stitching, hardware, and distinctive details, but keep IMAGE 1 authoritative for the object identity and overall shape.'
       : '';
     return normalizeObjectDescription(await this.generate(PROMPT + detailPrompt + FIELD_CONFIDENCE_PROMPT + clickedObjectPrompt(point), detailDataUrl ? [dataUrl, detailDataUrl] : [dataUrl]));
+  }
+
+  async readTextEvidence(dataUrl: string): Promise<OcrEvidence> {
+    return normalizeOcrEvidence(await this.generate(OCR_PROMPT, [dataUrl]));
   }
 
   async locateSelection(dataUrl: string, focusDataUrl: string, point: SelectionPoint) {
