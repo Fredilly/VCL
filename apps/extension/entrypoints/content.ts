@@ -15,6 +15,9 @@ type ObjectDescription = {
   material: string;
   style_attributes: string[];
   visible_text?: string[];
+  logos_markings?: string[];
+  distinctive_features?: string[];
+  shape_silhouette?: string[];
   search_terms: string[];
   confidence: number;
   identity_confidence: number;
@@ -284,7 +287,20 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     const readable = (analysis.visible_text ?? []).map((value) => value.trim()).filter(Boolean);
     const nameLike = readable.find((value) => /^[A-Z][A-Z\-']{2,}$/.test(value));
     const numberLike = readable.find((value) => /^\d{1,3}$/.test(value));
-    const conciseIdentity = [analysis.brand_candidate, analysis.model_candidate, nameLike, numberLike, analysis.subcategory || analysis.category, analysis.color]
+    const strongestRetrievalEvidence = [
+      ...(analysis.logos_markings ?? []),
+      ...(analysis.distinctive_features ?? []),
+      ...(analysis.shape_silhouette ?? []),
+    ].map((value) => value.trim()).filter(Boolean);
+    const conciseIdentity = [
+      analysis.brand_candidate,
+      analysis.model_candidate,
+      nameLike,
+      numberLike,
+      analysis.subcategory || analysis.category,
+      analysis.color,
+      strongestRetrievalEvidence[0],
+    ]
       .filter(Boolean)
       .filter((value, index, arr) => arr.findIndex((other) => String(other).toLowerCase() === String(value).toLowerCase()) === index)
       .join(' ');
@@ -293,7 +309,11 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     panel.appendChild(summary);
 
     const attrs = document.createElement('div');
-    attrs.textContent = [analysis.color, analysis.material, ...analysis.style_attributes].filter(Boolean).join(' · ');
+    attrs.textContent = [
+      analysis.material,
+      ...analysis.style_attributes,
+      ...strongestRetrievalEvidence.slice(1, 3),
+    ].filter(Boolean).join(' · ');
     Object.assign(attrs.style, { opacity: '0.85', lineHeight: '1.45', marginBottom: '8px' });
     panel.appendChild(attrs);
 

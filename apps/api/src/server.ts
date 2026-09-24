@@ -4,6 +4,7 @@ import { CloudflareVisionProvider, type CloudflareVisionBinding } from './cloudf
 import { OpenRouterVisionProvider, DEFAULT_OPENROUTER_MODEL } from './openrouter-vision.js';
 import { analyzeWithNearbyFrames, mergeFrameEvidence, parseEvidenceFrames } from './multi-frame-evidence.js';
 import { normalizeObjectDescription } from './types.js';
+import { mergeOcrEvidence, shouldRunOcrRecovery } from './ocr-evidence.js';
 import { parseSelectionPoint, TargetLocalizationError, type SelectionPoint } from './selection-target.js';
 import { CommerceNoResultsError, buildProductQueryVariants, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
 import { highConfidenceMetadataContradiction, verifyCandidate, rankVerified } from './candidate-verification.js';
@@ -615,6 +616,26 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         recordFailureState('vision', String(reason), true);
         return jsonResponse({ error: 'Object analysis is temporarily unavailable', reason, failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: true, vision_routing: visionRouting }, 502);
       }
+
+      const textRecovery = { attempted: false, applied: false };
+      if (shouldRunOcrRecovery(description)) {
+        textRecovery.attempted = true;
+        const recoveryImage = focusDataUrl || dataUrl;
+        for (const { provider } of visionProviders) {
+          if (!(provider instanceof OpenRouterVisionProvider || provider instanceof GeminiVisionProvider)) continue;
+          try {
+            const evidence = await provider.readTextEvidence(recoveryImage);
+            const enriched = mergeOcrEvidence(description, evidence);
+            textRecovery.applied = enriched.visible_text.length > description.visible_text.length
+              || enriched.logos_markings.length > description.logos_markings.length;
+            description = enriched;
+            if (textRecovery.applied) break;
+          } catch (error) {
+            logSafeError(error);
+          }
+        }
+      }
+
       const analyzed = timestamp === undefined ? description : mergeFrameEvidence(description, timestamp as number, []);
       return jsonResponse({ ...(analyzed as object), vision_routing: visionRouting });
     }
