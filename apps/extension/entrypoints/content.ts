@@ -292,28 +292,41 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       ...(analysis.distinctive_features ?? []),
       ...(analysis.shape_silhouette ?? []),
     ].map((value) => value.trim()).filter(Boolean);
-    const conciseIdentity = [
+
+    const titleParts = [
       analysis.brand_candidate,
       analysis.model_candidate,
       nameLike,
       numberLike,
       analysis.subcategory || analysis.category,
       analysis.color,
-      strongestRetrievalEvidence[0],
     ]
       .filter(Boolean)
-      .filter((value, index, arr) => arr.findIndex((other) => String(other).toLowerCase() === String(value).toLowerCase()) === index)
-      .join(' ');
-    summary.textContent = conciseIdentity || analysis.category;
+      .filter((value, index, arr) => arr.findIndex((other) => String(other).toLowerCase() === String(value).toLowerCase()) === index);
+
+    summary.textContent = titleParts.join(' ') || analysis.category;
     Object.assign(summary.style, { fontWeight: '700', marginBottom: '6px', paddingRight: '34px', fontSize: '14px' });
     panel.appendChild(summary);
 
     const attrs = document.createElement('div');
-    attrs.textContent = [
-      analysis.material,
+    const titleText = titleParts.map(String).join(' ').toLowerCase();
+    const detailCandidates = [
+      ...strongestRetrievalEvidence,
       ...analysis.style_attributes,
-      ...strongestRetrievalEvidence.slice(1, 3),
-    ].filter(Boolean).join(' · ');
+      analysis.material,
+    ]
+      .map((value) => value?.trim())
+      .filter((value): value is string => Boolean(value))
+      .filter((value) => !titleText.includes(value.toLowerCase()))
+      .filter((value, index, arr) => arr.findIndex((other) => other.toLowerCase() === value.toLowerCase()) === index);
+
+    const lowSignalMaterials = new Set(['polyester', 'cotton', 'synthetic']);
+    const detailParts = [
+      ...detailCandidates.filter((value) => !lowSignalMaterials.has(value.toLowerCase())),
+      ...detailCandidates.filter((value) => lowSignalMaterials.has(value.toLowerCase())),
+    ].slice(0, 2);
+
+    attrs.textContent = detailParts.join(' · ');
     Object.assign(attrs.style, { opacity: '0.85', lineHeight: '1.45', marginBottom: '8px' });
     panel.appendChild(attrs);
 
