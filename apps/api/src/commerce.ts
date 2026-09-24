@@ -374,17 +374,18 @@ export function buildProductQueryVariants(description: ObjectDescription, contex
   const base = buildProductQuery(description, context);
   const type = primaryType(description, context);
   const readableText = description.visible_text.map((value) => value.trim()).filter(Boolean).slice(0, 2);
-  const visibleTextConfidence = description.evidence_confidence?.visible_text ?? (readableText.length ? 0.8 : 0);
-  const groundedReadableText = visibleTextConfidence >= 0.8 ? readableText : [];
-  const identityText = groundedReadableText.filter((text) => ![description.brand_candidate, description.model_candidate].some(
+  const groundedReadableText = (description.evidence_confidence?.visible_text ?? 0) >= 0.8 ? readableText : [];
+  const groundedIdentityText = groundedReadableText.filter((text) => ![description.brand_candidate, description.model_candidate].some(
     (identity) => identity && normalized(identity) === normalized(text),
   ));
 
-  const textFirst = visibleTextFirst && identityText.length
+  const textFirst = visibleTextFirst && readableText.length
     ? uniqueNonEmpty([
         description.brand_candidate,
         description.model_candidate,
-        ...identityText,
+        ...readableText.filter((text) => ![description.brand_candidate, description.model_candidate].some(
+          (identity) => identity && normalized(identity) === normalized(text),
+        )),
         type,
         description.color,
       ]).join(' ')
@@ -394,15 +395,16 @@ export function buildProductQueryVariants(description: ObjectDescription, contex
   const identity = uniqueNonEmpty([
     description.brand_candidate,
     description.model_candidate,
-    ...identityText,
-    type,
+    ...groundedIdentityText,
+    type || description.subcategory,
   ]).join(' ');
   if (identity) variants.push(identity);
 
-  // Strong readable identity evidence must survive broadening. If we can read
-  // markings such as a surname + jersey number, do not fall back to a generic
-  // type/color query that can retrieve visually similar but wrong identities.
-  if (!identityText.length) {
+  // Strong, explicitly grounded readable identity evidence must survive
+  // broadening. If we can reliably read markings such as a surname + jersey
+  // number, do not fall back to a generic type/color query that can retrieve
+  // visually similar but wrong identities.
+  if (!groundedIdentityText.length) {
     const visual = uniqueNonEmpty([
       type || description.subcategory,
       description.color,
