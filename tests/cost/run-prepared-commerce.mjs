@@ -72,6 +72,7 @@ for (const row of rows) {
       context: row.context,
       source_image: row.source_image,
       ...(process.env.VCL_VISIBLE_TEXT_QUERY_V2 === '1' ? { benchmark_visible_text_query_v2: true } : {}),
+      ...(process.env.VCL_MARKING_VERIFY_V1 === '1' ? { benchmark_marking_verify_v1: true } : {}),
     });
 
     const commerceLatency = Date.now() - started;
