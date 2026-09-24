@@ -239,22 +239,6 @@ function primaryType(description: ObjectDescription, context?: ProductContext): 
   return typeFamilies(description.subcategory).has(type) ? description.subcategory : type;
 }
 
-function purchaseContextHints(description: ObjectDescription, context?: ProductContext): string[] {
-  if (!context?.title) return [];
-  const productText = normalized([description.category, description.subcategory, ...description.style_attributes].join(' '));
-  const apparelLike = /\b(apparel|sportswear|hoodie|shirt|jersey|sweater|jacket|top|shorts|pants|trousers)\b/.test(productText);
-  if (!apparelLike) return [];
-
-  const title = normalized(context.title);
-  if (/\b(nba|basketball)\b/.test(title)) return ['basketball'];
-  if (/\b(nfl|american football)\b/.test(title)) return ['football'];
-  if (/\b(mlb|baseball)\b/.test(title)) return ['baseball'];
-  if (/\b(nhl|hockey)\b/.test(title)) return ['hockey'];
-  if (/\b(tennis)\b/.test(title)) return ['tennis'];
-  if (/\b(soccer|premier league|champions league)\b/.test(title)) return ['soccer'];
-  return [];
-}
-
 function uniqueNonEmpty(parts: Array<string | null | undefined>): string[] {
   return [...new Set(parts.filter((value): value is string => Boolean(value && value.trim())).map((value) => value.trim()))];
 }
@@ -343,7 +327,6 @@ export function verifyProductCandidate(description: ObjectDescription, candidate
 export function buildProductQuery(description: ObjectDescription, context?: ProductContext): ProductQuery {
   const type = primaryType(description, context);
   const evidence = identityEvidence(description);
-  const contextHints = purchaseContextHints(description, context);
   const strongestEvidence = uniqueNonEmpty([
     ...description.visible_text,
     ...description.logos_markings,
@@ -357,7 +340,6 @@ export function buildProductQuery(description: ObjectDescription, context?: Prod
         description.brand_candidate,
         description.model_candidate,
         type,
-        ...contextHints,
         description.color,
         description.material,
         ...strongestEvidence,
@@ -391,7 +373,6 @@ export function buildProductQuery(description: ObjectDescription, context?: Prod
 export function buildProductQueryVariants(description: ObjectDescription, context?: ProductContext, visibleTextFirst = false): ProductQuery[] {
   const base = buildProductQuery(description, context);
   const type = primaryType(description, context);
-  const contextHints = purchaseContextHints(description, context);
   const readableText = description.visible_text.map((value) => value.trim()).filter(Boolean).slice(0, 2);
   const groundedReadableText = (description.evidence_confidence?.visible_text ?? 0) >= 0.8 ? readableText : [];
   const groundedIdentityText = groundedReadableText.filter((text) => ![description.brand_candidate, description.model_candidate].some(
@@ -416,7 +397,6 @@ export function buildProductQueryVariants(description: ObjectDescription, contex
     description.model_candidate,
     ...groundedIdentityText,
     type || description.subcategory,
-    ...contextHints,
   ]).join(' ');
   if (identity) variants.push(identity);
 
@@ -427,7 +407,6 @@ export function buildProductQueryVariants(description: ObjectDescription, contex
   if (!groundedIdentityText.length) {
     const visual = uniqueNonEmpty([
       type || description.subcategory,
-      ...contextHints,
       description.color,
     ]).join(' ');
     if (visual) variants.push(visual);
