@@ -10,12 +10,12 @@ const expected = {
   confidence: 0.95, identity_confidence: 0.92,
 };
 
-test('uses OpenRouter Gemini Flash Lite with image input and reports cost', async (t) => {
+test('uses OpenRouter Gemini Flash with image input and reports cost', async (t) => {
   let request;
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     request = { url: String(url), options };
     return Response.json({
-      model: 'google/gemini-2.5-flash-lite',
+      model: 'google/gemini-2.5-flash',
       choices: [{ message: { content: JSON.stringify(expected) } }],
       usage: { prompt_tokens: 1200, completion_tokens: 200, total_tokens: 1400, cost: 0.0002 },
     });
@@ -26,7 +26,7 @@ test('uses OpenRouter Gemini Flash Lite with image input and reports cost', asyn
   assert.equal(request.url, 'https://openrouter.ai/api/v1/chat/completions');
   assert.equal(request.options.headers.Authorization, 'Bearer test-key');
   const body = JSON.parse(request.options.body);
-  assert.equal(body.model, 'google/gemini-2.5-flash-lite');
+  assert.equal(body.model, 'google/gemini-2.5-flash');
   assert.deepEqual(body.provider, { data_collection: 'deny', zdr: true });
   assert.equal(body.messages[0].content[1].image_url.url, image);
   assert.equal(body.messages[0].content[2].image_url.url, detail);
