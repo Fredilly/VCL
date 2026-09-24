@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "suite": "alpha-v1-regression",
+  "frozen_at": "2026-09-24",
+  "baseline": {
+    "branch": "baseline/alpha-v1",
+    "commit": "aef9f97edc97a40ada0d66ae7417f7dccf680018"
+  },
+  "rules": [
+    "Do not edit expected identity/evidence to make a regression pass.",
+    "Vision, OCR, query construction, retrieval, verification, ranking, and explanation changes must preserve or improve this contract.",
+    "false EXACT must remain 0.",
+    "unsupported LIKELY must remain 0.",
+    "High-confidence identity evidence must not be dropped from retrieval intent.",
+    "The user-facing explanation must not disagree with retrieval intent.",
+    "Provider-blocked runs are tracked separately from product regressions."
+  ],
+  "cases": [
+    {
+      "id": "alpha-v1-001-durant-rockets-7",
+      "name": "Durant #7 red Rockets jersey",
+      "category": "apparel",
+      "expected_identity": "Houston Rockets basketball jersey",
+      "required_evidence": ["Durant", "7", "Rockets", "red"],
+      "forbidden_identity": ["unrelated team", "unrelated player"],
+      "replay": { "status": "capture_required" }
+    },
+    {
+      "id": "alpha-v1-002-lakers-12",
+      "name": "Lakers #12 white jersey",
+      "category": "apparel",
+      "expected_identity": "Los Angeles Lakers basketball jersey",
+      "required_evidence": ["Lakers", "12", "white"],
+      "forbidden_identity": ["unrelated team"],
+      "replay": { "status": "capture_required" }
+    },
+    {
+      "id": "alpha-v1-003-nike-sleeveless-hoodie",
+      "name": "Nike sleeveless hoodie / gradient chest stripe",
+      "category": "apparel",
+      "expected_identity": "Nike sleeveless hoodie",
+      "required_evidence": ["Nike", "sleeveless", "hoodie", "gradient chest stripe"],
+      "forbidden_identity": ["long-sleeve hoodie", "unrelated brand"],
+      "replay": { "status": "capture_required" }
+    },
+    {
+      "id": "alpha-v1-004-minnesota-grey-duck-shirt",
+      "name": "Minnesota Grey Duck text shirt",
+      "category": "apparel",
+      "expected_identity": "Minnesota Grey Duck text shirt",
+      "required_evidence": ["Minnesota", "Grey Duck", "shirt"],
+      "forbidden_identity": ["generic shirt with visible text omitted"],
+      "replay": { "status": "capture_required" }
+    },
+    {
+      "id": "alpha-v1-005-fragrance",
+      "name": "Perfume / fragrance",
+      "category": "fragrance",
+      "expected_identity": "Hugo Boss Boss Bottled fragrance",
+      "required_evidence": ["BOSS", "fragrance"],
+      "forbidden_identity": ["unrelated fragrance brand"],
+      "replay": {
+        "status": "ready",
+        "source": "https://youtu.be/jndGRB5Il3k?t=7",
+        "target_object": "perfume bottle",
+        "click_point": "center/body of perfume bottle",
+        "source_case": "golden-003-hugo-boss-bottled"
+      }
+    },
+    {
+      "id": "alpha-v1-006-funko",
+      "name": "Funko figure",
+      "category": "collectible",
+      "expected_identity": "Funko figure",
+      "required_evidence": ["Funko", "collectible figure"],
+      "forbidden_identity": ["unrelated toy type"],
+      "replay": { "status": "capture_required" }
+    },
+    {
+      "id": "alpha-v1-007-sneaker",
+      "name": "Sneaker",
+      "category": "shoes",
+      "expected_identity": "Adidas Samba OG sneaker",
+      "required_evidence": ["Adidas", "Samba OG", "sneaker"],
+      "forbidden_identity": ["unrelated shoe model"],
+      "replay": {
+        "status": "ready",
+        "source": "https://www.youtube.com/watch?v=NM_mH3o8K9I",
+        "timestamp_s": 30,
+        "selection": { "x": 0.5, "y": 0.5 },
+        "source_case": "s5-07"
+      }
+    }
+  ]
+}
