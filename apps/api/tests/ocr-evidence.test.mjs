@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mergeOcrEvidence, normalizeOcrEvidence, shouldRunOcrRecovery } from '../dist/src/ocr-evidence.js';
+import { mergeOcrEvidence, normalizeOcrEvidence, ocrRecoveryEnabled, shouldRunOcrRecovery } from '../dist/src/ocr-evidence.js';
 
 const base = {
   category: 'Sportswear',
@@ -20,6 +20,13 @@ const base = {
   identity_confidence: 0.2,
   evidence_confidence: { visible_text: 0 },
 };
+
+test('OCR recovery is off by default and only enabled explicitly or for benchmark', () => {
+  assert.equal(ocrRecoveryEnabled(undefined, undefined), false);
+  assert.equal(ocrRecoveryEnabled('false', false), false);
+  assert.equal(ocrRecoveryEnabled('true', false), true);
+  assert.equal(ocrRecoveryEnabled(undefined, true), true);
+});
 
 test('runs text recovery only for weak-identity text-sensitive products', () => {
   assert.equal(shouldRunOcrRecovery(base), true);
