@@ -63,6 +63,7 @@ export interface Env {
   ALPHA_FEEDBACK_ADMIN_TOKEN?: string;
   ALPHA_CREATOR_CONTENT_MAP?: string;
   VERIFIED_PRODUCT_MAPPINGS_JSON?: string;
+  VERIFIED_PRODUCT_TEST_MODE?: string;
   ALPHA_INSTALL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
   ALPHA_GLOBAL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
   AI?: WorkersAiBinding & CloudflareVisionBinding;
@@ -704,7 +705,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       const contentRef = context?.content_ref ?? null;
       const verifiedMapping = lookupVerifiedProductMapping({
         rawRegistry: env.VERIFIED_PRODUCT_MAPPINGS_JSON,
-        allowTestFixtures: benchmarkMode,
+        allowTestFixtures: benchmarkMode || env.VERIFIED_PRODUCT_TEST_MODE === 'true',
         platform: context?.platform ?? null,
         contentRef,
         description,
