@@ -24,10 +24,10 @@ jobs:
       VCL_API_ORIGIN: https://api.vcl.article6.org
 
     steps:
-      - name: Checkout experiment branch
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          ref: experiment/description-richness-ab
+          ref: main
 
       - name: Enable pnpm
         run: corepack enable
