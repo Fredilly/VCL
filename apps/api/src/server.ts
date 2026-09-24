@@ -4,7 +4,7 @@ import { CloudflareVisionProvider, type CloudflareVisionBinding } from './cloudf
 import { OpenRouterVisionProvider, DEFAULT_OPENROUTER_MODEL } from './openrouter-vision.js';
 import { analyzeWithNearbyFrames, mergeFrameEvidence, parseEvidenceFrames } from './multi-frame-evidence.js';
 import { normalizeObjectDescription } from './types.js';
-import { mergeOcrEvidence, shouldRunOcrRecovery } from './ocr-evidence.js';
+import { mergeOcrEvidence, ocrRecoveryEnabled, shouldRunOcrRecovery } from './ocr-evidence.js';
 import { parseSelectionPoint, TargetLocalizationError, type SelectionPoint } from './selection-target.js';
 import { CommerceNoResultsError, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
 import { ScoopResolver } from './scoop-resolver.js';
@@ -57,6 +57,7 @@ export interface Env {
   JEV_MODE?: string;
   BENCHMARK_MODE?: string;
   VISIBLE_TEXT_QUERY_V2?: string;
+  OCR_RECOVERY_ENABLED?: string;
   AI_GATEWAY_API_KEY?: string;
   ALPHA_ENABLED?: string;
   ALPHA_ATTRIBUTION_SECRET?: string;
@@ -619,7 +620,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
 
       const textRecovery = { attempted: false, applied: false };
-      if (shouldRunOcrRecovery(description)) {
+      if (ocrRecoveryEnabled(env.OCR_RECOVERY_ENABLED, record.benchmark_ocr_recovery) && shouldRunOcrRecovery(description)) {
         textRecovery.attempted = true;
         const recoveryImage = focusDataUrl || dataUrl;
         for (const { provider } of visionProviders) {
