@@ -4,10 +4,9 @@ import { CloudflareVisionProvider, type CloudflareVisionBinding } from './cloudf
 import { OpenRouterVisionProvider, DEFAULT_OPENROUTER_MODEL } from './openrouter-vision.js';
 import { analyzeWithNearbyFrames, mergeFrameEvidence, parseEvidenceFrames } from './multi-frame-evidence.js';
 import { normalizeObjectDescription } from './types.js';
-import { mergeOcrEvidence, ocrRecoveryEnabled, shouldRunOcrRecovery } from './ocr-evidence.js';
+import { mergeOcrEvidence, shouldRunOcrRecovery } from './ocr-evidence.js';
 import { parseSelectionPoint, TargetLocalizationError, type SelectionPoint } from './selection-target.js';
-import { CommerceNoResultsError, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
-import { ScoopResolver } from './scoop-resolver.js';
+import { CommerceNoResultsError, buildProductQueryVariants, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
 import { highConfidenceMetadataContradiction, verifyCandidate, rankVerified } from './candidate-verification.js';
 import { canonical } from './verification-evidence.js';
 import { candidateKey, compareCandidateImages, parseSourceImage, imageRequestBudget } from './candidate-images.js';
@@ -57,7 +56,6 @@ export interface Env {
   JEV_MODE?: string;
   BENCHMARK_MODE?: string;
   VISIBLE_TEXT_QUERY_V2?: string;
-  OCR_RECOVERY_ENABLED?: string;
   AI_GATEWAY_API_KEY?: string;
   ALPHA_ENABLED?: string;
   ALPHA_ATTRIBUTION_SECRET?: string;
@@ -620,7 +618,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
 
       const textRecovery = { attempted: false, applied: false };
-      if (ocrRecoveryEnabled(env.OCR_RECOVERY_ENABLED, record.benchmark_ocr_recovery) && shouldRunOcrRecovery(description)) {
+      if (shouldRunOcrRecovery(description)) {
         textRecovery.attempted = true;
         const recoveryImage = focusDataUrl || dataUrl;
         for (const { provider } of visionProviders) {
@@ -717,47 +715,40 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           })
         : null;
       const visibleTextQueryV2 = env.VISIBLE_TEXT_QUERY_V2 === 'true' || record.benchmark_visible_text_query_v2 === true;
+      const queries = buildProductQueryVariants(description, context, visibleTextQueryV2).map((query) => affiliateClickRef
+        ? { ...query, affiliate_reference_id: affiliateClickRef }
+        : query);
+      let routing: Parameters<typeof resolveProducts>[7];
+      const jevMode = env.JEV_MODE === 'off' || env.JEV_MODE === 'router' || env.JEV_MODE === 'fabric'
+        ? env.JEV_MODE
+        : env.JEV_DECISION_ROUTER === 'true' ? 'router' : 'off';
+      if (jevMode !== 'off') {
+        const jevBinding = resolveJevBinding(env);
+        if (jevBinding) {
+          const input = routerInput(description, Boolean(record.multi_frame_available), providers.length);
+          const routed = jevMode === 'fabric'
+            ? await routeWithJevFabric(input, jevBinding)
+            : await routeWithJev(input, jevBinding);
+          const broadSearchOnMiss = jevMode === 'fabric'
+            && 'broad_search_on_miss' in routed.telemetry
+            && routed.telemetry.broad_search_on_miss === true;
+          routing = {
+            ...routed.decision,
+            telemetry: routed.telemetry,
+            ...(broadSearchOnMiss ? { broad_search_on_miss: true } : {}),
+          };
+        }
+      }
+      const routingActive = Boolean(routing && !routing.telemetry.failed);
+      const routedProviders = routingActive && routing?.commerce_action === 'SKIP' ? [] : providers;
+      const routedQueries = !routingActive
+        ? queries
+        : routing?.commerce_action === 'SKIP'
+          ? queries.slice(0, 1)
+          : queries;
       const started = Date.now();
       const markingVerifyV1 = record.benchmark_marking_verify_v1 === true;
-      const scoopResolver = new ScoopResolver(async ({ evidence, intent }) => {
-        const queries = intent.queries.map((query) => affiliateClickRef
-          ? { ...query, affiliate_reference_id: affiliateClickRef }
-          : query);
-        let routing: Parameters<typeof resolveProducts>[7];
-        const jevMode = env.JEV_MODE === 'off' || env.JEV_MODE === 'router' || env.JEV_MODE === 'fabric'
-          ? env.JEV_MODE
-          : env.JEV_DECISION_ROUTER === 'true' ? 'router' : 'off';
-        if (jevMode !== 'off') {
-          const jevBinding = resolveJevBinding(env);
-          if (jevBinding) {
-            const input = routerInput(evidence.object, Boolean(record.multi_frame_available), providers.length);
-            const routed = jevMode === 'fabric'
-              ? await routeWithJevFabric(input, jevBinding)
-              : await routeWithJev(input, jevBinding);
-            const broadSearchOnMiss = jevMode === 'fabric'
-              && 'broad_search_on_miss' in routed.telemetry
-              && routed.telemetry.broad_search_on_miss === true;
-            routing = {
-              ...routed.decision,
-              telemetry: routed.telemetry,
-              ...(broadSearchOnMiss ? { broad_search_on_miss: true } : {}),
-            };
-          }
-        }
-        const routingActive = Boolean(routing && !routing.telemetry.failed);
-        const routedProviders = routingActive && routing?.commerce_action === 'SKIP' ? [] : providers;
-        const routedQueries = !routingActive
-          ? queries
-          : routing?.commerce_action === 'SKIP'
-            ? queries.slice(0, 1)
-            : queries;
-        return resolveProducts(routedProviders, routedQueries, evidence.object, env, evidence.context, sourceImage, compareCandidateImages, routing, markingVerifyV1);
-      });
-      const scoop = await scoopResolver.resolve({
-        evidence: { object: description, ...(context ? { context } : {}) },
-        visible_text_first: visibleTextQueryV2,
-      });
-      const resolved = scoop.resolution;
+      const resolved = await resolveProducts(routedProviders, routedQueries, description, env, context, sourceImage, compareCandidateImages, routing, markingVerifyV1);
       const feedbackEvidenceKey = evidenceFingerprint(description);
       let feedbackLearning = { penalized: 0, suppressed: 0 };
       if (env.FEEDBACK_LEDGER && resolved.products.length) {
@@ -825,7 +816,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           return { ...product, attribution_token: attribution.attribution_token, click_ref: attribution.click_ref };
         }));
       }
-      return jsonResponse({ ...resolved, products: attributedProducts, intent: { summary: scoop.intent.summary }, feedback_learning: feedbackLearning, latency_ms: total_ms, timing: { ...resolved.timing, total_ms },
+      return jsonResponse({ ...resolved, products: attributedProducts, feedback_learning: feedbackLearning, latency_ms: total_ms, timing: { ...resolved.timing, total_ms },
         ...(resolved.state === 'TEMPORARILY_UNAVAILABLE' ? { failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: true } :
           resolved.state === 'NO_RESULTS' ? { failure_state: 'NO_RESULTS', retryable: false } : {}) });
     }
