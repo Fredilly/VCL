@@ -18,7 +18,7 @@
     "EBAY_ENVIRONMENT": "production",
     "JEV_DECISION_ROUTER": "true",
     "VERIFIED_PRODUCT_TEST_MODE": "true",
-    "VERIFIED_PRODUCT_MAPPINGS_JSON": "[{\"platform\":\"youtube\",\"content_ref\":\"BR5fQYeqlJo\",\"scope\":\"entire_video\",\"object_type\":\"shirt\",\"brand\":\"Mizzen+Main\",\"product_id\":\"1WS-1916\",\"title\":\"Leeward Dress Shirt - Steel Blue Tonal Texture\",\"destination\":\"https://www.mizzenandmain.com/products/steel-blue-tonal-texture-leeward-dress-shirt\",\"provenance\":\"test_fixture\"}]"
+    "VERIFIED_PRODUCT_MAPPINGS_JSON": "[{\"platform\":\"youtube\",\"content_ref\":\"youtube:BR5fQYeqlJo\",\"scope\":\"entire_video\",\"object_type\":\"shirt\",\"brand\":\"Mizzen+Main\",\"product_id\":\"1WS-1916\",\"title\":\"Leeward Dress Shirt - Steel Blue Tonal Texture\",\"destination\":\"https://www.mizzenandmain.com/products/steel-blue-tonal-texture-leeward-dress-shirt\",\"provenance\":\"test_fixture\"}]"
   },
   "ai": {
     "binding": "AI"
