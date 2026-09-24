@@ -31,7 +31,10 @@ type ProductCandidate = {
   destination: string | null;
   price: string | null;
   currency: string | null;
-  result_class: 'LIKELY' | 'SIMILAR';
+  result_class: 'EXACT' | 'LIKELY' | 'SIMILAR';
+  brand?: string | null;
+  model?: string | null;
+  provenance?: string;
   provider?: string;
   attribution_token?: string;
   click_ref?: string;
@@ -44,6 +47,7 @@ type CommerceResponse = {
   state?: 'RESULTS' | 'NO_RESULTS' | 'TEMPORARILY_UNAVAILABLE';
   providers_used?: string[];
   timing?: { provider_retrieval_ms?: number; candidate_verification_ms?: number; total_ms?: number };
+  verified_mapping?: { hit: boolean; provenance?: string; product_id?: string };
 };
 
 function parseObjectDescription(value: unknown): ObjectDescription {
@@ -351,6 +355,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
 
     // A confident primary guess must not prevent the user from checking another view.
     // Confidence still comes from grounded evidence, never from action availability.
+    let improveControls: HTMLElement[] = [];
     if (!supplied) {
       const improve = button('Improve with nearby frames');
       const note = document.createElement('div');
@@ -358,6 +363,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       Object.assign(note.style, { marginTop: '10px', lineHeight: '1.35', opacity: '0.78' });
       Object.assign(improve.style, { marginTop: '8px' });
       panel.append(note, improve);
+      improveControls = [note, improve];
       improve.addEventListener('click', async () => {
         improve.disabled = true;
         const limitation = nearbyCaptureLimitation(result);
@@ -409,6 +415,26 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     if (controller.signal.aborted) return;
     if (commerceRaw && typeof commerceRaw === 'object' && typeof commerceRaw.error === 'string') throw new Error(commerceRaw.error);
     const commerce = parseCommerceResponse(commerceRaw);
+    const verifiedProduct = commerce.verified_mapping?.hit
+      ? commerce.products.find((product) => product.result_class === 'EXACT') ?? commerce.products[0]
+      : null;
+    if (verifiedProduct) {
+      summary.textContent = verifiedProduct.title;
+      const provenance = commerce.verified_mapping?.provenance ?? verifiedProduct.provenance ?? verifiedProduct.provider ?? 'verified_mapping';
+      const isTestFixture = provenance === 'test_fixture';
+      const verifiedMeta = [
+        verifiedProduct.brand,
+        verifiedProduct.model ? `SKU ${verifiedProduct.model}` : null,
+      ].filter(Boolean).join(' · ');
+      attrs.textContent = verifiedMeta || (isTestFixture ? 'Known-SKU test mapping' : 'Verified product mapping');
+      confidence.textContent = isTestFixture
+        ? 'Known-SKU test mapping'
+        : 'Product identity verified from first-party mapping';
+      identityConfidence.textContent = isTestFixture
+        ? 'Identity source: test fixture'
+        : 'Identity: Exact · verified mapping';
+      for (const control of improveControls) control.remove();
+    }
     if (__VCL_DEBUG_PROVENANCE__) {
       const timing = document.createElement('div');
       const total = Object.values(stageTiming).reduce<number>((sum, value) => sum + (value ?? 0), 0) + (commerce.timing?.total_ms ?? commerce.latency_ms);
