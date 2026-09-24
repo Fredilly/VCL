@@ -80,6 +80,6 @@ test('unrelated video misses', () => {
 });
 
 test('malformed records are ignored', () => {
-  assert.deepEqual(mod.parseVerifiedProductMappings('[{"platform":"youtube"}]'), []);
-  assert.deepEqual(mod.parseVerifiedProductMappings('not-json'), []);
+  assert.equal(mod.parseVerifiedProductMappings('[{"platform":"youtube"}]').length, 0);
+  assert.equal(mod.parseVerifiedProductMappings('not-json').length, 0);
 });
