@@ -637,7 +637,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
 
       const analyzed = timestamp === undefined ? description : mergeFrameEvidence(description, timestamp as number, []);
-      return jsonResponse({ ...(analyzed as object), vision_routing: visionRouting, text_recovery: textRecovery });
+      return jsonResponse({ ...(analyzed as object), vision_routing: visionRouting });
     }
     if (path === '/commerce-click') {
       if (!env.ALPHA_ATTRIBUTION_SECRET) return jsonResponse({ error: 'Commerce attribution is not configured' }, 503);
