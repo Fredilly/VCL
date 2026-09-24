@@ -27,6 +27,19 @@ function normalize(value: string | null | undefined): string {
   return (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+function normalizeContentRef(platform: string, value: string): string {
+  const ref = value.trim();
+  if (normalize(platform) !== 'youtube') return ref;
+  const prefixed = ref.match(/^youtube:(.+)$/i);
+  if (prefixed?.[1]) return `youtube:${prefixed[1]}`;
+  try {
+    const url = new URL(ref);
+    const id = url.searchParams.get('v');
+    if (id) return `youtube:${id}`;
+  } catch {}
+  return `youtube:${ref}`;
+}
+
 function objectText(description: ObjectDescription): string {
   return normalize([
     description.category,
@@ -78,11 +91,11 @@ export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProd
 export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProductMapping | null {
   if (!input.platform || !input.contentRef) return null;
   const platform = normalize(input.platform);
-  const contentRef = input.contentRef.trim();
+  const contentRef = normalizeContentRef(input.platform, input.contentRef);
   return parseVerifiedProductMappings(input.rawRegistry).find((mapping) => {
     if (mapping.provenance === 'test_fixture' && !input.allowTestFixtures) return false;
     return normalize(mapping.platform) === platform
-      && mapping.content_ref === contentRef
+      && normalizeContentRef(mapping.platform, mapping.content_ref) === contentRef
       && objectCompatible(mapping.object_type, input.description);
   }) ?? null;
 }
