@@ -1,0 +1,110 @@
+import type { ProductCandidate } from './commerce.js';
+import type { ObjectDescription } from './types.js';
+
+export type VerifiedProductProvenance = 'creator_verified' | 'brand_verified' | 'test_fixture';
+
+export type VerifiedProductMapping = {
+  platform: string;
+  content_ref: string;
+  scope: 'entire_video';
+  object_type: string;
+  brand: string;
+  product_id: string;
+  title: string;
+  destination: string;
+  provenance: VerifiedProductProvenance;
+};
+
+type LookupInput = {
+  rawRegistry?: string;
+  allowTestFixtures: boolean;
+  platform: string | null;
+  contentRef: string | null;
+  description: ObjectDescription;
+};
+
+function normalize(value: string | null | undefined): string {
+  return (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function objectText(description: ObjectDescription): string {
+  return normalize([
+    description.category,
+    description.subcategory,
+    ...description.style_attributes,
+    ...description.distinctive_features,
+    ...description.shape_silhouette,
+    ...description.search_terms,
+  ].join(' '));
+}
+
+function objectCompatible(objectType: string, description: ObjectDescription): boolean {
+  const type = normalize(objectType);
+  const text = ` ${objectText(description)} `;
+  if (!type) return false;
+  if (text.includes(` ${type} `)) return true;
+  if (type === 'shirt') return ['shirt', 'button down', 'buttondown', 'dress shirt', 'polo', 't shirt', 'tshirt', 'tee'].some((term) => text.includes(` ${term} `));
+  return false;
+}
+
+export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProductMapping[] {
+  if (!rawRegistry) return [];
+  let parsed: unknown;
+  try { parsed = JSON.parse(rawRegistry); } catch { return []; }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((value): VerifiedProductMapping[] => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    const record = value as Record<string, unknown>;
+    const provenance = record.provenance;
+    if (provenance !== 'creator_verified' && provenance !== 'brand_verified' && provenance !== 'test_fixture') return [];
+    const required = ['platform', 'content_ref', 'object_type', 'brand', 'product_id', 'title', 'destination'] as const;
+    if (required.some((key) => typeof record[key] !== 'string' || !(record[key] as string).trim())) return [];
+    if (record.scope !== 'entire_video') return [];
+    try { new URL(record.destination as string); } catch { return []; }
+    return [{
+      platform: (record.platform as string).trim(),
+      content_ref: (record.content_ref as string).trim(),
+      scope: 'entire_video',
+      object_type: (record.object_type as string).trim(),
+      brand: (record.brand as string).trim(),
+      product_id: (record.product_id as string).trim(),
+      title: (record.title as string).trim(),
+      destination: (record.destination as string).trim(),
+      provenance,
+    }];
+  });
+}
+
+export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProductMapping | null {
+  if (!input.platform || !input.contentRef) return null;
+  const platform = normalize(input.platform);
+  const contentRef = input.contentRef.trim();
+  return parseVerifiedProductMappings(input.rawRegistry).find((mapping) => {
+    if (mapping.provenance === 'test_fixture' && !input.allowTestFixtures) return false;
+    return normalize(mapping.platform) === platform
+      && mapping.content_ref === contentRef
+      && objectCompatible(mapping.object_type, input.description);
+  }) ?? null;
+}
+
+export function verifiedMappingProduct(mapping: VerifiedProductMapping): ProductCandidate {
+  return {
+    id: `verified:${mapping.platform}:${mapping.content_ref}:${mapping.product_id}`,
+    title: mapping.title,
+    brand: mapping.brand,
+    model: mapping.product_id,
+    category: mapping.object_type,
+    image_reference: null,
+    provenance: mapping.provenance,
+    destination: mapping.destination,
+    price: null,
+    currency: null,
+    result_class: 'EXACT',
+    metadata: { brand: mapping.brand, model: mapping.product_id, category: mapping.object_type },
+    verification_status: 'metadata_only',
+    verification_score: 100,
+    verification_reasons: [`${mapping.provenance} product mapping for this content`],
+    provider: mapping.provenance,
+    identity_key: `verified:${mapping.product_id}`,
+  };
+}

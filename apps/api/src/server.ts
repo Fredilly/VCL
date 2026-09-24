@@ -28,6 +28,7 @@ import { applyFeedbackPenalties, evidenceFingerprint, feedbackCandidateKey, feed
 export { FeedbackLedger } from './feedback-ledger.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
+import { lookupVerifiedProductMapping, verifiedMappingProduct } from './verified-product-mapping.js';
 export { AlphaAccessLedger } from './alpha-access.js';
 
 export interface Env {
@@ -61,6 +62,7 @@ export interface Env {
   ALPHA_ATTRIBUTION_SECRET?: string;
   ALPHA_FEEDBACK_ADMIN_TOKEN?: string;
   ALPHA_CREATOR_CONTENT_MAP?: string;
+  VERIFIED_PRODUCT_MAPPINGS_JSON?: string;
   ALPHA_INSTALL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
   ALPHA_GLOBAL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
   AI?: WorkersAiBinding & CloudflareVisionBinding;
@@ -699,12 +701,47 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       if (record.source_image != null && !sourceImage) return jsonResponse({ error: 'source_image must be a base64 JPEG, PNG, WebP or GIF crop under 2 MB' }, 400);
       const description = normalizeObjectDescription(record.description);
       const context = normalizeContext(record.context);
+      const contentRef = context?.content_ref ?? null;
+      const verifiedMapping = lookupVerifiedProductMapping({
+        rawRegistry: env.VERIFIED_PRODUCT_MAPPINGS_JSON,
+        allowTestFixtures: benchmarkMode,
+        platform: context?.platform ?? null,
+        contentRef,
+        description,
+      });
+      if (verifiedMapping) {
+        const started = Date.now();
+        const product = verifiedMappingProduct(verifiedMapping);
+        const total_ms = Date.now() - started;
+        recordAlphaScoop({
+          telemetry: alphaTelemetry,
+          state: 'RESULTS',
+          totalMs: total_ms,
+          providersUsed: [],
+          resultRows: [{ id: product.id, result_class: product.result_class }],
+          verificationUsage: undefined,
+          commerceCalls: {},
+          visionUsage: rawDescription?.provider_usage,
+        });
+        return jsonResponse({
+          query: buildProductQueryVariants(description, context)[0],
+          products: [product],
+          state: 'RESULTS',
+          providers_configured: [],
+          providers_used: [],
+          attempts: 0,
+          verification: { retrieved: 0, metadata_prefiltered: 0, light_escalations: 0, compared: 0, image_failures: 0, image_failure_reasons: {}, rejected: 0, contradictions: {} },
+          cost_usage: { commerce_calls: {}, verification_usage: { provider: 'none', model: 'none', requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0 } },
+          verified_mapping: { hit: true, provenance: verifiedMapping.provenance, product_id: verifiedMapping.product_id },
+          latency_ms: total_ms,
+          timing: { provider_retrieval_ms: 0, candidate_verification_ms: 0, candidate_image_fetch_ms: 0, candidate_model_verification_ms: 0, verification_batches: [], total_ms },
+        });
+      }
       const providers = commerceProviders(env);
       if (!providers.length) {
         recordFailureState('commerce', 'NO_CONFIGURED_PROVIDER', false);
         return jsonResponse({ error: 'Shopping sources are temporarily unavailable', reason: 'NO_CONFIGURED_PROVIDER', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: false }, 503);
       }
-      const contentRef = context?.content_ref ?? null;
       const creatorId = creatorForContent(env.ALPHA_CREATOR_CONTENT_MAP, contentRef);
       const affiliateClickRef = env.ALPHA_ATTRIBUTION_SECRET && creatorId && contentRef && alphaTelemetry
         ? await makeCommerceClickRef({
