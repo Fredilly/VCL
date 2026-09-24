@@ -60,10 +60,16 @@ export function normalizeObjectDescription(value: unknown): ObjectDescription {
   if (!Number.isFinite(confidence)) throw new Error('Vision output had invalid confidence.');
   if (!Number.isFinite(identityConfidence)) throw new Error('Vision output had invalid identity confidence.');
   const usage = providerUsage(record.provider_usage);
+  const visibleText = stringArray(record.visible_text, 8);
+  const evidenceConfidence = record.evidence_confidence && typeof record.evidence_confidence === 'object' && !Array.isArray(record.evidence_confidence)
+    ? Object.fromEntries(Object.entries(record.evidence_confidence).filter(([, value]) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1)) as Record<string, number>
+    : undefined;
+  if (evidenceConfidence && visibleText.length === 0 && (evidenceConfidence.visible_text ?? 0) > 0) {
+    evidenceConfidence.visible_text = 0;
+  }
 
   return {
-    ...(record.evidence_confidence && typeof record.evidence_confidence === 'object' && !Array.isArray(record.evidence_confidence)
-      ? { evidence_confidence: Object.fromEntries(Object.entries(record.evidence_confidence).filter(([, value]) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1)) as Record<string, number> } : {}),
+    ...(evidenceConfidence ? { evidence_confidence: evidenceConfidence } : {}),
     ...(usage ? { provider_usage: usage } : {}),
     category: typeof record.category === 'string' ? record.category : '',
     subcategory: typeof record.subcategory === 'string' ? record.subcategory : '',
@@ -72,7 +78,7 @@ export function normalizeObjectDescription(value: unknown): ObjectDescription {
     color: typeof record.color === 'string' ? record.color : '',
     material: typeof record.material === 'string' ? record.material : '',
     style_attributes: stringArray(record.style_attributes, 12),
-    visible_text: stringArray(record.visible_text, 8),
+    visible_text: visibleText,
     logos_markings: stringArray(record.logos_markings, 8),
     distinctive_features: stringArray(record.distinctive_features, 12),
     hardware_details: stringArray(record.hardware_details, 8),
