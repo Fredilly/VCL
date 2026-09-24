@@ -34,6 +34,7 @@ test('uses OpenRouter Gemini Flash Lite with image input and reports cost', asyn
   assert.match(prompt, /visible_text should contain readable words\/letters\/numbers actually visible/);
   assert.match(prompt, /logos_markings should describe visible logos, emblems, monograms, patches, labels, or symbols/);
   assert.match(prompt, /distinctive_features should capture unusual graphics, patterns, construction details/);
+  assert.match(prompt, /gradient\/ombre\/fade rather than collapsing it to generic color block/i);
   assert.match(prompt, /search_terms should be 1-4 concise purchase-search queries that use the strongest visible identity evidence first/);
   assert.match(prompt, /IMAGE 2 is a magnified detail around the user click/);
   assert.equal(result.brand_candidate, 'Adidas');
