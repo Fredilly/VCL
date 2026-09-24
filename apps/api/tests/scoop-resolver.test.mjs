@@ -74,6 +74,28 @@ test('ungrounded OCR-like text does not become canonical visible intent text', (
   assert.doesNotMatch(intent.summary.title, /GUESS BRAND/i);
 });
 
+
+test('Nike sleeveless hoodie keeps gradient detail and basketball context in canonical intent', () => {
+  const intent = buildScoopIntent({
+    object: description({
+      category: 'sportswear',
+      subcategory: 'sleeveless hoodie',
+      brand_candidate: 'Nike',
+      model_candidate: null,
+      color: 'black',
+      visible_text: [],
+      logos_markings: ['Nike Swoosh logo'],
+      distinctive_features: ['red-to-blue gradient chest stripe'],
+      shape_silhouette: ['sleeveless hoodie'],
+      evidence_confidence: {},
+    }),
+    context: { platform: 'youtube', title: 'NBA Legends GOING OFF in 2026 Summer Runs!' },
+  });
+  assert.match(intent.summary.title, /Nike/i);
+  assert.ok(intent.summary.details.some((detail) => /gradient/i.test(detail)));
+  assert.ok(intent.queries.some((query) => /basketball/i.test(query.query) && /gradient/i.test(query.query)));
+});
+
 test('ScoopResolver exposes one resolve boundary around Evidence -> Intent -> resolution', async () => {
   const resolver = new ScoopResolver(async ({ evidence, intent }) => ({
     query: intent.queries[0],
