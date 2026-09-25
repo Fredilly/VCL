@@ -32,6 +32,10 @@
       {
         "name": "ALPHA_ACCESS_LEDGER",
         "class_name": "AlphaAccessLedger"
+      },
+      {
+        "name": "VERIFIED_PRODUCT_LEDGER",
+        "class_name": "VerifiedProductLedger"
       }
     ]
   },
@@ -43,6 +47,10 @@
     {
       "tag": "v2-alpha-access",
       "new_sqlite_classes": ["AlphaAccessLedger"]
+    },
+    {
+      "tag": "v3-verified-product-ledger",
+      "new_classes": ["VerifiedProductLedger"]
     }
   ],
   "ratelimits": [
