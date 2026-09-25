@@ -332,8 +332,8 @@ async function refreshVerifiedOffers(
 
   // The canonical row always gets a real source image when the source exposes
   // one. Saved image -> exact provider item -> product-page metadata.
-  const sourceImage = mapping.image_reference
-    ?? exactSource?.image_reference
+  const sourceImage = exactSource?.image_reference
+    ?? mapping.image_reference
     ?? await sourceImageForVerifiedMapping(mapping);
   const hydratedMapping = sourceImage ? { ...mapping, image_reference: sourceImage } : mapping;
   const fallback = verifiedMappingProduct(hydratedMapping);
