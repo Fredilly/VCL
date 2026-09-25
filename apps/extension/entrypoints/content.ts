@@ -241,12 +241,6 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
       Object.assign(providerLabel.style, { fontSize: '11px', opacity: '0.62', marginTop: '2px' });
       text.appendChild(providerLabel);
     }
-    if (isScoopVerified) {
-      const verifiedLabel = document.createElement('div');
-      verifiedLabel.textContent = 'Scoop Verified';
-      Object.assign(verifiedLabel.style, { fontSize: '11px', opacity: '0.82', marginTop: '2px', fontWeight: '600' });
-      text.appendChild(verifiedLabel);
-    }
     row.appendChild(text);
     panel.appendChild(row);
 
@@ -511,17 +505,12 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       summary.textContent = verifiedProduct.title;
       Object.assign(summary.style, { fontSize: '15px', marginBottom: '4px' });
 
-      attrs.textContent = [verifiedProduct.brand, 'Scoop Verified'].filter(Boolean).join(' · ');
+      attrs.textContent = verifiedProduct.brand ?? '';
+      attrs.style.display = verifiedProduct.brand ? '' : 'none';
 
-      const visualTitle = [
-        analysis.subcategory || analysis.category,
-        analysis.color,
-      ].filter(Boolean).join(' ');
-      const visualDetails = detailParts.join(' · ');
-      confidence.textContent = `Visually detected: ${[visualTitle, visualDetails].filter(Boolean).join(' · ')}`;
-      identityConfidence.textContent = 'Scoop Verified';
-      Object.assign(confidence.style, { opacity: '0.72', marginTop: '8px' });
-      Object.assign(identityConfidence.style, { opacity: '0.72', marginTop: '3px' });
+      confidence.textContent = 'Matched from visible text and shirt details';
+      identityConfidence.remove();
+      Object.assign(confidence.style, { opacity: '0.62', marginTop: '8px', fontSize: '12px' });
 
       for (const control of improveControls) control.remove();
 
