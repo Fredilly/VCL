@@ -54,11 +54,11 @@
     },
     {
       "tag": "v3-verified-product-ledger",
-      "new_classes": ["VerifiedProductLedger"]
+      "new_sqlite_classes": ["VerifiedProductLedger"]
     },
     {
       "tag": "v4-admin-access",
-      "new_classes": ["AdminAccessLedger"]
+      "new_sqlite_classes": ["AdminAccessLedger"]
     }
   ],
   "ratelimits": [
