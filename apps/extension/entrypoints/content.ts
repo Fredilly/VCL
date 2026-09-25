@@ -77,7 +77,14 @@ function surfaceContext(currentTime?: number) {
     || document.querySelector('h1.title yt-formatted-string')?.textContent?.trim()
     || document.title.replace(/\s*-\s*YouTube\s*$/i, '').trim();
   const youtubeMatch = location.hostname.includes('youtube.com') && typeof location.search === 'string' ? location.search.match(/[?&]v=([^&]+)/) : null;
-  const youtubeId = youtubeMatch?.[1] ? decodeURIComponent(youtubeMatch[1]) : null;
+  const youtubeShortsMatch = location.hostname.includes('youtube.com') && typeof location.pathname === 'string'
+    ? location.pathname.match(/^\/shorts\/([^/?#]+)/)
+    : null;
+  const youtubeId = youtubeMatch?.[1]
+    ? decodeURIComponent(youtubeMatch[1])
+    : youtubeShortsMatch?.[1]
+      ? decodeURIComponent(youtubeShortsMatch[1])
+      : null;
   return {
     platform: location.hostname.includes('youtube.com') ? 'youtube' : 'generic-html5',
     title: youtubeTitle || null,
@@ -287,7 +294,7 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
             product,
           },
         }).then((response) => {
-          verify.textContent = response?.accepted ? '✓ Verified' : 'Try again';
+          verify.textContent = response?.accepted ? '✓ Verified' : (typeof response?.error === 'string' ? response.error : 'Try again');
           verify.disabled = Boolean(response?.accepted);
         }).catch(() => { verify.textContent = 'Try again'; verify.disabled = false; });
       });
