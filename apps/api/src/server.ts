@@ -1156,6 +1156,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       const description = normalizeObjectDescription(record.description);
       const context = normalizeContext(record.context);
       const contentRef = context?.content_ref ?? null;
+      const verifiedResolutionStarted = Date.now();
       const durableMappings = await durableVerifiedMappings(env, context?.platform ?? null, contentRef).catch(() => []);
       let verifiedMapping = lookupVerifiedProductMapping({
         rawRegistry: env.VERIFIED_PRODUCT_MAPPINGS_JSON,
@@ -1172,32 +1173,51 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         confidence: 0,
         reason: 'no_candidate',
       };
+      let sameVideoVisualCheck: SameVideoVisualCheck = {
+        decision: sameVideoReuse,
+        compared: 0,
+        failures: 0,
+        failure_reasons: {},
+      };
       if (!verifiedMapping && durableMappings.length) {
         const canonicalMappings = durableMappings.filter((mapping) => Boolean(mapping.canonical_key));
-        const canonicalRows = await Promise.all(canonicalMappings.map(async (mapping) => {
+        const canonicalRows = (await Promise.all(canonicalMappings.map(async (mapping) => {
           const identity = mapping.canonical_key
             ? await durableCanonicalProductIdentity(env, mapping.canonical_key).catch(() => null)
             : null;
           return identity ? { mapping, identity } : null;
-        }));
+        }))).filter((row): row is NonNullable<typeof row> => Boolean(row));
+
         sameVideoReuse = chooseSameVideoVerifiedReuse({
           description,
-          candidates: canonicalRows.filter((row): row is NonNullable<typeof row> => Boolean(row)),
+          candidates: canonicalRows,
         });
+
+        const reuseIdentity = sameVideoReuse.canonical_key
+          ? canonicalRows.find((row) => row.identity.canonical_key === sameVideoReuse.canonical_key)?.identity ?? null
+          : null;
+        sameVideoVisualCheck = await confirmSameVideoReuseWithImage(
+          env,
+          description,
+          context,
+          sourceImage,
+          sameVideoReuse,
+          reuseIdentity,
+        );
+        sameVideoReuse = sameVideoVisualCheck.decision;
         if (sameVideoReuse.mapping) verifiedMapping = sameVideoReuse.mapping;
       }
       if (verifiedMapping) {
-        const started = Date.now();
         const configuredProviders = commerceProviders(env);
         const refreshed = await refreshVerifiedOffers(configuredProviders, verifiedMapping);
-        const total_ms = Date.now() - started;
+        const total_ms = Date.now() - verifiedResolutionStarted;
         recordAlphaScoop({
           telemetry: alphaTelemetry,
           state: 'RESULTS',
           totalMs: total_ms,
           providersUsed: refreshed.providers_used,
           resultRows: refreshed.products.map((product) => ({ id: product.id, result_class: product.result_class })),
-          verificationUsage: undefined,
+          verificationUsage: sameVideoVisualCheck.usage,
           commerceCalls: refreshed.commerce_calls,
           visionUsage: rawDescription?.provider_usage,
         });
@@ -1215,8 +1235,28 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           providers_configured: configuredProviders.map(({ name }) => name),
           providers_used: refreshed.providers_used,
           attempts: refreshed.providers_used.length,
-          verification: { retrieved: refreshed.products.length, metadata_prefiltered: 0, light_escalations: 0, compared: 0, image_failures: 0, image_failure_reasons: {}, rejected: 0, contradictions: {} },
-          cost_usage: { commerce_calls: refreshed.commerce_calls, verification_usage: { provider: 'none', model: 'none', requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0 } },
+          verification: {
+            retrieved: refreshed.products.length,
+            metadata_prefiltered: 0,
+            light_escalations: 0,
+            compared: sameVideoVisualCheck.compared,
+            image_failures: sameVideoVisualCheck.failures,
+            image_failure_reasons: sameVideoVisualCheck.failure_reasons,
+            rejected: 0,
+            contradictions: {},
+          },
+          cost_usage: {
+            commerce_calls: refreshed.commerce_calls,
+            verification_usage: sameVideoVisualCheck.usage ?? {
+              provider: 'none',
+              model: 'none',
+              requests: 0,
+              prompt_tokens: 0,
+              completion_tokens: 0,
+              total_tokens: 0,
+              cost_usd: 0,
+            },
+          },
           verified_mapping: {
             hit: true,
             provenance: verifiedMapping.provenance,
@@ -1229,7 +1269,14 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             } : {}),
           },
           latency_ms: total_ms,
-          timing: { provider_retrieval_ms: refreshed.provider_retrieval_ms, candidate_verification_ms: 0, candidate_image_fetch_ms: 0, candidate_model_verification_ms: 0, verification_batches: [], total_ms },
+          timing: {
+            provider_retrieval_ms: refreshed.provider_retrieval_ms,
+            candidate_verification_ms: sameVideoVisualCheck.timing?.total_ms ?? 0,
+            candidate_image_fetch_ms: sameVideoVisualCheck.timing?.image_fetch_ms ?? 0,
+            candidate_model_verification_ms: sameVideoVisualCheck.timing?.model_ms ?? 0,
+            verification_batches: sameVideoVisualCheck.timing?.batches ?? [],
+            total_ms,
+          },
         });
       }
       const providers = commerceProviders(env);
