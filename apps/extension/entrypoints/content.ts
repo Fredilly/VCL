@@ -321,7 +321,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
   const controller = new AbortController();
   activeCapture = controller;
   const imageWrap = document.createElement('div');
-  Object.assign(imageWrap.style, { display: 'flex', justifyContent: 'center', marginBottom: '14px' });
+  Object.assign(imageWrap.style, { display: 'flex', justifyContent: 'center', marginBottom: '10px' });
   const scanSurface = document.createElement('div');
   Object.assign(scanSurface.style, { position: 'relative', display: 'inline-block', overflow: 'hidden', borderRadius: '14px', background: '#000' });
   const image = document.createElement('img');
@@ -491,7 +491,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       const provenance = commerce.verified_mapping?.provenance ?? verifiedProduct.provenance ?? verifiedProduct.provider ?? 'verified_mapping';
       const isTestFixture = provenance === 'test_fixture';
 
-      panel.firstElementChild!.textContent = 'Scoop found the exact item';
+      panel.firstElementChild!.remove();
 
       const exactBadge = document.createElement('div');
       exactBadge.textContent = '✓ Exact match';
@@ -504,7 +504,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
 
       summary.textContent = verifiedProduct.title;
       Object.assign(summary.style, { fontSize: '17px', lineHeight: '1.22', letterSpacing: '-0.02em', marginBottom: '8px' });
-      summary.after(exactBadge);
+      summary.before(exactBadge);
 
       attrs.textContent = verifiedProduct.brand ?? '';
       attrs.style.display = verifiedProduct.brand ? '' : 'none';
