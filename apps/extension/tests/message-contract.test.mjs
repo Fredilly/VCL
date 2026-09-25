@@ -191,6 +191,7 @@ test('Scoop Verified offer rows keep merchant name and verified label', () => {
 test('YouTube Shorts surface context keeps a stable content_ref for exact verification', () => {
   const context = vm.createContext({
     exports: {},
+    crypto: { randomUUID: () => 'shorts-context-test' },
     location: {
       hostname: 'www.youtube.com',
       search: '',
