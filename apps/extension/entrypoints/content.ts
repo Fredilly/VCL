@@ -198,6 +198,15 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
   }
 
   for (const product of commerce.products.slice(0, 5)) {
+    const card = document.createElement('div');
+    Object.assign(card.style, {
+      margin: '8px 0 0',
+      border: '1px solid rgba(255,255,255,.10)',
+      borderRadius: '14px',
+      background: 'rgba(255,255,255,.045)',
+      overflow: 'hidden',
+    });
+
     const row = document.createElement(product.destination ? 'a' : 'div');
     if (row instanceof HTMLAnchorElement && product.destination) {
       row.href = product.destination;
@@ -210,9 +219,8 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
       }
     }
     Object.assign((row as HTMLElement).style, {
-        display: 'grid', gridTemplateColumns: product.image_reference ? '64px 1fr' : '1fr', gap: '10px',
-      padding: '10px', margin: '8px 0 0', border: '1px solid rgba(255,255,255,.10)', borderRadius: '14px',
-      background: 'rgba(255,255,255,.045)', color: '#fff', textDecoration: 'none',
+      display: 'grid', gridTemplateColumns: product.image_reference ? '64px 1fr' : '1fr', gap: '10px',
+      padding: '10px', color: '#fff', textDecoration: 'none',
     });
     if (product.image_reference) {
       const img = document.createElement('img');
@@ -243,11 +251,20 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
       text.appendChild(providerLabel);
     }
     row.appendChild(text);
-    panel.appendChild(row);
+    card.appendChild(row);
 
     if (!isScoopVerified) {
       const feedback = document.createElement('div');
-      Object.assign(feedback.style, { display: 'flex', gap: '6px', margin: '6px 0 10px 74px', minHeight: '32px', alignItems: 'center', flexWrap: 'wrap' });
+      Object.assign(feedback.style, {
+        display: 'flex',
+        gap: '6px',
+        minHeight: '32px',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        padding: '8px 10px 10px',
+        marginLeft: product.image_reference ? '74px' : '0',
+        borderTop: '1px solid rgba(255,255,255,.08)',
+      });
       const yes = button('');
       const no = button('');
       yes.setAttribute('aria-label', 'Correct match');
@@ -309,8 +326,9 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
         });
         feedback.appendChild(verify);
       }
-      panel.appendChild(feedback);
+      card.appendChild(feedback);
     }
+    panel.appendChild(card);
   }
 }
 
