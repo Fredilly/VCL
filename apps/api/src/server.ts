@@ -201,6 +201,67 @@ function filterByCategory(providers: NamedCommerceProvider[], query: ProductQuer
 const LIKELY_CANDIDATE_THRESHOLD = 3;
 const SUFFICIENT_CANDIDATE_THRESHOLD = 3;
 
+function verifiedIdentityTokens(value: string): string[] {
+  const stop = new Set(['the','a','an','and','or','for','with','to','of','in','on','by','unisex','men','women','mens','womens']);
+  return canonical('model', value).split(' ').filter((token) => token.length > 1 && !stop.has(token));
+}
+
+function verifiedOfferMatches(mapping: VerifiedProductMapping, product: ProductCandidate): boolean {
+  if (product.model && mapping.product_id && canonical('model', product.model) === canonical('model', mapping.product_id)) return true;
+  const expected = verifiedIdentityTokens(mapping.title);
+  const actual = new Set(verifiedIdentityTokens(product.title));
+  if (!expected.length) return false;
+  const overlap = expected.filter((token) => actual.has(token)).length / expected.length;
+  return expected.length >= 3 ? overlap >= 0.72 : overlap === 1;
+}
+
+async function refreshVerifiedOffers(
+  providers: NamedCommerceProvider[],
+  mapping: VerifiedProductMapping,
+): Promise<{ products: ProductCandidate[]; providers_used: string[]; commerce_calls: Record<string, number>; provider_retrieval_ms: number }> {
+  const query: ProductQuery = {
+    query: mapping.title,
+    category: mapping.object_type,
+    subcategory: mapping.object_type,
+    brand: mapping.brand || null,
+    model: mapping.product_id || null,
+    attributes: [],
+  };
+  const eligible = filterByCategory(providers, query);
+  const providersUsed: string[] = [];
+  const commerceCalls: Record<string, number> = {};
+  const started = Date.now();
+  const batches = await Promise.all(eligible.map(async ({ name, provider }) => {
+    providersUsed.push(name);
+    commerceCalls[name] = (commerceCalls[name] ?? 0) + 1;
+    try {
+      return await provider.search(query);
+    } catch (error) {
+      if (!(error instanceof CommerceNoResultsError)) logSafeError(error);
+      return [];
+    }
+  }));
+  const fallback = verifiedMappingProduct(mapping);
+  const refreshed = batches.flat()
+    .filter((product) => verifiedOfferMatches(mapping, product))
+    .map((product): ProductCandidate => ({
+      ...product,
+      result_class: 'EXACT',
+      provenance: mapping.provenance,
+      provider: product.provider || product.provenance || mapping.provider || 'verified',
+      identity_key: `verified:${mapping.product_id}`,
+      verification_status: 'metadata_only',
+      verification_score: 100,
+      verification_reasons: [`${mapping.provenance} product identity; fresh merchant offer`],
+    }));
+  return {
+    products: dedupeProducts([...refreshed, fallback]).slice(0, 5),
+    providers_used: providersUsed,
+    commerce_calls: commerceCalls,
+    provider_retrieval_ms: Date.now() - started,
+  };
+}
+
 export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages, routing?: { commerce_action: 'SKIP' | 'SEARCH_NORMAL' | 'SEARCH_BROAD'; verification_action: 'LIGHT' | 'FULL'; telemetry: JevRouterTelemetry; broad_search_on_miss?: boolean }, useMarkingEvidence = false) {
   const routingActive = Boolean(routing && !routing.telemetry.failed);
   let attempts = 0;
