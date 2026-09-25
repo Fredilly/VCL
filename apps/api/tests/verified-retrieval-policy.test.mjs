@@ -172,6 +172,6 @@ test('verified commerce mapping hydrates its thumbnail and returns every same-SK
   assert.equal(result.products[1].image_reference, 'https://i.ebayimg.com/second.jpg');
   assert.equal(result.products.every((product) => product.result_class === 'EXACT'), true);
   assert.equal(result.products.some((product) => product.id === 'ITEM-SIMILAR'), false);
-  assert.deepEqual(result.providers_used, ['ebay']);
+  assert.deepEqual(Array.from(result.providers_used), ['ebay']);
   assert.equal(result.commerce_calls.ebay, 2);
 });
