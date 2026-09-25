@@ -105,7 +105,7 @@ export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProduc
   if (!input.platform || !input.contentRef) return null;
   const platform = normalize(input.platform);
   const contentRef = normalizeContentRef(input.platform, input.contentRef);
-  const mappings = [...(input.mappings ?? []), ...parseVerifiedProductMappings(input.rawRegistry)];
+  const mappings = [...parseVerifiedProductMappings(input.rawRegistry), ...(input.mappings ?? [])];
   return mappings.find((mapping) => {
     if (mapping.provenance === 'test_fixture' && !input.allowTestFixtures) return false;
     const timestampMatches = mapping.scope === 'entire_video'
