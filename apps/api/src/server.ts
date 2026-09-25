@@ -969,9 +969,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       if (verifiedMapping) {
         const started = Date.now();
         const configuredProviders = commerceProviders(env);
-        const refreshed = configuredProviders.length
-          ? await refreshVerifiedOffers(configuredProviders, verifiedMapping)
-          : { products: [verifiedMappingProduct(verifiedMapping)], providers_used: [], commerce_calls: {}, provider_retrieval_ms: 0 };
+        const refreshed = await refreshVerifiedOffers(configuredProviders, verifiedMapping);
         const total_ms = Date.now() - started;
         recordAlphaScoop({
           telemetry: alphaTelemetry,
