@@ -234,16 +234,31 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
     no.innerHTML = thumbDown;
     Object.assign(yes.style, { width: '34px', height: '32px', padding: '0', display: 'grid', placeItems: 'center', color: '#fff' });
     Object.assign(no.style, { width: '34px', height: '32px', padding: '0', display: 'grid', placeItems: 'center', color: '#fff', opacity: '0.82' });
-    const feedbackStatus = document.createElement('span');
-    Object.assign(feedbackStatus.style, { opacity: '0.65', fontSize: '11px', alignSelf: 'center' });
+    let selectedFeedback: 'correct_match' | 'wrong_item' | null = null;
+    const paintFeedback = () => {
+      const activeStyle = { background: '#fff', color: '#111', opacity: '1' };
+      const idleStyle = { background: 'transparent', color: '#fff', opacity: '0.82' };
+      Object.assign(yes.style, selectedFeedback === 'correct_match' ? activeStyle : idleStyle);
+      Object.assign(no.style, selectedFeedback === 'wrong_item' ? activeStyle : idleStyle);
+      yes.setAttribute('aria-pressed', selectedFeedback === 'correct_match' ? 'true' : 'false');
+      no.setAttribute('aria-pressed', selectedFeedback === 'wrong_item' ? 'true' : 'false');
+    };
     const submit = async (feedback_type: 'correct_match' | 'wrong_item') => {
+      const previous = selectedFeedback;
+      selectedFeedback = feedback_type;
+      paintFeedback();
       yes.disabled = true; no.disabled = true;
       const response = await browser.runtime.sendMessage({ type: 'VCL_FEEDBACK', event_id: eventId, result_id: product.id, feedback_type }).catch(() => null);
-      feedbackStatus.textContent = response?.accepted ? 'Thanks — this helps Scoop learn.' : 'Feedback could not be saved.';
+      yes.disabled = false; no.disabled = false;
+      if (!response?.accepted) {
+        selectedFeedback = previous;
+        paintFeedback();
+      }
     };
     yes.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void submit('correct_match'); });
     no.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void submit('wrong_item'); });
-    feedback.append(yes, no, feedbackStatus);
+    paintFeedback();
+    feedback.append(yes, no);
     if (admin?.admin && adminPayload) {
       const verify = button(commerce.verified_mapping?.hit && commerce.verified_mapping?.provenance === 'admin_verified' ? '✓ Verified' : 'Verify exact');
       Object.assign(verify.style, { height: '32px', padding: '0 9px', fontSize: '11px', opacity: commerce.verified_mapping?.hit ? '0.72' : '0.9' });
