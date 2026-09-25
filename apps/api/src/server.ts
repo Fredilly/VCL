@@ -333,8 +333,10 @@ async function refreshVerifiedOffers(
   // For eBay, fetch the verified listing directly first. This guarantees that
   // the current listing image is preferred over a stale/missing saved image and
   // lets us recover MPN/model metadata for finding other sellers of the same SKU.
-  const ebaySource = sourceProviders.find(({ provider }) => provider instanceof EbayCommerceProvider);
-  if (ebaySource && ebaySource.provider instanceof EbayCommerceProvider) {
+  const exactLookupSource = sourceProviders.find(({ provider }) =>
+    typeof (provider as CommerceProvider & { getItemById?: unknown }).getItemById === 'function',
+  );
+  if (exactLookupSource) {
     const query: ProductQuery = {
       query: mapping.product_id || mapping.title,
       category: mapping.object_type,
@@ -343,9 +345,12 @@ async function refreshVerifiedOffers(
       model: mapping.product_id || null,
       attributes: [],
     };
-    providersUsed.push(ebaySource.name);
-    commerceCalls[ebaySource.name] = (commerceCalls[ebaySource.name] ?? 0) + 1;
-    exactSource = await ebaySource.provider.getItemById(mapping.product_id, query).catch(() => null);
+    providersUsed.push(exactLookupSource.name);
+    commerceCalls[exactLookupSource.name] = (commerceCalls[exactLookupSource.name] ?? 0) + 1;
+    const exactLookup = (exactLookupSource.provider as CommerceProvider & {
+      getItemById(itemId: string, query: ProductQuery): Promise<ProductCandidate | null>;
+    }).getItemById.bind(exactLookupSource.provider);
+    exactSource = await exactLookup(mapping.product_id, query).catch(() => null);
     if (exactSource?.model) canonicalSku = exactSource.model;
   }
 
