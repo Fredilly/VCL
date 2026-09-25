@@ -205,12 +205,22 @@ function verifiedIdentityKey(value: string | null | undefined): string {
   return (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
-function verifiedSourceProviderName(value: string | null | undefined): string {
+function verifiedSourceProviderName(value: string | null | undefined, destination?: string | null): string {
   const raw = (value ?? '').trim().toLowerCase();
-  if (!raw) return '';
   const root = raw.split(':', 1)[0];
   if (root === 'ebay' || root === 'etsy' || root === 'serpapi' || root === 'brave') return root;
-  return raw;
+
+  // Older admin-verified rows can carry internal provenance (for example
+  // "admin_verified") instead of the merchant provider. Recover the merchant
+  // from the verified destination so exact-item hydration still runs.
+  if (destination) {
+    try {
+      const host = new URL(destination).hostname.toLowerCase().replace(/^www\./, '');
+      if (host === 'ebay.com' || host.endsWith('.ebay.com')) return 'ebay';
+      if (host === 'etsy.com' || host.endsWith('.etsy.com')) return 'etsy';
+    } catch {}
+  }
+  return '';
 }
 
 function verifiedOfferHasExactIdentity(mapping: VerifiedProductMapping, product: ProductCandidate): boolean {
@@ -327,7 +337,7 @@ export async function refreshVerifiedOffers(
   mapping: VerifiedProductMapping,
 ): Promise<{ products: ProductCandidate[]; providers_used: string[]; commerce_calls: Record<string, number>; provider_retrieval_ms: number }> {
   const started = Date.now();
-  const sourceProviderName = verifiedSourceProviderName(mapping.provider);
+  const sourceProviderName = verifiedSourceProviderName(mapping.provider, mapping.destination);
   const sourceProviders = sourceProviderName
     ? providers.filter(({ name }) => name.toLowerCase() === sourceProviderName)
     : [];
@@ -795,10 +805,10 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             ? product.image_reference.trim().slice(0, 1200)
             : null,
           provider: typeof product.provider === 'string' && product.provider.trim()
-            ? verifiedSourceProviderName(product.provider).slice(0, 80)
+            ? verifiedSourceProviderName(product.provider, destination).slice(0, 80) || null
             : typeof product.provenance === 'string' && product.provenance.trim()
-              ? verifiedSourceProviderName(product.provenance).slice(0, 80)
-              : null,
+              ? verifiedSourceProviderName(product.provenance, destination).slice(0, 80) || null
+              : verifiedSourceProviderName(null, destination) || null,
           provenance: 'admin_verified',
         };
         const saved = await persistAdminVerifiedMapping(env, mapping);
