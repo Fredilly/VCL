@@ -164,3 +164,11 @@ test('admin controls use per-admin session tokens and can promote non-EXACT cand
   assert.doesNotMatch(content, /admin\?\.admin && product\.result_class === 'EXACT'/);
   assert.match(content, /VCL_ADMIN_CREATE_INVITE/);
 });
+
+
+test('feedback UI uses reversible selected thumbs without thank-you copy', () => {
+  assert.match(content, /aria-pressed/);
+  assert.match(content, /selectedFeedback === 'correct_match'/);
+  assert.match(content, /selectedFeedback === 'wrong_item'/);
+  assert.doesNotMatch(content, /Thanks — this helps Scoop learn/);
+});
