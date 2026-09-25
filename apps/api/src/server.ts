@@ -345,9 +345,17 @@ async function refreshVerifiedOffers(
       verification_reasons: [`${mapping.provenance} product identity; same verified SKU/model`],
     }));
 
+  // Prefer an image from the same verified source/SKU when the saved mapping
+  // did not carry one. This avoids hardcoded image URLs while keeping the
+  // canonical verified product first.
+  const sourceOfferImage = exactOffers.find((product) => product.image_reference)?.image_reference ?? null;
+  const canonicalProduct = !fallback.image_reference && sourceOfferImage
+    ? { ...fallback, image_reference: sourceOfferImage }
+    : fallback;
+
   // Canonical verified source is always first. Additional rows are exact offers only.
   return {
-    products: dedupeProducts([fallback, ...exactOffers]).slice(0, 5),
+    products: dedupeProducts([canonicalProduct, ...exactOffers]).slice(0, 5),
     providers_used: providersUsed,
     commerce_calls: commerceCalls,
     provider_retrieval_ms: Date.now() - started,
