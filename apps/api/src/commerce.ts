@@ -15,6 +15,7 @@ export type ProductContext = {
   title?: string | null;
   url?: string | null;
   content_ref?: string | null;
+  timestamp_ms?: number | null;
 };
 
 export type ProductCandidate = {
