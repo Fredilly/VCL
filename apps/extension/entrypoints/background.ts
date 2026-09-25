@@ -1,5 +1,6 @@
 const INSTALL_ID_KEY = 'scoop_alpha_install_id';
 const ALPHA_TOKEN_KEY = 'scoop_alpha_token';
+const ADMIN_TOKEN_KEY = 'scoop_admin_token';
 let cachedInstallId: string | undefined;
 
 async function getInstallId() {
@@ -63,6 +64,44 @@ export default defineBackground(() => {
         });
         sendResponse(await response.json());
       }).catch(() => sendResponse({ required: true, active: false }));
+      return true;
+    }
+    if (message?.type === 'VCL_ADMIN_STATUS') {
+      void browser.storage.local.get(ADMIN_TOKEN_KEY).then(async (stored) => {
+        const token = typeof stored?.[ADMIN_TOKEN_KEY] === 'string' ? stored[ADMIN_TOKEN_KEY] : '';
+        if (!token) { sendResponse({ admin: false }); return; }
+        const response = await fetch('https://api.vcl.article6.org/admin/status', {
+          headers: { 'X-Scoop-Admin-Token': token },
+        });
+        const payload = await response.json().catch(() => ({ admin: false }));
+        if (!payload?.admin) await browser.storage.local.remove(ADMIN_TOKEN_KEY);
+        sendResponse({ admin: Boolean(payload?.admin) });
+      }).catch(() => sendResponse({ admin: false }));
+      return true;
+    }
+    if (message?.type === 'VCL_ADMIN_AUTH' && typeof message.token === 'string') {
+      const token = message.token.trim();
+      void fetch('https://api.vcl.article6.org/admin/status', {
+        headers: { 'X-Scoop-Admin-Token': token },
+      }).then(async (response) => {
+        const payload = await response.json().catch(() => ({ admin: false }));
+        if (response.ok && payload?.admin) await browser.storage.local.set({ [ADMIN_TOKEN_KEY]: token });
+        sendResponse({ admin: Boolean(response.ok && payload?.admin) });
+      }).catch(() => sendResponse({ admin: false }));
+      return true;
+    }
+    if (message?.type === 'VCL_ADMIN_VERIFY' && message.payload && typeof message.payload === 'object') {
+      void browser.storage.local.get(ADMIN_TOKEN_KEY).then(async (stored) => {
+        const token = typeof stored?.[ADMIN_TOKEN_KEY] === 'string' ? stored[ADMIN_TOKEN_KEY] : '';
+        if (!token) { sendResponse({ accepted: false, error: 'Admin access is not configured.' }); return; }
+        const response = await fetch('https://api.vcl.article6.org/admin/verified-product', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Scoop-Admin-Token': token },
+          body: JSON.stringify(message.payload),
+        });
+        const payload = await response.json().catch(() => ({ error: 'Invalid response' }));
+        sendResponse({ accepted: response.ok && Boolean(payload?.accepted), ...payload });
+      }).catch(() => sendResponse({ accepted: false, error: 'Could not save verified match.' }));
       return true;
     }
     if (message?.type === 'VCL_ALPHA_ACTIVATE' && typeof message.token === 'string') {
