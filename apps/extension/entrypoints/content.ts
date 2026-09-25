@@ -247,7 +247,7 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
 
     if (!isScoopVerified) {
       const feedback = document.createElement('div');
-      Object.assign(feedback.style, { display: 'flex', gap: '6px', margin: '-2px 0 8px 64px' });
+      Object.assign(feedback.style, { display: 'flex', gap: '6px', margin: '6px 0 10px 74px', minHeight: '32px', alignItems: 'center', flexWrap: 'wrap' });
       const yes = button('');
       const no = button('');
       yes.setAttribute('aria-label', 'Correct match');
