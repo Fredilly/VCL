@@ -300,67 +300,105 @@ async function refreshVerifiedOffers(
   mapping: VerifiedProductMapping,
 ): Promise<{ products: ProductCandidate[]; providers_used: string[]; commerce_calls: Record<string, number>; provider_retrieval_ms: number }> {
   const started = Date.now();
-  const sourceImage = await sourceImageForVerifiedMapping(mapping);
-  const hydratedMapping = sourceImage && !mapping.image_reference ? { ...mapping, image_reference: sourceImage } : mapping;
-  const fallback = verifiedMappingProduct(hydratedMapping);
-
-  // A known exact mapping must not fan out into broad shopping retrieval.
-  // Only query the original commerce source, and only keep candidates whose
-  // SKU/model/item identity is demonstrably the same verified product.
   const sourceProviderName = (mapping.provider ?? '').trim().toLowerCase();
   const sourceProviders = sourceProviderName
     ? providers.filter(({ name }) => name.toLowerCase() === sourceProviderName)
     : [];
-  if (!sourceProviders.length) {
-    return { products: [fallback], providers_used: [], commerce_calls: {}, provider_retrieval_ms: Date.now() - started };
+
+  const providersUsed: string[] = [];
+  const commerceCalls: Record<string, number> = {};
+
+  let exactSource: ProductCandidate | null = null;
+  let canonicalSku = mapping.product_id;
+
+  // For eBay, fetch the verified listing directly first. This guarantees that
+  // the current listing image is preferred over a stale/missing saved image and
+  // lets us recover MPN/model metadata for finding other sellers of the same SKU.
+  const ebaySource = sourceProviders.find(({ provider }) => provider instanceof EbayCommerceProvider);
+  if (ebaySource && ebaySource.provider instanceof EbayCommerceProvider) {
+    const query: ProductQuery = {
+      query: mapping.product_id || mapping.title,
+      category: mapping.object_type,
+      subcategory: mapping.object_type,
+      brand: mapping.brand || null,
+      model: mapping.product_id || null,
+      attributes: [],
+    };
+    providersUsed.push(ebaySource.name);
+    commerceCalls[ebaySource.name] = (commerceCalls[ebaySource.name] ?? 0) + 1;
+    exactSource = await ebaySource.provider.getItemById(mapping.product_id, query).catch(() => null);
+    if (exactSource?.model) canonicalSku = exactSource.model;
   }
 
-  const query: ProductQuery = {
-    query: mapping.product_id || mapping.title,
+  // The canonical row always gets a real source image when the source exposes
+  // one. Saved image -> exact provider item -> product-page metadata.
+  const sourceImage = mapping.image_reference
+    ?? exactSource?.image_reference
+    ?? await sourceImageForVerifiedMapping(mapping);
+  const hydratedMapping = sourceImage ? { ...mapping, image_reference: sourceImage } : mapping;
+  const fallback = verifiedMappingProduct(hydratedMapping);
+
+  const makeExact = (product: ProductCandidate): ProductCandidate => ({
+    ...product,
+    result_class: 'EXACT',
+    provenance: mapping.provenance,
+    provider: product.provider || mapping.provider || undefined,
+    identity_key: `verified:${verifiedIdentityKey(canonicalSku) || verifiedIdentityKey(mapping.product_id)}`,
+    verification_status: 'metadata_only',
+    verification_score: 100,
+    verification_reasons: [`${mapping.provenance} product identity; same verified SKU/model`],
+  });
+
+  const canonicalProduct = exactSource
+    ? makeExact({
+        ...exactSource,
+        title: mapping.title || exactSource.title,
+        brand: mapping.brand || exactSource.brand,
+        image_reference: exactSource.image_reference || sourceImage,
+      })
+    : fallback;
+
+  if (!sourceProviders.length) {
+    return { products: [canonicalProduct], providers_used: providersUsed, commerce_calls: commerceCalls, provider_retrieval_ms: Date.now() - started };
+  }
+
+  // Once exact identity is known, search only the original source for more
+  // offers of the SAME SKU/model. Never spend calls on broad/similar retrieval.
+  const searchQuery: ProductQuery = {
+    query: canonicalSku || mapping.title,
     category: mapping.object_type,
     subcategory: mapping.object_type,
     brand: mapping.brand || null,
-    model: mapping.product_id || null,
+    model: canonicalSku || null,
     attributes: [],
   };
-  const providersUsed: string[] = [];
-  const commerceCalls: Record<string, number> = {};
+
   const batches = await Promise.all(sourceProviders.map(async ({ name, provider }) => {
+    // eBay was already counted once for direct item hydration; this is a second,
+    // intentional call for other offers of the same SKU.
     providersUsed.push(name);
     commerceCalls[name] = (commerceCalls[name] ?? 0) + 1;
     try {
-      return await provider.search(query);
+      return await provider.search(searchQuery);
     } catch (error) {
       if (!(error instanceof CommerceNoResultsError)) logSafeError(error);
       return [];
     }
   }));
 
+  const expectedSku = verifiedIdentityKey(canonicalSku);
   const exactOffers = batches.flat()
-    .filter((product) => verifiedOfferHasExactIdentity(mapping, product))
-    .map((product): ProductCandidate => ({
-      ...product,
-      result_class: 'EXACT',
-      provenance: mapping.provenance,
-      provider: product.provider || product.provenance || mapping.provider || undefined,
-      identity_key: `verified:${mapping.product_id}`,
-      verification_status: 'metadata_only',
-      verification_score: 100,
-      verification_reasons: [`${mapping.provenance} product identity; same verified SKU/model`],
-    }));
+    .filter((product) => {
+      if (product.model && expectedSku && verifiedIdentityKey(product.model) === expectedSku) return true;
+      if (exactSource?.id && product.id === exactSource.id) return true;
+      return verifiedOfferHasExactIdentity(mapping, product);
+    })
+    .map(makeExact);
 
-  // Prefer an image from the same verified source/SKU when the saved mapping
-  // did not carry one. This avoids hardcoded image URLs while keeping the
-  // canonical verified product first.
-  const sourceOfferImage = exactOffers.find((product) => product.image_reference)?.image_reference ?? null;
-  const canonicalProduct = !fallback.image_reference && sourceOfferImage
-    ? { ...fallback, image_reference: sourceOfferImage }
-    : fallback;
-
-  // Canonical verified source is always first. Additional rows are exact offers only.
+  // Exact source first, then every other distinct seller/listing for the same SKU.
   return {
     products: dedupeProducts([canonicalProduct, ...exactOffers]).slice(0, 5),
-    providers_used: providersUsed,
+    providers_used: [...new Set(providersUsed)],
     commerce_calls: commerceCalls,
     provider_retrieval_ms: Date.now() - started,
   };
