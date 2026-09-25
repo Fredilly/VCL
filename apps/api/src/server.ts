@@ -556,6 +556,14 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           product_id: productId,
           title,
           destination,
+          image_reference: typeof product.image_reference === 'string' && product.image_reference.trim()
+            ? product.image_reference.trim().slice(0, 1200)
+            : null,
+          provider: typeof product.provider === 'string' && product.provider.trim()
+            ? product.provider.trim().slice(0, 80)
+            : typeof product.provenance === 'string' && product.provenance.trim()
+              ? product.provenance.trim().slice(0, 80)
+              : null,
           provenance: 'admin_verified',
         };
         const saved = await persistAdminVerifiedMapping(env, mapping);
