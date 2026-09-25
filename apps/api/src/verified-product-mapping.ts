@@ -1,12 +1,14 @@
 import type { ProductCandidate } from './commerce.js';
 import type { ObjectDescription } from './types.js';
 
-export type VerifiedProductProvenance = 'creator_verified' | 'brand_verified' | 'test_fixture';
+export type VerifiedProductProvenance = 'creator_verified' | 'brand_verified' | 'admin_verified' | 'test_fixture';
 
 export type VerifiedProductMapping = {
   platform: string;
   content_ref: string;
-  scope: 'entire_video';
+  scope: 'entire_video' | 'time_window';
+  timestamp_start_ms?: number;
+  timestamp_end_ms?: number;
   object_type: string;
   brand: string;
   product_id: string;
@@ -21,6 +23,8 @@ type LookupInput = {
   platform: string | null;
   contentRef: string | null;
   description: ObjectDescription;
+  timestampMs?: number | null;
+  mappings?: VerifiedProductMapping[];
 };
 
 function normalize(value: string | null | undefined): string {
@@ -69,15 +73,20 @@ export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProd
     if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
     const record = value as Record<string, unknown>;
     const provenance = record.provenance;
-    if (provenance !== 'creator_verified' && provenance !== 'brand_verified' && provenance !== 'test_fixture') return [];
+    if (provenance !== 'creator_verified' && provenance !== 'brand_verified' && provenance !== 'admin_verified' && provenance !== 'test_fixture') return [];
     const required = ['platform', 'content_ref', 'object_type', 'brand', 'product_id', 'title', 'destination'] as const;
     if (required.some((key) => typeof record[key] !== 'string' || !(record[key] as string).trim())) return [];
-    if (record.scope !== 'entire_video') return [];
+    if (record.scope !== 'entire_video' && record.scope !== 'time_window') return [];
+    const start = typeof record.timestamp_start_ms === 'number' && Number.isFinite(record.timestamp_start_ms) ? record.timestamp_start_ms : undefined;
+    const end = typeof record.timestamp_end_ms === 'number' && Number.isFinite(record.timestamp_end_ms) ? record.timestamp_end_ms : undefined;
+    if (record.scope === 'time_window' && (start === undefined || end === undefined || start < 0 || end < start)) return [];
     try { new URL(record.destination as string); } catch { return []; }
     return [{
       platform: (record.platform as string).trim(),
       content_ref: (record.content_ref as string).trim(),
-      scope: 'entire_video',
+      scope: record.scope,
+      ...(start !== undefined ? { timestamp_start_ms: start } : {}),
+      ...(end !== undefined ? { timestamp_end_ms: end } : {}),
       object_type: (record.object_type as string).trim(),
       brand: (record.brand as string).trim(),
       product_id: (record.product_id as string).trim(),
@@ -92,10 +101,18 @@ export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProduc
   if (!input.platform || !input.contentRef) return null;
   const platform = normalize(input.platform);
   const contentRef = normalizeContentRef(input.platform, input.contentRef);
-  return parseVerifiedProductMappings(input.rawRegistry).find((mapping) => {
+  const mappings = [...(input.mappings ?? []), ...parseVerifiedProductMappings(input.rawRegistry)];
+  return mappings.find((mapping) => {
     if (mapping.provenance === 'test_fixture' && !input.allowTestFixtures) return false;
+    const timestampMatches = mapping.scope === 'entire_video'
+      || (typeof input.timestampMs === 'number'
+        && typeof mapping.timestamp_start_ms === 'number'
+        && typeof mapping.timestamp_end_ms === 'number'
+        && input.timestampMs >= mapping.timestamp_start_ms
+        && input.timestampMs <= mapping.timestamp_end_ms);
     return normalize(mapping.platform) === platform
       && normalizeContentRef(mapping.platform, mapping.content_ref) === contentRef
+      && timestampMatches
       && objectCompatible(mapping.object_type, input.description);
   }) ?? null;
 }
