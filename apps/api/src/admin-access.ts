@@ -91,7 +91,7 @@ export async function auditAdminAction(
 }
 
 async function sha256(value: string): Promise<string> {
-  const bytes = new TextEncoder().encode(value);
+  const bytes = Uint8Array.from(value, (char) => char.charCodeAt(0));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
