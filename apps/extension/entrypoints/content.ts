@@ -243,7 +243,7 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
     yes.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void submit('correct_match'); });
     no.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void submit('wrong_item'); });
     feedback.append(yes, no);
-    if (admin?.admin && product.result_class === 'EXACT' && adminPayload) {
+    if (admin?.admin && adminPayload) {
       const verify = button(commerce.verified_mapping?.hit && commerce.verified_mapping?.provenance === 'admin_verified' ? '✓ Verified' : 'Verify exact');
       Object.assign(verify.style, { height: '32px', padding: '0 9px', fontSize: '11px', opacity: commerce.verified_mapping?.hit ? '0.72' : '0.9' });
       verify.disabled = Boolean(commerce.verified_mapping?.hit && commerce.verified_mapping?.provenance === 'admin_verified');
