@@ -148,3 +148,9 @@ test('feedback messages are forwarded to the feedback endpoint', async () => {
   assert.deepEqual(seen.body, { event_id: 'evt-1', result_id: 'result-1', feedback_type: 'correct_match' });
   assert.equal(response.accepted, true);
 });
+
+
+test('macOS admin shortcut uses physical KeyA instead of localized Option+A character', () => {
+  assert.match(content, /event\.altKey && event\.shiftKey && event\.code === 'KeyA'/);
+  assert.doesNotMatch(content, /event\.key\.toLowerCase\(\) === 'a'/);
+});
