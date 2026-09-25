@@ -143,3 +143,26 @@ test('admin verified time-window mapping is deterministic only inside its verifi
   });
   assert.equal(miss, null);
 });
+
+
+test('verified mapping preserves merchant thumbnail and provider for fallback display', () => {
+  const mapping = {
+    platform: 'youtube',
+    content_ref: 'youtube:MERCHANT_VIDEO',
+    scope: 'time_window',
+    timestamp_start_ms: 1000,
+    timestamp_end_ms: 9000,
+    object_type: 't-shirt',
+    brand: '',
+    product_id: 'shirt-1',
+    title: 'Building is my Love Language Black Oversized Tee',
+    destination: 'https://www.ebay.com/itm/example',
+    image_reference: 'https://i.ebayimg.com/example.jpg',
+    provider: 'ebay',
+    provenance: 'admin_verified',
+  };
+  const product = mod.verifiedMappingProduct(mapping);
+  assert.equal(product.image_reference, 'https://i.ebayimg.com/example.jpg');
+  assert.equal(product.provider, 'ebay');
+  assert.equal(product.result_class, 'EXACT');
+});

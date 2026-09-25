@@ -201,6 +201,67 @@ function filterByCategory(providers: NamedCommerceProvider[], query: ProductQuer
 const LIKELY_CANDIDATE_THRESHOLD = 3;
 const SUFFICIENT_CANDIDATE_THRESHOLD = 3;
 
+function verifiedIdentityTokens(value: string): string[] {
+  const stop = new Set(['the','a','an','and','or','for','with','to','of','in','on','by','unisex','men','women','mens','womens']);
+  return (canonical('model', value) ?? '').split(' ').filter((token) => token.length > 1 && !stop.has(token));
+}
+
+function verifiedOfferMatches(mapping: VerifiedProductMapping, product: ProductCandidate): boolean {
+  if (product.model && mapping.product_id && canonical('model', product.model) === canonical('model', mapping.product_id)) return true;
+  const expected = verifiedIdentityTokens(mapping.title);
+  const actual = new Set(verifiedIdentityTokens(product.title));
+  if (!expected.length) return false;
+  const overlap = expected.filter((token) => actual.has(token)).length / expected.length;
+  return expected.length >= 3 ? overlap >= 0.72 : overlap === 1;
+}
+
+async function refreshVerifiedOffers(
+  providers: NamedCommerceProvider[],
+  mapping: VerifiedProductMapping,
+): Promise<{ products: ProductCandidate[]; providers_used: string[]; commerce_calls: Record<string, number>; provider_retrieval_ms: number }> {
+  const query: ProductQuery = {
+    query: mapping.title,
+    category: mapping.object_type,
+    subcategory: mapping.object_type,
+    brand: mapping.brand || null,
+    model: mapping.product_id || null,
+    attributes: [],
+  };
+  const eligible = filterByCategory(providers, query);
+  const providersUsed: string[] = [];
+  const commerceCalls: Record<string, number> = {};
+  const started = Date.now();
+  const batches = await Promise.all(eligible.map(async ({ name, provider }) => {
+    providersUsed.push(name);
+    commerceCalls[name] = (commerceCalls[name] ?? 0) + 1;
+    try {
+      return await provider.search(query);
+    } catch (error) {
+      if (!(error instanceof CommerceNoResultsError)) logSafeError(error);
+      return [];
+    }
+  }));
+  const fallback = verifiedMappingProduct(mapping);
+  const refreshed = batches.flat()
+    .filter((product) => verifiedOfferMatches(mapping, product))
+    .map((product): ProductCandidate => ({
+      ...product,
+      result_class: 'EXACT',
+      provenance: mapping.provenance,
+      provider: product.provider || product.provenance || mapping.provider || 'verified',
+      identity_key: `verified:${mapping.product_id}`,
+      verification_status: 'metadata_only',
+      verification_score: 100,
+      verification_reasons: [`${mapping.provenance} product identity; fresh merchant offer`],
+    }));
+  return {
+    products: dedupeProducts([...refreshed, fallback]).slice(0, 5),
+    providers_used: providersUsed,
+    commerce_calls: commerceCalls,
+    provider_retrieval_ms: Date.now() - started,
+  };
+}
+
 export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages, routing?: { commerce_action: 'SKIP' | 'SEARCH_NORMAL' | 'SEARCH_BROAD'; verification_action: 'LIGHT' | 'FULL'; telemetry: JevRouterTelemetry; broad_search_on_miss?: boolean }, useMarkingEvidence = false) {
   const routingActive = Boolean(routing && !routing.telemetry.failed);
   let attempts = 0;
@@ -556,6 +617,14 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           product_id: productId,
           title,
           destination,
+          image_reference: typeof product.image_reference === 'string' && product.image_reference.trim()
+            ? product.image_reference.trim().slice(0, 1200)
+            : null,
+          provider: typeof product.provider === 'string' && product.provider.trim()
+            ? product.provider.trim().slice(0, 80)
+            : typeof product.provenance === 'string' && product.provenance.trim()
+              ? product.provenance.trim().slice(0, 80)
+              : null,
           provenance: 'admin_verified',
         };
         const saved = await persistAdminVerifiedMapping(env, mapping);
@@ -799,30 +868,40 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       });
       if (verifiedMapping) {
         const started = Date.now();
-        const product = verifiedMappingProduct(verifiedMapping);
+        const configuredProviders = commerceProviders(env);
+        const refreshed = configuredProviders.length
+          ? await refreshVerifiedOffers(configuredProviders, verifiedMapping)
+          : { products: [verifiedMappingProduct(verifiedMapping)], providers_used: [], commerce_calls: {}, provider_retrieval_ms: 0 };
         const total_ms = Date.now() - started;
         recordAlphaScoop({
           telemetry: alphaTelemetry,
           state: 'RESULTS',
           totalMs: total_ms,
-          providersUsed: [],
-          resultRows: [{ id: product.id, result_class: product.result_class }],
+          providersUsed: refreshed.providers_used,
+          resultRows: refreshed.products.map((product) => ({ id: product.id, result_class: product.result_class })),
           verificationUsage: undefined,
-          commerceCalls: {},
+          commerceCalls: refreshed.commerce_calls,
           visionUsage: rawDescription?.provider_usage,
         });
         return jsonResponse({
-          query: buildProductQueryVariants(description, context)[0],
-          products: [product],
+          query: {
+            query: verifiedMapping.title,
+            category: verifiedMapping.object_type,
+            subcategory: verifiedMapping.object_type,
+            brand: verifiedMapping.brand || null,
+            model: verifiedMapping.product_id || null,
+            attributes: [],
+          },
+          products: refreshed.products,
           state: 'RESULTS',
-          providers_configured: [],
-          providers_used: [],
-          attempts: 0,
-          verification: { retrieved: 0, metadata_prefiltered: 0, light_escalations: 0, compared: 0, image_failures: 0, image_failure_reasons: {}, rejected: 0, contradictions: {} },
-          cost_usage: { commerce_calls: {}, verification_usage: { provider: 'none', model: 'none', requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0 } },
+          providers_configured: configuredProviders.map(({ name }) => name),
+          providers_used: refreshed.providers_used,
+          attempts: refreshed.providers_used.length,
+          verification: { retrieved: refreshed.products.length, metadata_prefiltered: 0, light_escalations: 0, compared: 0, image_failures: 0, image_failure_reasons: {}, rejected: 0, contradictions: {} },
+          cost_usage: { commerce_calls: refreshed.commerce_calls, verification_usage: { provider: 'none', model: 'none', requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0 } },
           verified_mapping: { hit: true, provenance: verifiedMapping.provenance, product_id: verifiedMapping.product_id },
           latency_ms: total_ms,
-          timing: { provider_retrieval_ms: 0, candidate_verification_ms: 0, candidate_image_fetch_ms: 0, candidate_model_verification_ms: 0, verification_batches: [], total_ms },
+          timing: { provider_retrieval_ms: refreshed.provider_retrieval_ms, candidate_verification_ms: 0, candidate_image_fetch_ms: 0, candidate_model_verification_ms: 0, verification_batches: [], total_ms },
         });
       }
       const providers = commerceProviders(env);
