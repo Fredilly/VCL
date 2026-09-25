@@ -174,6 +174,16 @@ test('feedback UI uses reversible selected thumbs without thank-you copy', () =>
 });
 
 
+test('product feedback and verify controls stay inside their product card', () => {
+  assert.match(content, /const card = document\.createElement\('div'\)/);
+  assert.match(content, /card\.appendChild\(row\)/);
+  assert.match(content, /card\.appendChild\(feedback\)/);
+  assert.match(content, /panel\.appendChild\(card\)/);
+  assert.doesNotMatch(content, /panel\.appendChild\(feedback\)/);
+  assert.doesNotMatch(content, /margin: '-/);
+});
+
+
 test('verified result UI uses one exact-match badge and concise evidence copy without SKU/admin jargon', () => {
   assert.match(content, /exactBadge\.textContent = '✓ Exact match'/);
   assert.match(content, /Matched from visible text and shirt details/);
