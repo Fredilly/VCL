@@ -323,10 +323,19 @@ export function selectSameVideoVisualWinner(input: {
   if (confirmed.length > 1) {
     return { mapping: null, canonical_key: null, confidence: 0, reason: 'ambiguous' };
   }
+
+  const observed = [...input.comparisons.values()]
+    .filter((comparison) => Number.isFinite(comparison.similarity) && Number.isFinite(comparison.confidence))
+    .sort((a, b) => (b.similarity * b.confidence) - (a.similarity * a.confidence))[0];
+
   return {
     mapping: null,
     canonical_key: null,
     confidence: 0,
     reason: sawComparison ? 'visual_rejected' : 'visual_unavailable',
+    ...(observed ? {
+      visual_similarity: observed.similarity,
+      visual_confidence: observed.confidence,
+    } : {}),
   };
 }
