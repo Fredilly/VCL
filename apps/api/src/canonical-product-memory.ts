@@ -14,6 +14,12 @@ export type CanonicalProductIdentity = {
   model: string | null;
   object_type: string;
   visible_text: string[];
+  color?: string | null;
+  material?: string | null;
+  style_attributes?: string[];
+  logos_markings?: string[];
+  distinctive_features?: string[];
+  shape_silhouette?: string[];
   normalized_fingerprint: string;
   provenance: VerifiedProductProvenance;
   verified_at: string;
@@ -25,6 +31,12 @@ type CanonicalIdentityInput = {
   model?: string | null;
   merchantItemId?: string | null;
   visibleText?: string[];
+  color?: string | null;
+  material?: string | null;
+  styleAttributes?: string[];
+  logosMarkings?: string[];
+  distinctiveFeatures?: string[];
+  shapeSilhouette?: string[];
   verifiedAt?: string;
 };
 
@@ -68,6 +80,12 @@ function normalizedFingerprint(input: {
   model: string | null;
   objectType: string;
   visibleText: string[];
+  color?: string | null;
+  material?: string | null;
+  styleAttributes?: string[];
+  logosMarkings?: string[];
+  distinctiveFeatures?: string[];
+  shapeSilhouette?: string[];
 }): string {
   return [
     `brand:${normalizeIdentityText(input.brand)}`,
@@ -75,6 +93,12 @@ function normalizedFingerprint(input: {
     `type:${normalizeIdentityText(input.objectType)}`,
     `title:${normalizeIdentityText(input.title)}`,
     `text:${input.visibleText.map(normalizeIdentityText).filter(Boolean).sort().join(' ')}`,
+    `color:${normalizeIdentityText(input.color)}`,
+    `material:${normalizeIdentityText(input.material)}`,
+    `style:${(input.styleAttributes ?? []).map(normalizeIdentityText).filter(Boolean).sort().join(' ')}`,
+    `markings:${(input.logosMarkings ?? []).map(normalizeIdentityText).filter(Boolean).sort().join(' ')}`,
+    `features:${(input.distinctiveFeatures ?? []).map(normalizeIdentityText).filter(Boolean).sort().join(' ')}`,
+    `shape:${(input.shapeSilhouette ?? []).map(normalizeIdentityText).filter(Boolean).sort().join(' ')}`,
   ].join('|');
 }
 
@@ -85,9 +109,27 @@ export function canonicalProductIdentity(input: CanonicalIdentityInput): Canonic
   const model = bounded(input.model, 160) || null;
   const objectType = bounded(mapping.object_type, 100);
   const visibleText = uniqueText(input.visibleText);
+  const color = bounded(input.color, 80) || null;
+  const material = bounded(input.material, 120) || null;
+  const styleAttributes = uniqueText(input.styleAttributes, 12);
+  const logosMarkings = uniqueText(input.logosMarkings, 8);
+  const distinctiveFeatures = uniqueText(input.distinctiveFeatures, 12);
+  const shapeSilhouette = uniqueText(input.shapeSilhouette, 8);
   if (!title || !objectType) throw new Error('Canonical product identity needs title and object type');
 
-  const normalized_fingerprint = normalizedFingerprint({ title, brand, model, objectType, visibleText });
+  const normalized_fingerprint = normalizedFingerprint({
+    title,
+    brand,
+    model,
+    objectType,
+    visibleText,
+    color,
+    material,
+    styleAttributes,
+    logosMarkings,
+    distinctiveFeatures,
+    shapeSilhouette,
+  });
   const identityBasis = model
     ? [normalizeIdentityText(brand), normalizeIdentityText(model), normalizeIdentityText(objectType)].join('|')
     : [normalizeIdentityText(brand), normalizeIdentityText(title), normalizeIdentityText(objectType), visibleText.map(normalizeIdentityText).join(' ')].join('|');
@@ -101,6 +143,12 @@ export function canonicalProductIdentity(input: CanonicalIdentityInput): Canonic
     model,
     object_type: objectType,
     visible_text: visibleText,
+    color,
+    material,
+    style_attributes: styleAttributes,
+    logos_markings: logosMarkings,
+    distinctive_features: distinctiveFeatures,
+    shape_silhouette: shapeSilhouette,
     normalized_fingerprint,
     provenance: mapping.provenance,
     verified_at: input.verifiedAt ?? new Date().toISOString(),
@@ -142,7 +190,13 @@ export function mergeCanonicalProductIdentity(
     model: existing.model ?? incoming.model,
     object_type: existing.object_type || incoming.object_type,
     visible_text: uniqueText([...existing.visible_text, ...incoming.visible_text]),
-    normalized_fingerprint: existing.normalized_fingerprint || incoming.normalized_fingerprint,
+    color: existing.color ?? incoming.color ?? null,
+    material: existing.material ?? incoming.material ?? null,
+    style_attributes: uniqueText([...(existing.style_attributes ?? []), ...(incoming.style_attributes ?? [])], 12),
+    logos_markings: uniqueText([...(existing.logos_markings ?? []), ...(incoming.logos_markings ?? [])], 8),
+    distinctive_features: uniqueText([...(existing.distinctive_features ?? []), ...(incoming.distinctive_features ?? [])], 12),
+    shape_silhouette: uniqueText([...(existing.shape_silhouette ?? []), ...(incoming.shape_silhouette ?? [])], 8),
+    normalized_fingerprint: incoming.normalized_fingerprint || existing.normalized_fingerprint,
     provenance: existing.provenance,
     verified_at: incoming.verified_at,
     merchant_refs: merchantRefs.slice(0, 25),
