@@ -15,7 +15,9 @@
     "cost:summary": "node tests/cost/summarize.mjs",
     "cost:compare": "node tests/cost/compare.mjs",
     "secret:add": "node tools/secrets.mjs add",
-    "secrets:check": "node tools/secrets.mjs check"
+    "secrets:check": "node tools/secrets.mjs check",
+    "dev:auto": "node tools/dev-auto-sync.mjs",
+    "setup:dev-auto": "bash tools/install-scoop-autosync-macos.sh"
   },
   "devDependencies": {
     "wrangler": "^4.131.0"
