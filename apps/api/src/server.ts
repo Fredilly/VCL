@@ -818,6 +818,12 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           model: typeof product.model === 'string' ? product.model : null,
           merchantItemId: typeof product.id === 'string' ? product.id : null,
           visibleText: description.visible_text,
+          color: description.color,
+          material: description.material,
+          styleAttributes: description.style_attributes,
+          logosMarkings: description.logos_markings,
+          distinctiveFeatures: description.distinctive_features,
+          shapeSilhouette: description.shape_silhouette,
         });
         const canonical = await persistCanonicalProductIdentity(env, identity);
         const mapping: VerifiedProductMapping = { ...mappingBase, canonical_key: canonical.canonical_key };
