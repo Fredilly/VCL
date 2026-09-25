@@ -156,7 +156,7 @@ export function chooseSameVideoVerifiedReuse(input: {
     const partialIdentity = signals.identityOverlap.shared >= 1 && signals.secondarySignals >= 3;
     const structuralCandidate = signals.identityOverlap.shared === 0
       && signals.color === true
-      && signals.secondarySignals >= 3;
+      && signals.secondarySignals >= 2;
 
     if (strongText || partialIdentity || structuralCandidate) {
       const confidence = strongText ? 0.9 : partialIdentity ? 0.82 : 0.72;
