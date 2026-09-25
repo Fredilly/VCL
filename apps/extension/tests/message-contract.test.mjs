@@ -154,3 +154,13 @@ test('macOS admin shortcut uses physical KeyA instead of localized Option+A char
   assert.match(content, /event\.altKey && event\.shiftKey && event\.code === 'KeyA'/);
   assert.doesNotMatch(content, /event\.key\.toLowerCase\(\) === 'a'/);
 });
+
+
+test('admin controls use per-admin session tokens and can promote non-EXACT candidates', () => {
+  assert.match(background, /scoop_admin_session/);
+  assert.match(background, /\/admin\/auth/);
+  assert.match(background, /X-Scoop-Admin-Session/);
+  assert.match(content, /if \(admin\?\.admin && adminPayload\)/);
+  assert.doesNotMatch(content, /admin\?\.admin && product\.result_class === 'EXACT'/);
+  assert.match(content, /VCL_ADMIN_CREATE_INVITE/);
+});
