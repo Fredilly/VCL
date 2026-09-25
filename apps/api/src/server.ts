@@ -29,7 +29,8 @@ export { FeedbackLedger } from './feedback-ledger.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
-import { durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
+import { durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
+import { chooseSameVideoVerifiedReuse, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalProductIdentity } from './canonical-product-memory.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 export { AlphaAccessLedger } from './alpha-access.js';
@@ -1056,7 +1057,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       const context = normalizeContext(record.context);
       const contentRef = context?.content_ref ?? null;
       const durableMappings = await durableVerifiedMappings(env, context?.platform ?? null, contentRef).catch(() => []);
-      const verifiedMapping = lookupVerifiedProductMapping({
+      let verifiedMapping = lookupVerifiedProductMapping({
         rawRegistry: env.VERIFIED_PRODUCT_MAPPINGS_JSON,
         mappings: durableMappings,
         allowTestFixtures: benchmarkMode || env.VERIFIED_PRODUCT_TEST_MODE === 'true',
@@ -1065,6 +1066,26 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         timestampMs: context?.timestamp_ms ?? null,
         description,
       });
+      let sameVideoReuse: SameVideoReuseDecision = {
+        mapping: null,
+        canonical_key: null,
+        confidence: 0,
+        reason: 'no_candidate',
+      };
+      if (!verifiedMapping && durableMappings.length) {
+        const canonicalMappings = durableMappings.filter((mapping) => Boolean(mapping.canonical_key));
+        const canonicalRows = await Promise.all(canonicalMappings.map(async (mapping) => {
+          const identity = mapping.canonical_key
+            ? await durableCanonicalProductIdentity(env, mapping.canonical_key).catch(() => null)
+            : null;
+          return identity ? { mapping, identity } : null;
+        }));
+        sameVideoReuse = chooseSameVideoVerifiedReuse({
+          description,
+          candidates: canonicalRows.filter((row): row is NonNullable<typeof row> => Boolean(row)),
+        });
+        if (sameVideoReuse.mapping) verifiedMapping = sameVideoReuse.mapping;
+      }
       if (verifiedMapping) {
         const started = Date.now();
         const configuredProviders = commerceProviders(env);
@@ -1096,7 +1117,17 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           attempts: refreshed.providers_used.length,
           verification: { retrieved: refreshed.products.length, metadata_prefiltered: 0, light_escalations: 0, compared: 0, image_failures: 0, image_failure_reasons: {}, rejected: 0, contradictions: {} },
           cost_usage: { commerce_calls: refreshed.commerce_calls, verification_usage: { provider: 'none', model: 'none', requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0 } },
-          verified_mapping: { hit: true, provenance: verifiedMapping.provenance, product_id: verifiedMapping.product_id },
+          verified_mapping: {
+            hit: true,
+            provenance: verifiedMapping.provenance,
+            product_id: verifiedMapping.product_id,
+            ...(sameVideoReuse.mapping ? {
+              reuse: 'same_video',
+              canonical_key: sameVideoReuse.canonical_key,
+              confidence: sameVideoReuse.confidence,
+              reason: sameVideoReuse.reason,
+            } : {}),
+          },
           latency_ms: total_ms,
           timing: { provider_retrieval_ms: refreshed.provider_retrieval_ms, candidate_verification_ms: 0, candidate_image_fetch_ms: 0, candidate_model_verification_ms: 0, verification_batches: [], total_ms },
         });
@@ -1217,7 +1248,18 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           return { ...product, attribution_token: attribution.attribution_token, click_ref: attribution.click_ref };
         }));
       }
-      return jsonResponse({ ...resolved, products: attributedProducts, feedback_learning: feedbackLearning, latency_ms: total_ms, timing: { ...resolved.timing, total_ms },
+      return jsonResponse({
+        ...resolved,
+        products: attributedProducts,
+        feedback_learning: feedbackLearning,
+        verified_mapping: {
+          hit: false,
+          reuse: 'same_video',
+          confidence: sameVideoReuse.confidence,
+          reason: sameVideoReuse.reason,
+        },
+        latency_ms: total_ms,
+        timing: { ...resolved.timing, total_ms },
         ...(resolved.state === 'TEMPORARILY_UNAVAILABLE' ? { failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: true } :
           resolved.state === 'NO_RESULTS' ? { failure_state: 'NO_RESULTS', retryable: false } : {}) });
     }
