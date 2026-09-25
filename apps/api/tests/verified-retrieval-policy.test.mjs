@@ -157,7 +157,7 @@ test('verified commerce mapping hydrates its thumbnail and returns every same-SK
   const result = await response.json();
 
   assert.equal(response.status, 200);
-  assert.equal(result.products.length, 2, `canonical listing plus the second seller with the same SKU; got ${JSON.stringify(result.products)}; fetches=${JSON.stringify(fetches)}`);
+  assert.equal(result.products.length, 2, `canonical listing plus the second seller with the same SKU; got ${JSON.stringify(result.products)}; providers=${JSON.stringify(result.providers_configured)}; fetches=${JSON.stringify(fetches)}`);
   assert.equal(result.products[0].id, 'ITEM-EXACT', 'verified source listing must stay first');
   assert.equal(result.products[0].image_reference, 'https://i.ebayimg.com/live-source.jpg', 'live source thumbnail wins over saved image');
   assert.equal(result.products[1].id, 'ITEM-EXACT-2');
