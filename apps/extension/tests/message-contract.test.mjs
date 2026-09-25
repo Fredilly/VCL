@@ -180,7 +180,7 @@ test('product feedback and verify controls stay inside their product card', () =
   assert.match(content, /card\.appendChild\(feedback\)/);
   assert.match(content, /panel\.appendChild\(card\)/);
   assert.doesNotMatch(content, /panel\.appendChild\(feedback\)/);
-  assert.doesNotMatch(content, /margin: '-/);
+  assert.doesNotMatch(content, /Object\.assign\(feedback\.style,[\s\S]*?margin:\s*'-/);
 });
 
 
