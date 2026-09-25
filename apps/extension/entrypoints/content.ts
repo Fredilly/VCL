@@ -206,12 +206,16 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
     title.textContent = product.title;
     Object.assign(title.style, { fontWeight: '600', lineHeight: '1.3' });
     const meta = document.createElement('div');
-    const parts = [product.result_class, product.price && product.currency ? `${product.price} ${product.currency}` : null];
+    const isScoopVerified = ['admin_verified', 'creator_verified', 'brand_verified'].includes(product.provenance ?? product.provider ?? '');
+    const parts = [
+      isScoopVerified ? 'Scoop Verified' : product.result_class,
+      product.price && product.currency ? `${product.price} ${product.currency}` : null,
+    ];
     if (__VCL_DEBUG_PROVENANCE__ && product.provider) parts.push(`source: ${product.provider}`);
     meta.textContent = parts.filter(Boolean).join(' · ');
     Object.assign(meta.style, { opacity: '0.7', marginTop: '4px' });
     text.append(title, meta);
-    if (product.provider) {
+    if (product.provider && !isScoopVerified) {
       const providerLabel = document.createElement('div');
       providerLabel.textContent = product.provider;
       Object.assign(providerLabel.style, { fontSize: '11px', opacity: '0.5', marginTop: '2px' });
@@ -479,11 +483,9 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       summary.textContent = verifiedProduct.title;
       Object.assign(summary.style, { fontSize: '15px', marginBottom: '4px' });
 
-      const verifiedMeta = [
-        verifiedProduct.brand,
-        verifiedProduct.model ? `SKU ${verifiedProduct.model}` : null,
-      ].filter(Boolean).join(' · ');
-      attrs.textContent = verifiedMeta || (isTestFixture ? 'Known-SKU test mapping' : 'Verified product mapping');
+      attrs.textContent = isTestFixture
+        ? (verifiedProduct.brand || 'Known test product')
+        : [verifiedProduct.brand, 'Scoop Verified'].filter(Boolean).join(' · ');
 
       const visualTitle = [
         analysis.subcategory || analysis.category,
@@ -492,8 +494,8 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       const visualDetails = detailParts.join(' · ');
       confidence.textContent = `Visually detected: ${[visualTitle, visualDetails].filter(Boolean).join(' · ')}`;
       identityConfidence.textContent = isTestFixture
-        ? 'Identity source: known-SKU test mapping'
-        : 'Identity source: verified product data';
+        ? 'Known test product'
+        : 'Scoop Verified';
       Object.assign(confidence.style, { opacity: '0.72', marginTop: '8px' });
       Object.assign(identityConfidence.style, { opacity: '0.72', marginTop: '3px' });
 
