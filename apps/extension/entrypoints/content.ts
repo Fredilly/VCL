@@ -72,7 +72,7 @@ function parseCommerceResponse(value: unknown): CommerceResponse {
   return value as CommerceResponse;
 }
 
-function surfaceContext() {
+function surfaceContext(currentTime?: number) {
   const youtubeTitle = document.querySelector('h1.ytd-watch-metadata yt-formatted-string')?.textContent?.trim()
     || document.querySelector('h1.title yt-formatted-string')?.textContent?.trim()
     || document.title.replace(/\s*-\s*YouTube\s*$/i, '').trim();
@@ -82,6 +82,7 @@ function surfaceContext() {
     platform: location.hostname.includes('youtube.com') ? 'youtube' : 'generic-html5',
     title: youtubeTitle || null,
     content_ref: youtubeId ? `youtube:${youtubeId}` : null,
+    timestamp_ms: typeof currentTime === 'number' && Number.isFinite(currentTime) ? Math.round(currentTime * 1000) : null,
   };
 }
 
@@ -147,7 +148,8 @@ function formatLatency(ms: number) {
   return `${value}s`;
 }
 
-function renderProducts(panel: HTMLElement, commerce: CommerceResponse, eventId: string) {
+async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, eventId: string, adminPayload?: { description: ObjectDescription; context: ReturnType<typeof surfaceContext>; timestamp_ms: number }) {
+  const admin = adminPayload ? await browser.runtime.sendMessage({ type: 'VCL_ADMIN_STATUS' }).catch(() => ({ admin: false })) : { admin: false };
   const heading = document.createElement('div');
   heading.textContent = `Products · ${commerce.products.length} · ${formatLatency(commerce.latency_ms)}`;
   Object.assign(heading.style, { fontWeight: '700', margin: '12px 0 8px' });
@@ -241,6 +243,30 @@ function renderProducts(panel: HTMLElement, commerce: CommerceResponse, eventId:
     yes.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void submit('correct_match'); });
     no.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void submit('wrong_item'); });
     feedback.append(yes, no);
+    if (admin?.admin && product.result_class === 'EXACT' && adminPayload) {
+      const verify = button(commerce.verified_mapping?.hit && commerce.verified_mapping?.provenance === 'admin_verified' ? '✓ Verified' : 'Verify exact');
+      Object.assign(verify.style, { height: '32px', padding: '0 9px', fontSize: '11px', opacity: commerce.verified_mapping?.hit ? '0.72' : '0.9' });
+      verify.disabled = Boolean(commerce.verified_mapping?.hit && commerce.verified_mapping?.provenance === 'admin_verified');
+      verify.addEventListener('click', (event) => {
+        event.preventDefault(); event.stopPropagation();
+        verify.disabled = true; verify.textContent = 'Saving…';
+        void browser.runtime.sendMessage({
+          type: 'VCL_ADMIN_VERIFY',
+          payload: {
+            action: 'verify',
+            platform: adminPayload.context.platform,
+            content_ref: adminPayload.context.content_ref,
+            timestamp_ms: adminPayload.timestamp_ms,
+            description: adminPayload.description,
+            product,
+          },
+        }).then((response) => {
+          verify.textContent = response?.accepted ? '✓ Verified' : 'Try again';
+          verify.disabled = Boolean(response?.accepted);
+        }).catch(() => { verify.textContent = 'Try again'; verify.disabled = false; });
+      });
+      feedback.appendChild(verify);
+    }
     panel.appendChild(feedback);
   }
 }
@@ -408,7 +434,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       type: 'VCL_RESOLVE_PRODUCTS',
       requestId: crypto.randomUUID(),
       description: analysis,
-      context: surfaceContext(),
+      context: surfaceContext(result.currentTime),
       source_image: result.dataUrl,
       telemetry: { event_id: scoopEventId, session_id: alphaSessionId, interaction_started_at: interactionStarted },
     });
@@ -495,7 +521,11 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     }
     scanAnimation?.cancel();
     scanLine.remove();
-    renderProducts(panel, commerce, scoopEventId);
+    await renderProducts(panel, commerce, scoopEventId, {
+      description: analysis,
+      context: surfaceContext(result.currentTime),
+      timestamp_ms: Math.round(result.currentTime * 1000),
+    });
   } catch (error) {
     if (controller.signal.aborted) return;
     scanAnimation?.cancel();
@@ -643,7 +673,17 @@ export default defineContentScript({
         });
       }
     });
-    window.addEventListener('keydown', (event) => { if (event.key === 'Escape') cleanupScoopUi(); });
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') cleanupScoopUi();
+      if (event.altKey && event.shiftKey && event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        const token = window.prompt('Scoop admin token');
+        if (!token?.trim()) return;
+        void browser.runtime.sendMessage({ type: 'VCL_ADMIN_AUTH', token: token.trim() }).then((response) => {
+          window.alert(response?.admin ? 'Scoop admin mode enabled on this browser.' : 'Admin token was not accepted.');
+        }).catch(() => window.alert('Could not enable Scoop admin mode.'));
+      }
+    });
     window.addEventListener('pagehide', cleanupScoopUi, { once: true });
     window.addEventListener('beforeunload', cleanupScoopUi, { once: true });
   },

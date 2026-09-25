@@ -28,8 +28,10 @@ import { applyFeedbackPenalties, evidenceFingerprint, feedbackCandidateKey, feed
 export { FeedbackLedger } from './feedback-ledger.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
-import { lookupVerifiedProductMapping, verifiedMappingProduct } from './verified-product-mapping.js';
+import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
+import { durableVerifiedMappings, persistAdminVerifiedMapping, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
 export { AlphaAccessLedger } from './alpha-access.js';
+export { VerifiedProductLedger } from './verified-product-ledger.js';
 
 export interface Env {
   GEMINI_API_KEY?: string;
@@ -71,6 +73,7 @@ export interface Env {
   ALPHA_INVITE_REQUIRED?: string;
   ALPHA_INVITE_SECRET?: string;
   ALPHA_ACCESS_LEDGER?: AlphaAccessNamespaceLike;
+  VERIFIED_PRODUCT_LEDGER?: VerifiedProductLedgerNamespaceLike;
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
@@ -140,7 +143,12 @@ function dedupeProducts(products: ProductCandidate[]) {
 function normalizeContext(value: unknown): ProductContext | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const v = value as Record<string, unknown>;
-  return { platform: typeof v.platform === 'string' ? v.platform.slice(0, 40) : null, title: typeof v.title === 'string' ? v.title.slice(0, 300) : null, content_ref: typeof v.content_ref === 'string' ? v.content_ref.slice(0, 180) : null };
+  return {
+    platform: typeof v.platform === 'string' ? v.platform.slice(0, 40) : null,
+    title: typeof v.title === 'string' ? v.title.slice(0, 300) : null,
+    content_ref: typeof v.content_ref === 'string' ? v.content_ref.slice(0, 180) : null,
+    timestamp_ms: typeof v.timestamp_ms === 'number' && Number.isFinite(v.timestamp_ms) && v.timestamp_ms >= 0 ? Math.round(v.timestamp_ms) : null,
+  };
 }
 
 function makeEbayAuth(creds: EbayCredentials): EbayAuth {
@@ -468,6 +476,10 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
     const active = await authorizeAlphaRequest(env, request);
     return jsonResponse({ required: true, active });
   }
+  if (request.method === 'GET' && path === '/admin/status') {
+    const adminToken = env.ALPHA_FEEDBACK_ADMIN_TOKEN || env.ALPHA_ATTRIBUTION_SECRET;
+    return jsonResponse({ admin: Boolean(adminToken && request.headers.get('x-scoop-admin-token') === adminToken) });
+  }
   if (request.method !== 'POST') return jsonResponse({ error: 'Not found' }, 404);
   if (env.ALPHA_ENABLED === 'false' && path !== '/feedback' && path !== '/commerce-click') {
     return jsonResponse({ error: 'Scoop alpha is temporarily paused', reason: 'ALPHA_DISABLED', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: false }, 503);
@@ -481,6 +493,53 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       return activated.accepted
         ? jsonResponse({ accepted: true, invite_id: activated.invite_id, expires_at: activated.expires_at })
         : jsonResponse({ error: 'Invalid, expired, or already-used invite', reason: 'ALPHA_INVITE_REJECTED' }, 403);
+    }
+    if (path === '/admin/verified-product') {
+      const adminToken = env.ALPHA_FEEDBACK_ADMIN_TOKEN || env.ALPHA_ATTRIBUTION_SECRET;
+      if (!adminToken || request.headers.get('x-scoop-admin-token') !== adminToken) return jsonResponse({ error: 'Unauthorized' }, 401);
+      try {
+        const body = await request.json() as Record<string, unknown>;
+        const action = body.action === 'revoke' ? 'revoke' : 'verify';
+        const platform = typeof body.platform === 'string' ? body.platform.slice(0, 40) : '';
+        const contentRef = typeof body.content_ref === 'string' ? body.content_ref.slice(0, 180) : '';
+        if (!platform || !contentRef) return jsonResponse({ error: 'Missing content identity' }, 400);
+        if (action === 'revoke') {
+          const productId = typeof body.product_id === 'string' ? body.product_id.slice(0, 160) : '';
+          if (!productId) return jsonResponse({ error: 'Missing product id' }, 400);
+          return jsonResponse({ revoked: await revokeAdminVerifiedMapping(env, { platform, content_ref: contentRef, product_id: productId }) });
+        }
+        const product = body.product && typeof body.product === 'object' && !Array.isArray(body.product) ? body.product as Record<string, unknown> : {};
+        const description = normalizeObjectDescription(body.description);
+        const timestampMs = typeof body.timestamp_ms === 'number' && Number.isFinite(body.timestamp_ms) && body.timestamp_ms >= 0 ? Math.round(body.timestamp_ms) : null;
+        if (timestampMs === null) return jsonResponse({ error: 'Missing timestamp' }, 400);
+        const destination = typeof product.destination === 'string' ? product.destination : '';
+        try { new URL(destination); } catch { return jsonResponse({ error: 'Verified result needs a valid destination' }, 400); }
+        const productId = typeof product.model === 'string' && product.model.trim()
+          ? product.model.trim().slice(0, 160)
+          : typeof product.id === 'string' ? product.id.trim().slice(0, 160) : '';
+        const title = typeof product.title === 'string' ? product.title.trim().slice(0, 300) : '';
+        if (!productId || !title) return jsonResponse({ error: 'Verified result is missing product identity' }, 400);
+        const mapping: VerifiedProductMapping = {
+          platform,
+          content_ref: contentRef,
+          scope: 'time_window',
+          timestamp_start_ms: Math.max(0, timestampMs - 5000),
+          timestamp_end_ms: timestampMs + 5000,
+          object_type: (description.subcategory || description.category).slice(0, 100),
+          brand: typeof product.brand === 'string' && product.brand.trim()
+            ? product.brand.trim().slice(0, 120)
+            : (description.brand_candidate ?? '').slice(0, 120),
+          product_id: productId,
+          title,
+          destination,
+          provenance: 'admin_verified',
+        };
+        const saved = await persistAdminVerifiedMapping(env, mapping);
+        return jsonResponse({ accepted: true, mapping: saved });
+      } catch (error) {
+        logSafeError(error);
+        return jsonResponse({ error: 'Could not verify exact product' }, 400);
+      }
     }
     if (path === '/alpha/admin/invite') {
       const adminToken = env.ALPHA_FEEDBACK_ADMIN_TOKEN || env.ALPHA_ATTRIBUTION_SECRET;
@@ -703,11 +762,14 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       const description = normalizeObjectDescription(record.description);
       const context = normalizeContext(record.context);
       const contentRef = context?.content_ref ?? null;
+      const durableMappings = await durableVerifiedMappings(env, context?.platform ?? null, contentRef).catch(() => []);
       const verifiedMapping = lookupVerifiedProductMapping({
         rawRegistry: env.VERIFIED_PRODUCT_MAPPINGS_JSON,
+        mappings: durableMappings,
         allowTestFixtures: benchmarkMode || env.VERIFIED_PRODUCT_TEST_MODE === 'true',
         platform: context?.platform ?? null,
         contentRef,
+        timestampMs: context?.timestamp_ms ?? null,
         description,
       });
       if (verifiedMapping) {

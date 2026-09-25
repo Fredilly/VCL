@@ -106,3 +106,40 @@ test('YouTube raw IDs and canonical youtube: refs resolve to the same video', ()
   });
   assert.equal(hit?.product_id, '1WS-1916');
 });
+
+
+test('admin verified time-window mapping is deterministic only inside its verified window', () => {
+  const mapping = {
+    platform: 'youtube',
+    content_ref: 'youtube:ADMIN_VIDEO',
+    scope: 'time_window',
+    timestamp_start_ms: 95000,
+    timestamp_end_ms: 105000,
+    object_type: 'button-down shirt',
+    brand: 'Nike',
+    product_id: 'ADMIN-SKU-1',
+    title: 'Admin Verified Shirt',
+    destination: 'https://www.nike.com/',
+    provenance: 'admin_verified',
+  };
+  const hit = mod.lookupVerifiedProductMapping({
+    mappings: [mapping],
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: 'ADMIN_VIDEO',
+    timestampMs: 100000,
+    description: shirt,
+  });
+  assert.equal(hit?.product_id, 'ADMIN-SKU-1');
+  assert.equal(mod.verifiedMappingProduct(hit).result_class, 'EXACT');
+
+  const miss = mod.lookupVerifiedProductMapping({
+    mappings: [mapping],
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: 'ADMIN_VIDEO',
+    timestampMs: 120000,
+    description: shirt,
+  });
+  assert.equal(miss, null);
+});
