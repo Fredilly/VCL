@@ -134,6 +134,27 @@ test('legacy identity with slogan but no rich fingerprint remains eligible for v
   assert.equal(result.requires_visual, true);
 });
 
+
+
+test('weak OCR can still reach visual confirmation from strong structural agreement', () => {
+  const result = mod.chooseSameVideoVerifiedReuse({
+    description: {
+      ...description,
+      visible_text: [],
+      logos_markings: [],
+      search_terms: ['black t-shirt'],
+    },
+    candidates: [{ mapping, identity }],
+  });
+  assert.equal(result.mapping?.product_id, 'merchant-item-1');
+  assert.equal(result.reason, 'fingerprint_candidate');
+  assert.equal(result.requires_visual, true);
+
+  const confirmed = mod.confirmSameVideoVisual(result, visualMatch);
+  assert.equal(confirmed.mapping?.product_id, 'merchant-item-1');
+  assert.equal(confirmed.reason, 'visual_confirmed');
+});
+
 test('generic same-category item does not become a reuse candidate', () => {
   const result = mod.chooseSameVideoVerifiedReuse({
     description: {
