@@ -498,7 +498,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       Object.assign(exactBadge.style, {
         display: 'inline-flex', alignItems: 'center', gap: '6px', width: 'fit-content',
         padding: '5px 9px', margin: '0 0 10px', borderRadius: '999px',
-        background: 'rgba(48,209,88,.14)', border: '1px solid rgba(48,209,88,.28)', color: '#e7ffed',
+        background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.18)', color: '#fff',
         fontWeight: '650', fontSize: '12px', letterSpacing: '-0.005em',
       });
 
