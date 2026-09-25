@@ -236,7 +236,7 @@ function safeVerifiedSourceUrl(value: string): URL | null {
   }
 }
 
-function metaImageFromHtml(html: string, base: URL): string | null {
+function sourceImageFromHtml(html: string, base: URL): string | null {
   const tags = html.match(/<meta\b[^>]*>/gi) ?? [];
   for (const tag of tags) {
     const property = tag.match(/\b(?:property|name)\s*=\s*["']([^"']+)["']/i)?.[1]?.toLowerCase();
@@ -247,6 +247,25 @@ function metaImageFromHtml(html: string, base: URL): string | null {
       const image = new URL(content.replace(/&amp;/g, '&'), base);
       if (image.protocol === 'https:' || image.protocol === 'http:') return image.toString();
     } catch {}
+  }
+
+  // Some storefronts do not expose social image metadata early in the response.
+  // Fall back to the first real product image in the page rather than leaving a
+  // verified product visually blank. This remains source-backed, not hardcoded.
+  const imageTags = html.match(/<img\b[^>]*>/gi) ?? [];
+  const preferred = imageTags.find((tag) =>
+    /cdn\.shopify\.com/i.test(tag)
+    && /(?:product|shirt|dress|leeward|steel blue|tonal texture)/i.test(tag),
+  ) ?? imageTags.find((tag) => /cdn\.shopify\.com/i.test(tag));
+  if (preferred) {
+    const src = preferred.match(/\b(?:src|data-src)\s*=\s*["']([^"']+)["']/i)?.[1]
+      ?? preferred.match(/\bsrcset\s*=\s*["']([^"' ,]+)/i)?.[1];
+    if (src) {
+      try {
+        const image = new URL(src.replace(/&amp;/g, '&'), base);
+        if (image.protocol === 'https:' || image.protocol === 'http:') return image.toString();
+      } catch {}
+    }
   }
   return null;
 }
@@ -280,11 +299,11 @@ async function sourceImageForVerifiedMapping(mapping: VerifiedProductMapping): P
       if (done) break;
       bytes += value.byteLength;
       html += decoder.decode(value, { stream: true });
-      if (/<meta\b[^>]*(?:og:image|twitter:image)/i.test(html)) break;
+      if (/<meta\b[^>]*(?:og:image|twitter:image)/i.test(html) || /<img\b[^>]*cdn\.shopify\.com/i.test(html)) break;
     }
     try { await reader.cancel(); } catch {}
     html += decoder.decode();
-    const image = metaImageFromHtml(html, new URL(response.url || source.toString()));
+    const image = sourceImageFromHtml(html, new URL(response.url || source.toString()));
     verifiedSourceImageCache.set(source.toString(), { image, expires_at: Date.now() + (image ? 30 * 60_000 : 5 * 60_000) });
     return image;
   } catch {
