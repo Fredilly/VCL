@@ -155,6 +155,18 @@ function formatLatency(ms: number) {
   return `${value}s`;
 }
 
+function productSourceLabel(product: ProductCandidate): string | null {
+  if (product.provider && !['admin_verified', 'creator_verified', 'brand_verified', 'test_fixture', 'verified'].includes(product.provider)) {
+    return product.provider.toLowerCase() === 'ebay' ? 'eBay' : product.provider;
+  }
+  if (!product.destination) return null;
+  try {
+    return new URL(product.destination).hostname.replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+}
+
 async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, eventId: string, adminPayload?: { description: ObjectDescription; context: ReturnType<typeof surfaceContext>; timestamp_ms: number }) {
   const admin = adminPayload ? await browser.runtime.sendMessage({ type: 'VCL_ADMIN_STATUS' }).catch(() => ({ admin: false })) : { admin: false };
   const heading = document.createElement('div');
@@ -222,9 +234,10 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
     meta.textContent = parts.filter(Boolean).join(' · ');
     Object.assign(meta.style, { opacity: '0.7', marginTop: '4px' });
     text.append(title, meta);
-    if (product.provider && !isScoopVerified) {
+    const sourceLabel = productSourceLabel(product);
+    if (sourceLabel) {
       const providerLabel = document.createElement('div');
-      providerLabel.textContent = product.provider.toLowerCase() === 'ebay' ? 'eBay' : product.provider;
+      providerLabel.textContent = sourceLabel;
       Object.assign(providerLabel.style, { fontSize: '11px', opacity: '0.62', marginTop: '2px' });
       text.appendChild(providerLabel);
     }
@@ -237,70 +250,72 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
     row.appendChild(text);
     panel.appendChild(row);
 
-    const feedback = document.createElement('div');
-    Object.assign(feedback.style, { display: 'flex', gap: '6px', margin: '-2px 0 8px 64px' });
-    const yes = button('');
-    const no = button('');
-    yes.setAttribute('aria-label', 'Correct match');
-    no.setAttribute('aria-label', 'Wrong match');
-    yes.setAttribute('title', 'Correct match');
-    no.setAttribute('title', 'Wrong match');
-    const thumbUp = '<svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M8.5 20H5V10h3.5v10Zm2-10 3.2-5.2c.5-.8 1.8-.5 1.8.5V9h3.3c1.2 0 2.1 1.1 1.8 2.3l-1.2 5.8A3.5 3.5 0 0 1 16 20h-5.5V10Z" fill="currentColor"/></svg>';
-    const thumbDown = '<svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M8.5 4H5v10h3.5V4Zm2 10 3.2 5.2c.5.8 1.8.5 1.8-.5V15h3.3c1.2 0 2.1-1.1 1.8-2.3l-1.2-5.8A3.5 3.5 0 0 0 16 4h-5.5v10Z" fill="currentColor"/></svg>';
-    yes.innerHTML = thumbUp;
-    no.innerHTML = thumbDown;
-    Object.assign(yes.style, { width: '34px', height: '32px', padding: '0', display: 'grid', placeItems: 'center', color: '#fff' });
-    Object.assign(no.style, { width: '34px', height: '32px', padding: '0', display: 'grid', placeItems: 'center', color: '#fff', opacity: '0.82' });
-    let selectedFeedback: 'correct_match' | 'wrong_item' | null = null;
-    const paintFeedback = () => {
-      const activeStyle = { background: '#fff', color: '#111', opacity: '1' };
-      const idleStyle = { background: 'transparent', color: '#fff', opacity: '0.82' };
-      Object.assign(yes.style, selectedFeedback === 'correct_match' ? activeStyle : idleStyle);
-      Object.assign(no.style, selectedFeedback === 'wrong_item' ? activeStyle : idleStyle);
-      yes.setAttribute('aria-pressed', selectedFeedback === 'correct_match' ? 'true' : 'false');
-      no.setAttribute('aria-pressed', selectedFeedback === 'wrong_item' ? 'true' : 'false');
-    };
-    const submit = async (feedback_type: 'correct_match' | 'wrong_item') => {
-      const previous = selectedFeedback;
-      selectedFeedback = feedback_type;
-      paintFeedback();
-      yes.disabled = true; no.disabled = true;
-      const response = await browser.runtime.sendMessage({ type: 'VCL_FEEDBACK', event_id: eventId, result_id: product.id, feedback_type }).catch(() => null);
-      yes.disabled = false; no.disabled = false;
-      if (!response?.accepted) {
-        selectedFeedback = previous;
+    if (!isScoopVerified) {
+      const feedback = document.createElement('div');
+      Object.assign(feedback.style, { display: 'flex', gap: '6px', margin: '-2px 0 8px 64px' });
+      const yes = button('');
+      const no = button('');
+      yes.setAttribute('aria-label', 'Correct match');
+      no.setAttribute('aria-label', 'Wrong match');
+      yes.setAttribute('title', 'Correct match');
+      no.setAttribute('title', 'Wrong match');
+      const thumbUp = '<svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M8.5 20H5V10h3.5v10Zm2-10 3.2-5.2c.5-.8 1.8-.5 1.8.5V9h3.3c1.2 0 2.1 1.1 1.8 2.3l-1.2 5.8A3.5 3.5 0 0 1 16 20h-5.5V10Z" fill="currentColor"/></svg>';
+      const thumbDown = '<svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M8.5 4H5v10h3.5V4Zm2 10 3.2 5.2c.5.8 1.8.5 1.8-.5V15h3.3c1.2 0 2.1-1.1 1.8-2.3l-1.2-5.8A3.5 3.5 0 0 0 16 4h-5.5v10Z" fill="currentColor"/></svg>';
+      yes.innerHTML = thumbUp;
+      no.innerHTML = thumbDown;
+      Object.assign(yes.style, { width: '34px', height: '32px', padding: '0', display: 'grid', placeItems: 'center', color: '#fff' });
+      Object.assign(no.style, { width: '34px', height: '32px', padding: '0', display: 'grid', placeItems: 'center', color: '#fff', opacity: '0.82' });
+      let selectedFeedback: 'correct_match' | 'wrong_item' | null = null;
+      const paintFeedback = () => {
+        const activeStyle = { background: '#fff', color: '#111', opacity: '1' };
+        const idleStyle = { background: 'transparent', color: '#fff', opacity: '0.82' };
+        Object.assign(yes.style, selectedFeedback === 'correct_match' ? activeStyle : idleStyle);
+        Object.assign(no.style, selectedFeedback === 'wrong_item' ? activeStyle : idleStyle);
+        yes.setAttribute('aria-pressed', selectedFeedback === 'correct_match' ? 'true' : 'false');
+        no.setAttribute('aria-pressed', selectedFeedback === 'wrong_item' ? 'true' : 'false');
+      };
+      const submit = async (feedback_type: 'correct_match' | 'wrong_item') => {
+        const previous = selectedFeedback;
+        selectedFeedback = feedback_type;
         paintFeedback();
+        yes.disabled = true; no.disabled = true;
+        const response = await browser.runtime.sendMessage({ type: 'VCL_FEEDBACK', event_id: eventId, result_id: product.id, feedback_type }).catch(() => null);
+        yes.disabled = false; no.disabled = false;
+        if (!response?.accepted) {
+          selectedFeedback = previous;
+          paintFeedback();
+        }
+      };
+      yes.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void submit('correct_match'); });
+      no.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void submit('wrong_item'); });
+      paintFeedback();
+      feedback.append(yes, no);
+      if (admin?.admin && adminPayload) {
+        const verify = button(commerce.verified_mapping?.hit && commerce.verified_mapping?.provenance === 'admin_verified' ? '✓ Verified' : 'Verify exact');
+        Object.assign(verify.style, { height: '32px', padding: '0 9px', fontSize: '11px', opacity: commerce.verified_mapping?.hit ? '0.72' : '0.9' });
+        verify.disabled = Boolean(commerce.verified_mapping?.hit && commerce.verified_mapping?.provenance === 'admin_verified');
+        verify.addEventListener('click', (event) => {
+          event.preventDefault(); event.stopPropagation();
+          verify.disabled = true; verify.textContent = 'Saving…';
+          void browser.runtime.sendMessage({
+            type: 'VCL_ADMIN_VERIFY',
+            payload: {
+              action: 'verify',
+              platform: adminPayload.context.platform,
+              content_ref: adminPayload.context.content_ref,
+              timestamp_ms: adminPayload.timestamp_ms,
+              description: adminPayload.description,
+              product,
+            },
+          }).then((response) => {
+            verify.textContent = response?.accepted ? '✓ Verified' : (typeof response?.error === 'string' ? response.error : 'Try again');
+            verify.disabled = Boolean(response?.accepted);
+          }).catch(() => { verify.textContent = 'Try again'; verify.disabled = false; });
+        });
+        feedback.appendChild(verify);
       }
-    };
-    yes.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void submit('correct_match'); });
-    no.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void submit('wrong_item'); });
-    paintFeedback();
-    feedback.append(yes, no);
-    if (admin?.admin && adminPayload) {
-      const verify = button(commerce.verified_mapping?.hit && commerce.verified_mapping?.provenance === 'admin_verified' ? '✓ Verified' : 'Verify exact');
-      Object.assign(verify.style, { height: '32px', padding: '0 9px', fontSize: '11px', opacity: commerce.verified_mapping?.hit ? '0.72' : '0.9' });
-      verify.disabled = Boolean(commerce.verified_mapping?.hit && commerce.verified_mapping?.provenance === 'admin_verified');
-      verify.addEventListener('click', (event) => {
-        event.preventDefault(); event.stopPropagation();
-        verify.disabled = true; verify.textContent = 'Saving…';
-        void browser.runtime.sendMessage({
-          type: 'VCL_ADMIN_VERIFY',
-          payload: {
-            action: 'verify',
-            platform: adminPayload.context.platform,
-            content_ref: adminPayload.context.content_ref,
-            timestamp_ms: adminPayload.timestamp_ms,
-            description: adminPayload.description,
-            product,
-          },
-        }).then((response) => {
-          verify.textContent = response?.accepted ? '✓ Verified' : (typeof response?.error === 'string' ? response.error : 'Try again');
-          verify.disabled = Boolean(response?.accepted);
-        }).catch(() => { verify.textContent = 'Try again'; verify.disabled = false; });
-      });
-      feedback.appendChild(verify);
+      panel.appendChild(feedback);
     }
-    panel.appendChild(feedback);
   }
 }
 
