@@ -13,7 +13,7 @@ test('alpha manifest keeps permissions narrow', () => {
 });
 
 test('commerce context does not transmit the full browsing URL', () => {
-  const start = content.indexOf('function surfaceContext()');
+  const start = content.indexOf('function surfaceContext(');
   const end = content.indexOf('function removeOverlay()', start);
   assert.ok(start >= 0 && end > start);
   const surfaceContext = content.slice(start, end);
