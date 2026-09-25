@@ -206,20 +206,26 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
     title.textContent = product.title;
     Object.assign(title.style, { fontWeight: '600', lineHeight: '1.3' });
     const meta = document.createElement('div');
-    const isScoopVerified = ['admin_verified', 'creator_verified', 'brand_verified'].includes(product.provenance ?? product.provider ?? '');
+    const isScoopVerified = ['admin_verified', 'creator_verified', 'brand_verified'].includes(product.provenance ?? '');
     const parts = [
-      isScoopVerified ? 'Scoop Verified' : product.result_class,
+      !isScoopVerified ? product.result_class : null,
       product.price && product.currency ? `${product.price} ${product.currency}` : null,
     ];
     if (__VCL_DEBUG_PROVENANCE__ && product.provider) parts.push(`source: ${product.provider}`);
     meta.textContent = parts.filter(Boolean).join(' · ');
     Object.assign(meta.style, { opacity: '0.7', marginTop: '4px' });
     text.append(title, meta);
-    if (product.provider && !isScoopVerified) {
+    if (product.provider) {
       const providerLabel = document.createElement('div');
-      providerLabel.textContent = product.provider;
-      Object.assign(providerLabel.style, { fontSize: '11px', opacity: '0.5', marginTop: '2px' });
+      providerLabel.textContent = product.provider.toLowerCase() === 'ebay' ? 'eBay' : product.provider;
+      Object.assign(providerLabel.style, { fontSize: '11px', opacity: '0.62', marginTop: '2px' });
       text.appendChild(providerLabel);
+    }
+    if (isScoopVerified) {
+      const verifiedLabel = document.createElement('div');
+      verifiedLabel.textContent = 'Scoop Verified';
+      Object.assign(verifiedLabel.style, { fontSize: '11px', opacity: '0.82', marginTop: '2px', fontWeight: '600' });
+      text.appendChild(verifiedLabel);
     }
     row.appendChild(text);
     panel.appendChild(row);
