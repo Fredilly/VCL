@@ -30,7 +30,7 @@ import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerc
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
-import { chooseSameVideoVerifiedReuse, confirmSameVideoVisual, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
+import { eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 export { AlphaAccessLedger } from './alpha-access.js';
@@ -483,57 +483,85 @@ async function confirmSameVideoReuseWithImage(
   description: ReturnType<typeof normalizeObjectDescription>,
   context: ProductContext | undefined,
   sourceImage: ReturnType<typeof parseSourceImage>,
-  decision: SameVideoReuseDecision,
-  identity: CanonicalProductIdentity | null,
+  candidates: SameVideoCanonicalCandidate[],
 ): Promise<SameVideoVisualCheck> {
-  const empty = { decision, compared: 0, failures: 0, failure_reasons: {} };
-  if (!decision.mapping || !decision.requires_visual) return empty;
-  if (!sourceImage || !identity) return { ...empty, decision: confirmSameVideoVisual(decision, null) };
+  const noDecision: SameVideoReuseDecision = {
+    mapping: null,
+    canonical_key: null,
+    confidence: 0,
+    reason: 'no_candidate',
+  };
+  const empty = { decision: noDecision, compared: 0, failures: 0, failure_reasons: {} };
 
-  const merchantRef = identity.merchant_refs.find((ref) => Boolean(ref.image_reference && ref.destination));
-  if (!merchantRef?.image_reference) return { ...empty, decision: confirmSameVideoVisual(decision, null) };
+  const exactModel = exactModelSameVideoReuse({ description, candidates });
+  if (exactModel.mapping) return { ...empty, decision: exactModel };
+
+  const eligible = eligibleSameVideoCanonicalCandidates({ description, candidates });
+  if (!eligible.length || !sourceImage) {
+    return { ...empty, decision: { ...noDecision, reason: eligible.length ? 'visual_unavailable' : 'no_candidate' } };
+  }
 
   const useOpenRouter = env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
   const key = useOpenRouter ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY;
-  if (!key) return { ...empty, decision: confirmSameVideoVisual(decision, null) };
+  if (!key) return { ...empty, decision: { ...noDecision, reason: 'visual_unavailable' } };
   const model = useOpenRouter ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
 
-  const candidate: ProductCandidate = {
-    id: identity.canonical_key,
-    title: identity.title,
-    brand: identity.brand,
-    model: identity.model,
-    category: identity.object_type,
-    image_reference: merchantRef.image_reference,
-    provenance: 'canonical_verified',
-    destination: merchantRef.destination,
-    price: null,
-    currency: null,
-    result_class: 'SIMILAR',
-    metadata: {
-      ...(identity.brand ? { brand: identity.brand } : {}),
-      ...(identity.model ? { model: identity.model } : {}),
+  const rows = eligible.flatMap(({ identity }) => {
+    const merchantRef = identity.merchant_refs.find((ref) => Boolean(ref.image_reference && ref.destination));
+    if (!merchantRef?.image_reference) return [];
+    const product: ProductCandidate = {
+      id: identity.canonical_key,
+      title: identity.title,
+      brand: identity.brand,
+      model: identity.model,
       category: identity.object_type,
-      ...(identity.color ? { color: identity.color } : {}),
-      ...(identity.material ? { material: identity.material } : {}),
-    },
-  };
+      image_reference: merchantRef.image_reference,
+      provenance: 'canonical_verified',
+      destination: merchantRef.destination,
+      price: null,
+      currency: null,
+      result_class: 'SIMILAR',
+      metadata: {
+        ...(identity.brand ? { brand: identity.brand } : {}),
+        ...(identity.model ? { model: identity.model } : {}),
+        category: identity.object_type,
+        ...(identity.color ? { color: identity.color } : {}),
+        ...(identity.material ? { material: identity.material } : {}),
+      },
+    };
+    return [{ identity, product }];
+  });
+
+  if (!rows.length) return { ...empty, decision: { ...noDecision, reason: 'visual_unavailable' } };
 
   const images = await compareCandidateImages(
     key,
     model,
     sourceImage,
     description,
-    [candidate],
+    rows.map((row) => row.product),
     context,
     imageRequestBudget(),
     { provider: useOpenRouter ? 'openrouter' : 'gemini' },
   ).catch(() => null);
 
-  if (!images) return { ...empty, decision: confirmSameVideoVisual(decision, null), failures: 1, failure_reasons: { visual_check_failed: 1 } };
-  const comparison = images.comparisons.get(candidateKey(candidate));
+  if (!images) {
+    return {
+      ...empty,
+      decision: { ...noDecision, reason: 'visual_unavailable' },
+      failures: 1,
+      failure_reasons: { visual_check_failed: 1 },
+    };
+  }
+
+  const comparisons = new Map<string, ImageComparison>();
+  for (const row of rows) {
+    const comparison = images.comparisons.get(candidateKey(row.product));
+    if (comparison) comparisons.set(row.identity.canonical_key, comparison);
+  }
+
   return {
-    decision: confirmSameVideoVisual(decision, comparison),
+    decision: selectSameVideoVisualWinner({ candidates: eligible, comparisons }),
     compared: images.compared,
     failures: images.failures,
     failure_reasons: images.failure_reasons ?? {},
@@ -1188,21 +1216,12 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           return identity ? { mapping, identity } : null;
         }))).filter((row): row is NonNullable<typeof row> => Boolean(row));
 
-        sameVideoReuse = chooseSameVideoVerifiedReuse({
-          description,
-          candidates: canonicalRows,
-        });
-
-        const reuseIdentity = sameVideoReuse.canonical_key
-          ? canonicalRows.find((row) => row.identity.canonical_key === sameVideoReuse.canonical_key)?.identity ?? null
-          : null;
         sameVideoVisualCheck = await confirmSameVideoReuseWithImage(
           env,
           description,
           context,
           sourceImage,
-          sameVideoReuse,
-          reuseIdentity,
+          canonicalRows,
         );
         sameVideoReuse = sameVideoVisualCheck.decision;
         if (sameVideoReuse.mapping) verifiedMapping = sameVideoReuse.mapping;
