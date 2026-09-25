@@ -675,7 +675,7 @@ export default defineContentScript({
     });
     window.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') cleanupScoopUi();
-      if (event.altKey && event.shiftKey && event.key.toLowerCase() === 'a') {
+      if (event.altKey && event.shiftKey && event.code === 'KeyA') {
         event.preventDefault();
         const token = window.prompt('Scoop admin token');
         if (!token?.trim()) return;
