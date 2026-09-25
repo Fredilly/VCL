@@ -1328,6 +1328,25 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       const started = Date.now();
       const markingVerifyV1 = record.benchmark_marking_verify_v1 === true;
       const resolved = await resolveProducts(routedProviders, routedQueries, description, env, context, sourceImage, compareCandidateImages, routing, markingVerifyV1);
+      if (sameVideoVisualCheck.usage) {
+        const usage = resolved.cost_usage.verification_usage;
+        usage.requests += sameVideoVisualCheck.usage.requests ?? 0;
+        usage.prompt_tokens += sameVideoVisualCheck.usage.prompt_tokens ?? 0;
+        usage.completion_tokens += sameVideoVisualCheck.usage.completion_tokens ?? 0;
+        usage.total_tokens += sameVideoVisualCheck.usage.total_tokens ?? 0;
+        usage.cost_usd += sameVideoVisualCheck.usage.cost_usd ?? 0;
+        resolved.verification.compared += sameVideoVisualCheck.compared;
+        resolved.verification.image_failures += sameVideoVisualCheck.failures;
+        for (const [reason, count] of Object.entries(sameVideoVisualCheck.failure_reasons)) {
+          resolved.verification.image_failure_reasons[reason] = (resolved.verification.image_failure_reasons[reason] ?? 0) + count;
+        }
+        if (sameVideoVisualCheck.timing) {
+          resolved.timing.candidate_verification_ms += sameVideoVisualCheck.timing.total_ms;
+          resolved.timing.candidate_image_fetch_ms += sameVideoVisualCheck.timing.image_fetch_ms;
+          resolved.timing.candidate_model_verification_ms += sameVideoVisualCheck.timing.model_ms;
+          resolved.timing.verification_batches.push(...sameVideoVisualCheck.timing.batches);
+        }
+      }
       const feedbackEvidenceKey = evidenceFingerprint(description);
       let feedbackLearning = { penalized: 0, suppressed: 0 };
       if (env.FEEDBACK_LEDGER && resolved.products.length) {
@@ -1340,7 +1359,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           logSafeError(error);
         }
       }
-      const total_ms = Date.now() - started;
+      const total_ms = Date.now() - started + (sameVideoVisualCheck.timing?.total_ms ?? 0);
       const failureState = resolved.state === 'TEMPORARILY_UNAVAILABLE' ? 'TEMPORARILY_UNAVAILABLE' : resolved.state === 'NO_RESULTS' ? 'NO_RESULTS' : undefined;
       if (resolved.state === 'TEMPORARILY_UNAVAILABLE') recordFailureState('commerce', 'PROVIDER_UNAVAILABLE', true);
       else if (resolved.state === 'NO_RESULTS') recordFailureState('commerce', 'NO_RESULTS', false);
