@@ -868,30 +868,40 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       });
       if (verifiedMapping) {
         const started = Date.now();
-        const product = verifiedMappingProduct(verifiedMapping);
+        const configuredProviders = commerceProviders(env);
+        const refreshed = configuredProviders.length
+          ? await refreshVerifiedOffers(configuredProviders, verifiedMapping)
+          : { products: [verifiedMappingProduct(verifiedMapping)], providers_used: [], commerce_calls: {}, provider_retrieval_ms: 0 };
         const total_ms = Date.now() - started;
         recordAlphaScoop({
           telemetry: alphaTelemetry,
           state: 'RESULTS',
           totalMs: total_ms,
-          providersUsed: [],
-          resultRows: [{ id: product.id, result_class: product.result_class }],
+          providersUsed: refreshed.providers_used,
+          resultRows: refreshed.products.map((product) => ({ id: product.id, result_class: product.result_class })),
           verificationUsage: undefined,
-          commerceCalls: {},
+          commerceCalls: refreshed.commerce_calls,
           visionUsage: rawDescription?.provider_usage,
         });
         return jsonResponse({
-          query: buildProductQueryVariants(description, context)[0],
-          products: [product],
+          query: {
+            query: verifiedMapping.title,
+            category: verifiedMapping.object_type,
+            subcategory: verifiedMapping.object_type,
+            brand: verifiedMapping.brand || null,
+            model: verifiedMapping.product_id || null,
+            attributes: [],
+          },
+          products: refreshed.products,
           state: 'RESULTS',
-          providers_configured: [],
-          providers_used: [],
-          attempts: 0,
-          verification: { retrieved: 0, metadata_prefiltered: 0, light_escalations: 0, compared: 0, image_failures: 0, image_failure_reasons: {}, rejected: 0, contradictions: {} },
-          cost_usage: { commerce_calls: {}, verification_usage: { provider: 'none', model: 'none', requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0 } },
+          providers_configured: configuredProviders.map(({ name }) => name),
+          providers_used: refreshed.providers_used,
+          attempts: refreshed.providers_used.length,
+          verification: { retrieved: refreshed.products.length, metadata_prefiltered: 0, light_escalations: 0, compared: 0, image_failures: 0, image_failure_reasons: {}, rejected: 0, contradictions: {} },
+          cost_usage: { commerce_calls: refreshed.commerce_calls, verification_usage: { provider: 'none', model: 'none', requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0 } },
           verified_mapping: { hit: true, provenance: verifiedMapping.provenance, product_id: verifiedMapping.product_id },
           latency_ms: total_ms,
-          timing: { provider_retrieval_ms: 0, candidate_verification_ms: 0, candidate_image_fetch_ms: 0, candidate_model_verification_ms: 0, verification_batches: [], total_ms },
+          timing: { provider_retrieval_ms: refreshed.provider_retrieval_ms, candidate_verification_ms: 0, candidate_image_fetch_ms: 0, candidate_model_verification_ms: 0, verification_batches: [], total_ms },
         });
       }
       const providers = commerceProviders(env);
