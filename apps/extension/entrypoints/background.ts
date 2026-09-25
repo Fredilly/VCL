@@ -1,6 +1,6 @@
 const INSTALL_ID_KEY = 'scoop_alpha_install_id';
 const ALPHA_TOKEN_KEY = 'scoop_alpha_token';
-const ADMIN_TOKEN_KEY = 'scoop_admin_token';
+const ADMIN_SESSION_KEY = 'scoop_admin_session';
 let cachedInstallId: string | undefined;
 
 async function getInstallId() {
@@ -67,36 +67,58 @@ export default defineBackground(() => {
       return true;
     }
     if (message?.type === 'VCL_ADMIN_STATUS') {
-      void browser.storage.local.get(ADMIN_TOKEN_KEY).then(async (stored) => {
-        const token = typeof stored?.[ADMIN_TOKEN_KEY] === 'string' ? stored[ADMIN_TOKEN_KEY] : '';
+      void browser.storage.local.get(ADMIN_SESSION_KEY).then(async (stored) => {
+        const token = typeof stored?.[ADMIN_SESSION_KEY] === 'string' ? stored[ADMIN_SESSION_KEY] : '';
         if (!token) { sendResponse({ admin: false }); return; }
         const response = await fetch('https://api.vcl.article6.org/admin/status', {
-          headers: { 'X-Scoop-Admin-Token': token },
+          headers: { 'X-Scoop-Admin-Session': token },
         });
         const payload = await response.json().catch(() => ({ admin: false }));
-        if (!payload?.admin) await browser.storage.local.remove(ADMIN_TOKEN_KEY);
+        if (!payload?.admin) await browser.storage.local.remove(ADMIN_SESSION_KEY);
         sendResponse({ admin: Boolean(payload?.admin) });
       }).catch(() => sendResponse({ admin: false }));
       return true;
     }
     if (message?.type === 'VCL_ADMIN_AUTH' && typeof message.token === 'string') {
-      const token = message.token.trim();
-      void fetch('https://api.vcl.article6.org/admin/status', {
-        headers: { 'X-Scoop-Admin-Token': token },
+      const credential = message.token.trim();
+      void fetch('https://api.vcl.article6.org/admin/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential, label: typeof message.label === 'string' ? message.label : 'Admin' }),
       }).then(async (response) => {
         const payload = await response.json().catch(() => ({ admin: false }));
-        if (response.ok && payload?.admin) await browser.storage.local.set({ [ADMIN_TOKEN_KEY]: token });
-        sendResponse({ admin: Boolean(response.ok && payload?.admin) });
+        if (response.ok && payload?.admin && typeof payload.session_token === 'string') {
+          await browser.storage.local.set({ [ADMIN_SESSION_KEY]: payload.session_token });
+        }
+        sendResponse({ admin: Boolean(response.ok && payload?.admin), label: payload?.label, expires_at: payload?.expires_at });
       }).catch(() => sendResponse({ admin: false }));
       return true;
     }
+    if (message?.type === 'VCL_ADMIN_CREATE_INVITE') {
+      void browser.storage.local.get(ADMIN_SESSION_KEY).then(async (stored) => {
+        const session = typeof stored?.[ADMIN_SESSION_KEY] === 'string' ? stored[ADMIN_SESSION_KEY] : '';
+        if (!session) { sendResponse({ ok: false, error: 'Admin session missing.' }); return; }
+        const response = await fetch('https://api.vcl.article6.org/admin/invite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Scoop-Admin-Session': session },
+          body: '{}',
+        });
+        const payload = await response.json().catch(() => ({ error: 'Invalid response' }));
+        sendResponse({ ok: response.ok, ...payload });
+      }).catch(() => sendResponse({ ok: false, error: 'Could not create admin invite.' }));
+      return true;
+    }
+    if (message?.type === 'VCL_ADMIN_LOGOUT') {
+      void browser.storage.local.remove(ADMIN_SESSION_KEY).then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
+      return true;
+    }
     if (message?.type === 'VCL_ADMIN_VERIFY' && message.payload && typeof message.payload === 'object') {
-      void browser.storage.local.get(ADMIN_TOKEN_KEY).then(async (stored) => {
-        const token = typeof stored?.[ADMIN_TOKEN_KEY] === 'string' ? stored[ADMIN_TOKEN_KEY] : '';
+      void browser.storage.local.get(ADMIN_SESSION_KEY).then(async (stored) => {
+        const token = typeof stored?.[ADMIN_SESSION_KEY] === 'string' ? stored[ADMIN_SESSION_KEY] : '';
         if (!token) { sendResponse({ accepted: false, error: 'Admin access is not configured.' }); return; }
         const response = await fetch('https://api.vcl.article6.org/admin/verified-product', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Scoop-Admin-Token': token },
+          headers: { 'Content-Type': 'application/json', 'X-Scoop-Admin-Session': token },
           body: JSON.stringify(message.payload),
         });
         const payload = await response.json().catch(() => ({ error: 'Invalid response' }));

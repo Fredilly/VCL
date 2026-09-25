@@ -29,11 +29,12 @@ test('content script is limited to supported alpha surfaces', () => {
 });
 
 
-test('persistent extension storage is limited to anonymous alpha install id', async () => {
+test('persistent extension storage is limited to anonymous access/session identifiers', async () => {
   const background = await readFile(new URL('../entrypoints/background.ts', import.meta.url), 'utf8');
   assert.match(background, /scoop_alpha_install_id/);
   assert.match(background, /browser\.storage\.local\.get\(INSTALL_ID_KEY\)/);
   assert.match(background, /browser\.storage\.local\.set\(\{ \[INSTALL_ID_KEY\]: created \}\)/);
+  assert.match(background, /scoop_admin_session/);
   assert.doesNotMatch(background, /storage\.local\.(set|remove).*dataUrl/);
   assert.doesNotMatch(background, /storage\.local\.(set|remove).*location\.href/);
 });

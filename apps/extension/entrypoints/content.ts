@@ -234,16 +234,32 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
     no.innerHTML = thumbDown;
     Object.assign(yes.style, { width: '34px', height: '32px', padding: '0', display: 'grid', placeItems: 'center', color: '#fff' });
     Object.assign(no.style, { width: '34px', height: '32px', padding: '0', display: 'grid', placeItems: 'center', color: '#fff', opacity: '0.82' });
+    let selectedFeedback: 'correct_match' | 'wrong_item' | null = null;
+    const paintFeedback = () => {
+      const activeStyle = { background: '#fff', color: '#111', opacity: '1' };
+      const idleStyle = { background: 'transparent', color: '#fff', opacity: '0.82' };
+      Object.assign(yes.style, selectedFeedback === 'correct_match' ? activeStyle : idleStyle);
+      Object.assign(no.style, selectedFeedback === 'wrong_item' ? activeStyle : idleStyle);
+      yes.setAttribute('aria-pressed', selectedFeedback === 'correct_match' ? 'true' : 'false');
+      no.setAttribute('aria-pressed', selectedFeedback === 'wrong_item' ? 'true' : 'false');
+    };
     const submit = async (feedback_type: 'correct_match' | 'wrong_item') => {
+      const previous = selectedFeedback;
+      selectedFeedback = feedback_type;
+      paintFeedback();
       yes.disabled = true; no.disabled = true;
       const response = await browser.runtime.sendMessage({ type: 'VCL_FEEDBACK', event_id: eventId, result_id: product.id, feedback_type }).catch(() => null);
-      feedback.textContent = response?.accepted ? 'Thanks — this helps Scoop learn.' : 'Feedback could not be saved.';
-      Object.assign(feedback.style, { opacity: '0.65', fontSize: '11px' });
+      yes.disabled = false; no.disabled = false;
+      if (!response?.accepted) {
+        selectedFeedback = previous;
+        paintFeedback();
+      }
     };
     yes.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void submit('correct_match'); });
     no.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void submit('wrong_item'); });
+    paintFeedback();
     feedback.append(yes, no);
-    if (admin?.admin && product.result_class === 'EXACT' && adminPayload) {
+    if (admin?.admin && adminPayload) {
       const verify = button(commerce.verified_mapping?.hit && commerce.verified_mapping?.provenance === 'admin_verified' ? '✓ Verified' : 'Verify exact');
       Object.assign(verify.style, { height: '32px', padding: '0 9px', fontSize: '11px', opacity: commerce.verified_mapping?.hit ? '0.72' : '0.9' });
       verify.disabled = Boolean(commerce.verified_mapping?.hit && commerce.verified_mapping?.provenance === 'admin_verified');
@@ -677,11 +693,31 @@ export default defineContentScript({
       if (event.key === 'Escape') cleanupScoopUi();
       if (event.altKey && event.shiftKey && event.code === 'KeyA') {
         event.preventDefault();
-        const token = window.prompt('Scoop admin token');
-        if (!token?.trim()) return;
-        void browser.runtime.sendMessage({ type: 'VCL_ADMIN_AUTH', token: token.trim() }).then((response) => {
-          window.alert(response?.admin ? 'Scoop admin mode enabled on this browser.' : 'Admin token was not accepted.');
-        }).catch(() => window.alert('Could not enable Scoop admin mode.'));
+        void browser.runtime.sendMessage({ type: 'VCL_ADMIN_STATUS' }).then(async (status) => {
+          if (status?.admin) {
+            const command = window.prompt('Scoop admin mode is active. Type INVITE to add another admin, LOGOUT to sign out, or Cancel to close.');
+            if (!command?.trim()) return;
+            if (command.trim().toUpperCase() === 'INVITE') {
+              const invite = await browser.runtime.sendMessage({ type: 'VCL_ADMIN_CREATE_INVITE' }).catch(() => null);
+              if (invite?.ok && invite?.code) {
+                window.prompt('One-time admin invite code. Send this privately to the new admin:', invite.code);
+              } else {
+                window.alert('Could not create an admin invite.');
+              }
+              return;
+            }
+            if (command.trim().toUpperCase() === 'LOGOUT') {
+              const result = await browser.runtime.sendMessage({ type: 'VCL_ADMIN_LOGOUT' }).catch(() => null);
+              window.alert(result?.ok ? 'Scoop admin mode signed out on this browser.' : 'Could not sign out admin mode.');
+            }
+            return;
+          }
+
+          const token = window.prompt('Paste your Scoop master admin token or a one-time admin invite code');
+          if (!token?.trim()) return;
+          const response = await browser.runtime.sendMessage({ type: 'VCL_ADMIN_AUTH', token: token.trim() }).catch(() => null);
+          window.alert(response?.admin ? 'Scoop admin mode enabled on this browser.' : 'Admin credential was not accepted.');
+        }).catch(() => window.alert('Could not open Scoop admin controls.'));
       }
     });
     window.addEventListener('pagehide', cleanupScoopUi, { once: true });

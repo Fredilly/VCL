@@ -39,7 +39,7 @@ export type FeedbackPenalty = {
 
 const WRONG_TYPES = new Set(['wrong_item', 'wrong_category', 'not_similar']);
 const CORRECT_TYPES = new Set(['correct_match', 'useful']);
-export const FEEDBACK_RANKING_POLICY = 'alpha-feedback-v1';
+export const FEEDBACK_RANKING_POLICY = 'alpha-feedback-v2';
 
 function bounded(value: unknown, max: number): string {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
@@ -258,18 +258,40 @@ export class FeedbackLedger {
 
     if (path === '/feedback') {
       const feedback = normalizeUserFeedback(await request.json());
-      const exists = this.rows(
-        'SELECT 1 AS present FROM feedback WHERE event_id = ? AND result_id = ? AND feedback_type = ? LIMIT 1',
-        feedback.event_id, feedback.result_id, feedback.feedback_type,
-      ).length > 0;
-      if (!exists) {
+      const existing = this.rows(
+        'SELECT feedback_type, applied FROM feedback WHERE event_id = ? AND result_id = ?',
+        feedback.event_id, feedback.result_id,
+      );
+      const unchanged = existing.length === 1 && String(existing[0].feedback_type ?? '') === feedback.feedback_type;
+      if (!unchanged) {
+        const context = this.rows(
+          'SELECT evidence_key, candidate_key FROM result_context WHERE event_id = ? AND result_id = ? LIMIT 1',
+          feedback.event_id, feedback.result_id,
+        )[0];
+        if (context) {
+          for (const row of existing) {
+            if (Number(row.applied ?? 0) !== 1) continue;
+            const type = String(row.feedback_type ?? '');
+            const wrong = WRONG_TYPES.has(type) ? 1 : 0;
+            const correct = CORRECT_TYPES.has(type) ? 1 : 0;
+            this.sql.exec(
+              `UPDATE mapping_signal
+               SET wrong_count = MAX(0, wrong_count - ?),
+                   correct_count = MAX(0, correct_count - ?),
+                   updated_at = ?
+               WHERE evidence_key = ? AND candidate_key = ?`,
+              wrong, correct, new Date().toISOString(), context.evidence_key, context.candidate_key,
+            );
+          }
+        }
+        this.sql.exec('DELETE FROM feedback WHERE event_id = ? AND result_id = ?', feedback.event_id, feedback.result_id);
         this.sql.exec(
           'INSERT INTO feedback (event_id, result_id, feedback_type, created_at, applied) VALUES (?, ?, ?, ?, 0)',
           feedback.event_id, feedback.result_id, feedback.feedback_type, feedback.created_at,
         );
         this.applyUnapplied(feedback.event_id, feedback.result_id);
       }
-      return Response.json({ accepted: true, duplicate: exists, feedback });
+      return Response.json({ accepted: true, changed: !unchanged, feedback });
     }
 
     if (path === '/penalties') {

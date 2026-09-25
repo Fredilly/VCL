@@ -36,6 +36,10 @@
       {
         "name": "VERIFIED_PRODUCT_LEDGER",
         "class_name": "VerifiedProductLedger"
+      },
+      {
+        "name": "ADMIN_ACCESS_LEDGER",
+        "class_name": "AdminAccessLedger"
       }
     ]
   },
@@ -51,6 +55,10 @@
     {
       "tag": "v3-verified-product-ledger",
       "new_classes": ["VerifiedProductLedger"]
+    },
+    {
+      "tag": "v4-admin-access",
+      "new_classes": ["AdminAccessLedger"]
     }
   ],
   "ratelimits": [

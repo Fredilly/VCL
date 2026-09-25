@@ -30,8 +30,10 @@ import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerc
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { durableVerifiedMappings, persistAdminVerifiedMapping, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
+import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 export { AlphaAccessLedger } from './alpha-access.js';
 export { VerifiedProductLedger } from './verified-product-ledger.js';
+export { AdminAccessLedger } from './admin-access.js';
 
 export interface Env {
   GEMINI_API_KEY?: string;
@@ -74,10 +76,11 @@ export interface Env {
   ALPHA_INVITE_SECRET?: string;
   ALPHA_ACCESS_LEDGER?: AlphaAccessNamespaceLike;
   VERIFIED_PRODUCT_LEDGER?: VerifiedProductLedgerNamespaceLike;
+  ADMIN_ACCESS_LEDGER?: AdminAccessNamespaceLike;
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
-const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type,x-scoop-install-id,x-scoop-admin-token,x-scoop-alpha-token', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
+const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type,x-scoop-install-id,x-scoop-admin-session,x-scoop-alpha-token', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
 
 type VisionProviderName = 'openrouter' | 'gemini' | 'groq-3.8' | 'groq-3.6' | 'cloudflare';
 const visionCooldownUntil = new Map<VisionProviderName, number>();
@@ -477,14 +480,33 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
     return jsonResponse({ required: true, active });
   }
   if (request.method === 'GET' && path === '/admin/status') {
-    const adminToken = env.ALPHA_FEEDBACK_ADMIN_TOKEN || env.ALPHA_ATTRIBUTION_SECRET;
-    return jsonResponse({ admin: Boolean(adminToken && request.headers.get('x-scoop-admin-token') === adminToken) });
+    return jsonResponse(await authorizeAdminSession(env, request.headers.get('x-scoop-admin-session') ?? ''));
   }
   if (request.method !== 'POST') return jsonResponse({ error: 'Not found' }, 404);
   if (env.ALPHA_ENABLED === 'false' && path !== '/feedback' && path !== '/commerce-click') {
     return jsonResponse({ error: 'Scoop alpha is temporarily paused', reason: 'ALPHA_DISABLED', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: false }, 503);
   }
   try {
+    if (path === '/admin/auth') {
+      const body = await request.json() as Record<string, unknown>;
+      const credential = typeof body.credential === 'string' ? body.credential.trim() : '';
+      const label = typeof body.label === 'string' ? body.label.trim().slice(0, 80) : 'Admin';
+      if (!credential) return jsonResponse({ error: 'Admin credential required' }, 400);
+      const master = env.ALPHA_FEEDBACK_ADMIN_TOKEN || env.ALPHA_ATTRIBUTION_SECRET;
+      const session = master && credential === master
+        ? await createBootstrapAdmin(env, label || 'Owner')
+        : await redeemAdminInvite(env, credential, label || 'Admin');
+      return session ? jsonResponse({ admin: true, ...session }) : jsonResponse({ error: 'Invalid or expired admin credential' }, 403);
+    }
+    if (path === '/admin/invite') {
+      const sessionToken = request.headers.get('x-scoop-admin-session') ?? '';
+      const authorized = await authorizeAdminSession(env, sessionToken);
+      if (!authorized.admin || !authorized.admin_id) return jsonResponse({ error: 'Unauthorized' }, 401);
+      const invite = await createAdminInvite(env, sessionToken);
+      if (!invite) return jsonResponse({ error: 'Could not create admin invite' }, 500);
+      await auditAdminAction(env, authorized.admin_id, 'admin_invite_created');
+      return jsonResponse(invite);
+    }
     if (path === '/alpha/activate') {
       const body = await request.json() as Record<string, unknown>;
       const token = typeof body.token === 'string' ? body.token : '';
@@ -495,8 +517,8 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         : jsonResponse({ error: 'Invalid, expired, or already-used invite', reason: 'ALPHA_INVITE_REJECTED' }, 403);
     }
     if (path === '/admin/verified-product') {
-      const adminToken = env.ALPHA_FEEDBACK_ADMIN_TOKEN || env.ALPHA_ATTRIBUTION_SECRET;
-      if (!adminToken || request.headers.get('x-scoop-admin-token') !== adminToken) return jsonResponse({ error: 'Unauthorized' }, 401);
+      const authorized = await authorizeAdminSession(env, request.headers.get('x-scoop-admin-session') ?? '');
+      if (!authorized.admin || !authorized.admin_id) return jsonResponse({ error: 'Unauthorized' }, 401);
       try {
         const body = await request.json() as Record<string, unknown>;
         const action = body.action === 'revoke' ? 'revoke' : 'verify';
@@ -506,7 +528,9 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         if (action === 'revoke') {
           const productId = typeof body.product_id === 'string' ? body.product_id.slice(0, 160) : '';
           if (!productId) return jsonResponse({ error: 'Missing product id' }, 400);
-          return jsonResponse({ revoked: await revokeAdminVerifiedMapping(env, { platform, content_ref: contentRef, product_id: productId }) });
+          const revoked = await revokeAdminVerifiedMapping(env, { platform, content_ref: contentRef, product_id: productId });
+          if (revoked) await auditAdminAction(env, authorized.admin_id!, 'verified_product_revoked', { platform, content_ref: contentRef, product_id: productId });
+          return jsonResponse({ revoked });
         }
         const product = body.product && typeof body.product === 'object' && !Array.isArray(body.product) ? body.product as Record<string, unknown> : {};
         const description = normalizeObjectDescription(body.description);
@@ -535,6 +559,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           provenance: 'admin_verified',
         };
         const saved = await persistAdminVerifiedMapping(env, mapping);
+        await auditAdminAction(env, authorized.admin_id!, 'verified_product_saved', { platform, content_ref: contentRef, product_id: productId, timestamp_ms: timestampMs });
         return jsonResponse({ accepted: true, mapping: saved });
       } catch (error) {
         logSafeError(error);
@@ -542,14 +567,15 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
     }
     if (path === '/alpha/admin/invite') {
-      const adminToken = env.ALPHA_FEEDBACK_ADMIN_TOKEN || env.ALPHA_ATTRIBUTION_SECRET;
-      if (!adminToken || request.headers.get('x-scoop-admin-token') !== adminToken) return jsonResponse({ error: 'Unauthorized' }, 401);
+      const authorized = await authorizeAdminSession(env, request.headers.get('x-scoop-admin-session') ?? '');
+      if (!authorized.admin || !authorized.admin_id) return jsonResponse({ error: 'Unauthorized' }, 401);
       const body = await request.json() as Record<string, unknown>;
       const inviteId = typeof body.invite_id === 'string' ? body.invite_id : '';
       const ttlDays = Number(body.ttl_days ?? 7);
       const maxInstalls = Number(body.max_installs ?? 2);
       try {
         const invite = await createAlphaInvite(env, inviteId, ttlDays, maxInstalls);
+        await auditAdminAction(env, authorized.admin_id!, 'alpha_invite_created', { invite_id: inviteId, ttl_days: ttlDays, max_installs: maxInstalls });
         return jsonResponse({ ...invite, invite_url: `https://scoop.article6.org/alpha?code=${encodeURIComponent(invite.token)}` });
       } catch (error) {
         return jsonResponse({ error: error instanceof Error ? error.message : 'Could not create invite' }, 400);
@@ -723,9 +749,8 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
     }
     if (path === '/feedback-report') {
-      const adminToken = env.ALPHA_FEEDBACK_ADMIN_TOKEN || env.ALPHA_ATTRIBUTION_SECRET;
-      if (!adminToken) return jsonResponse({ error: 'Feedback report access is not configured' }, 503);
-      if (request.headers.get('x-scoop-admin-token') !== adminToken) return jsonResponse({ error: 'Unauthorized' }, 401);
+      const authorized = await authorizeAdminSession(env, request.headers.get('x-scoop-admin-session') ?? '');
+      if (!authorized.admin) return jsonResponse({ error: 'Unauthorized' }, 401);
       try {
         const body = await request.json().catch(() => ({})) as { session_id?: unknown };
         const sessionId = typeof body.session_id === 'string' ? body.session_id : null;
