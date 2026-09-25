@@ -214,3 +214,59 @@ test('exact stored and observed model is strong enough without extra visual call
   assert.equal(result.confidence, 1);
   assert.equal(result.requires_visual, false);
 });
+
+
+test('same-video canonical candidate reaches visual selection even when OCR and structure are weak', () => {
+  const weak = {
+    ...description,
+    visible_text: [],
+    logos_markings: [],
+    distinctive_features: [],
+    shape_silhouette: [],
+    style_attributes: [],
+    search_terms: [],
+  };
+  const eligible = mod.eligibleSameVideoCanonicalCandidates({
+    description: weak,
+    candidates: [{ mapping, identity }],
+  });
+  assert.equal(eligible.length, 1);
+
+  const winner = mod.selectSameVideoVisualWinner({
+    candidates: eligible,
+    comparisons: new Map([[identity.canonical_key, visualMatch]]),
+  });
+  assert.equal(winner.mapping?.product_id, 'merchant-item-1');
+  assert.equal(winner.reason, 'visual_confirmed');
+});
+
+test('multiple visually confirmed canonical products fail closed as ambiguous', () => {
+  const secondMapping = { ...mapping, product_id: 'merchant-item-2', canonical_key: 'product:v1:shirt-2' };
+  const secondIdentity = { ...identity, canonical_key: 'product:v1:shirt-2' };
+  const eligible = mod.eligibleSameVideoCanonicalCandidates({
+    description,
+    candidates: [{ mapping, identity }, { mapping: secondMapping, identity: secondIdentity }],
+  });
+  const winner = mod.selectSameVideoVisualWinner({
+    candidates: eligible,
+    comparisons: new Map([
+      [identity.canonical_key, visualMatch],
+      [secondIdentity.canonical_key, { ...visualMatch, similarity: 0.95 }],
+    ]),
+  });
+  assert.equal(winner.mapping, null);
+  assert.equal(winner.reason, 'ambiguous');
+});
+
+test('visually weak canonical candidate stays non-exact', () => {
+  const eligible = mod.eligibleSameVideoCanonicalCandidates({
+    description,
+    candidates: [{ mapping, identity }],
+  });
+  const winner = mod.selectSameVideoVisualWinner({
+    candidates: eligible,
+    comparisons: new Map([[identity.canonical_key, { ...visualMatch, similarity: 0.8 }]]),
+  });
+  assert.equal(winner.mapping, null);
+  assert.equal(winner.reason, 'visual_rejected');
+});

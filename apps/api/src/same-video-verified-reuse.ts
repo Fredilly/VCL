@@ -234,3 +234,99 @@ export function confirmSameVideoVisual(
     visual_confidence: comparison.confidence,
   };
 }
+
+
+export type SameVideoCanonicalCandidate = {
+  mapping: VerifiedProductMapping;
+  identity: CanonicalProductIdentity;
+};
+
+export function eligibleSameVideoCanonicalCandidates(input: {
+  description: ObjectDescription;
+  candidates: SameVideoCanonicalCandidate[];
+}): SameVideoCanonicalCandidate[] {
+  const unique = new Map<string, SameVideoCanonicalCandidate>();
+
+  for (const candidate of input.candidates) {
+    const { mapping, identity } = candidate;
+    if (!mapping.canonical_key || mapping.canonical_key !== identity.canonical_key) continue;
+    if (!objectCompatible(identity, input.description)) continue;
+
+    const expectedBrand = normalizeIdentityText(identity.brand);
+    const observedBrand = normalizeIdentityText(input.description.brand_candidate);
+    if (expectedBrand && observedBrand && expectedBrand !== observedBrand) continue;
+
+    const expectedModel = normalizeIdentityText(identity.model);
+    const observedModel = normalizeIdentityText(input.description.model_candidate);
+    if (expectedModel && observedModel && expectedModel !== observedModel) continue;
+
+    const color = sameColor(identity, input.description);
+    if (color === false) continue;
+
+    if (!unique.has(identity.canonical_key)) unique.set(identity.canonical_key, candidate);
+  }
+
+  return [...unique.values()];
+}
+
+export function exactModelSameVideoReuse(input: {
+  description: ObjectDescription;
+  candidates: SameVideoCanonicalCandidate[];
+}): SameVideoReuseDecision {
+  const observedModel = normalizeIdentityText(input.description.model_candidate);
+  if (!observedModel) return { mapping: null, canonical_key: null, confidence: 0, reason: 'no_candidate' };
+
+  const matches = eligibleSameVideoCanonicalCandidates(input).filter(({ identity }) =>
+    Boolean(identity.model) && normalizeIdentityText(identity.model) === observedModel);
+
+  if (matches.length !== 1) {
+    return {
+      mapping: null,
+      canonical_key: null,
+      confidence: 0,
+      reason: matches.length > 1 ? 'ambiguous' : 'no_candidate',
+    };
+  }
+
+  return {
+    mapping: matches[0].mapping,
+    canonical_key: matches[0].identity.canonical_key,
+    confidence: 1,
+    reason: 'model_exact',
+    requires_visual: false,
+  };
+}
+
+export function selectSameVideoVisualWinner(input: {
+  candidates: SameVideoCanonicalCandidate[];
+  comparisons: Map<string, ImageComparison>;
+}): SameVideoReuseDecision {
+  const confirmed: SameVideoReuseDecision[] = [];
+  let sawComparison = false;
+
+  for (const { mapping, identity } of input.candidates) {
+    const comparison = input.comparisons.get(identity.canonical_key);
+    if (!comparison) continue;
+    sawComparison = true;
+    const decision: SameVideoReuseDecision = {
+      mapping,
+      canonical_key: identity.canonical_key,
+      confidence: 0.7,
+      reason: 'fingerprint_candidate',
+      requires_visual: true,
+    };
+    const result = confirmSameVideoVisual(decision, comparison);
+    if (result.mapping && result.reason === 'visual_confirmed') confirmed.push(result);
+  }
+
+  if (confirmed.length === 1) return confirmed[0];
+  if (confirmed.length > 1) {
+    return { mapping: null, canonical_key: null, confidence: 0, reason: 'ambiguous' };
+  }
+  return {
+    mapping: null,
+    canonical_key: null,
+    confidence: 0,
+    reason: sawComparison ? 'visual_rejected' : 'visual_unavailable',
+  };
+}
