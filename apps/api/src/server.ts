@@ -29,7 +29,8 @@ export { FeedbackLedger } from './feedback-ledger.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
-import { durableVerifiedMappings, persistAdminVerifiedMapping, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
+import { durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
+import { canonicalProductIdentity } from './canonical-product-memory.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 export { AlphaAccessLedger } from './alpha-access.js';
 export { VerifiedProductLedger } from './verified-product-ledger.js';
@@ -788,7 +789,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           : typeof product.id === 'string' ? product.id.trim().slice(0, 160) : '';
         const title = typeof product.title === 'string' ? product.title.trim().slice(0, 300) : '';
         if (!productId || !title) return jsonResponse({ error: 'Verified result is missing product identity' }, 400);
-        const mapping: VerifiedProductMapping = {
+        const mappingBase: VerifiedProductMapping = {
           platform,
           content_ref: contentRef,
           scope: 'time_window',
@@ -811,9 +812,23 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
               : verifiedSourceProviderName(null, destination) || null,
           provenance: 'admin_verified',
         };
+        const identity = canonicalProductIdentity({
+          mapping: mappingBase,
+          model: typeof product.model === 'string' ? product.model : null,
+          merchantItemId: typeof product.id === 'string' ? product.id : null,
+          visibleText: description.visible_text,
+        });
+        const canonical = await persistCanonicalProductIdentity(env, identity);
+        const mapping: VerifiedProductMapping = { ...mappingBase, canonical_key: canonical.canonical_key };
         const saved = await persistAdminVerifiedMapping(env, mapping);
-        await auditAdminAction(env, authorized.admin_id!, 'verified_product_saved', { platform, content_ref: contentRef, product_id: productId, timestamp_ms: timestampMs });
-        return jsonResponse({ accepted: true, mapping: saved });
+        await auditAdminAction(env, authorized.admin_id!, 'verified_product_saved', {
+          platform,
+          content_ref: contentRef,
+          product_id: productId,
+          canonical_key: canonical.canonical_key,
+          timestamp_ms: timestampMs,
+        });
+        return jsonResponse({ accepted: true, mapping: saved, canonical_key: canonical.canonical_key });
       } catch (error) {
         logSafeError(error);
         return jsonResponse({ error: 'Could not verify exact product' }, 400);
