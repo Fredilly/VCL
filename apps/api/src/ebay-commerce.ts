@@ -19,6 +19,8 @@ type EbayItemSummary = {
   condition?: { conditionId?: string; condition?: string };
   seller?: { username?: string; feedbackPercentage?: string; feedbackScore?: number };
   shippingOptions?: Array<{ shippingCost?: { value?: string; currency?: string } }>;
+  localizedAspects?: Array<{ name?: string; value?: string }>;
+  additionalImages?: Array<{ imageUrl?: string }>;
 };
 
 type EbaySearchResponse = {
@@ -27,18 +29,31 @@ type EbaySearchResponse = {
   warnings?: Array<{ messageId?: string; message?: string }>;
 };
 
+function ebayModel(item: EbayItemSummary): string | null {
+  const aspects = item.localizedAspects ?? [];
+  const preferred = ['mpn', 'manufacturer part number', 'model', 'style code', 'sku'];
+  for (const key of preferred) {
+    const match = aspects.find((aspect) => aspect.name?.trim().toLowerCase() === key && aspect.value?.trim());
+    if (match?.value) return match.value.trim();
+  }
+  return null;
+}
+
 function normalizeItem(item: EbayItemSummary, query: ProductQuery): ProductCandidate {
   const title = item.title ?? '';
-  const isLikely = Boolean(query.brand && query.model && title.toLowerCase().includes(query.brand.toLowerCase()) && title.toLowerCase().includes(query.model.toLowerCase()));
+  const model = ebayModel(item);
+  const isLikely = Boolean(query.brand && query.model
+    && title.toLowerCase().includes(query.brand.toLowerCase())
+    && (title.toLowerCase().includes(query.model.toLowerCase()) || model?.toLowerCase() === query.model.toLowerCase()));
 
   return {
     id: item.itemId ?? crypto.randomUUID(),
     title,
     brand: item.brand?.brandName ?? null,
-    model: null,
+    model,
     category: item.categories?.[0]?.categoryName ?? null,
-    metadata: { brand: item.brand?.brandName, category: item.categories?.[0]?.categoryName },
-    image_reference: item.image?.imageUrl ?? null,
+    metadata: { brand: item.brand?.brandName, model: model ?? undefined, category: item.categories?.[0]?.categoryName },
+    image_reference: item.image?.imageUrl ?? item.additionalImages?.[0]?.imageUrl ?? null,
     provenance: 'ebay:browse',
     destination: item.itemAffiliateWebUrl ?? item.itemWebUrl ?? null,
     price: item.price?.value ?? null,
@@ -67,6 +82,33 @@ export class EbayCommerceProvider implements CommerceProvider {
     url.searchParams.set('limit', '12');
 
     return this.fetchItems(url, token, query, { method: 'GET' });
+  }
+
+  async getItemById(itemId: string, query: ProductQuery): Promise<ProductCandidate | null> {
+    if (!itemId.trim()) return null;
+    const token = await this.auth.getAccessToken();
+    const baseUrl = this.auth.getBrowseBaseUrl();
+    const url = new URL(`/buy/browse/v1/item/${encodeURIComponent(itemId.trim())}`, baseUrl);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
+        },
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch {
+      return null;
+    }
+    if (!response.ok) return null;
+    try {
+      const item = await response.json() as EbayItemSummary;
+      return item.title ? normalizeItem(item, query) : null;
+    } catch {
+      return null;
+    }
   }
 
   async searchByImage(imageBase64: string, query: ProductQuery): Promise<ProductCandidate[]> {

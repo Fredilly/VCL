@@ -77,41 +77,10 @@ test('verified source page supplies a missing thumbnail without broad commerce r
   assert.equal(fetches[0], 'https://brand.example/products/sku-1');
 });
 
-test('verified commerce mapping queries only its source and returns only the same verified identity', async () => {
-  const fetches = [];
-  const worker = loadModule(serverFile, {
-    fetch: async (url) => {
-      const value = String(url);
-      fetches.push(value);
-      if (value.includes('/identity/v1/oauth2/token')) {
-        return Response.json({ access_token: 'token', token_type: 'Application Access Token', expires_in: 7200 });
-      }
-      if (value.includes('/buy/browse/v1/item_summary/search')) {
-        return Response.json({
-          itemSummaries: [
-            {
-              itemId: 'ITEM-EXACT',
-              title: 'Verified Shirt exact offer',
-              image: { imageUrl: 'https://i.ebayimg.com/exact.jpg' },
-              itemWebUrl: 'https://www.ebay.com/itm/ITEM-EXACT-alt',
-              price: { value: '30.00', currency: 'USD' },
-            },
-            {
-              itemId: 'ITEM-SIMILAR',
-              title: 'Verified Shirt very similar words',
-              image: { imageUrl: 'https://i.ebayimg.com/similar.jpg' },
-              itemWebUrl: 'https://www.ebay.com/itm/ITEM-SIMILAR',
-              price: { value: '25.00', currency: 'USD' },
-            },
-          ],
-        });
-      }
-      throw new Error(`Unexpected fetch: ${value}`);
-    },
-    console: { error() {}, warn() {} },
-  }).default;
+test('verified commerce mapping hydrates its thumbnail and returns every same-SKU exact offer', async () => {
+  const { refreshVerifiedOffers } = loadModule(serverFile, { console: { error() {}, warn() {} } });
 
-  const mapping = [{
+  const mapping = {
     platform: 'youtube',
     content_ref: 'youtube:VIDEO',
     scope: 'entire_video',
@@ -120,27 +89,89 @@ test('verified commerce mapping queries only its source and returns only the sam
     product_id: 'ITEM-EXACT',
     title: 'Verified Shirt',
     destination: 'https://www.ebay.com/itm/ITEM-EXACT',
-    image_reference: 'https://i.ebayimg.com/saved.jpg',
+    image_reference: 'https://i.ebayimg.com/stale-saved.jpg',
     provider: 'ebay',
     provenance: 'test_fixture',
-  }];
+  };
 
-  const response = await worker.fetch(requestFor(), {
-    VERIFIED_PRODUCT_MAPPINGS_JSON: JSON.stringify(mapping),
-    VERIFIED_PRODUCT_TEST_MODE: 'true',
-    BENCHMARK_MODE: 'true',
-    COMMERCE_PROVIDER: 'ebay',
-    EBAY_PRODUCTION_CLIENT_ID: 'id',
-    EBAY_PRODUCTION_CLIENT_SECRET: 'secret',
-    EBAY_ENVIRONMENT: 'production',
-  });
-  const result = await response.json();
+  const calls = [];
+  const provider = {
+    async getItemById(itemId) {
+      calls.push(['getItemById', itemId]);
+      return {
+        id: 'ITEM-EXACT',
+        title: 'Verified Shirt source listing',
+        brand: 'Brand',
+        model: 'SKU-42',
+        category: 'shirt',
+        image_reference: 'https://i.ebayimg.com/live-source.jpg',
+        provenance: 'ebay:browse',
+        destination: 'https://www.ebay.com/itm/ITEM-EXACT',
+        price: '30.00',
+        currency: 'USD',
+        result_class: 'LIKELY',
+        provider: 'ebay',
+      };
+    },
+    async search(query) {
+      calls.push(['search', query.query]);
+      return [
+        {
+          id: 'ITEM-EXACT',
+          title: 'Verified Shirt source listing',
+          brand: 'Brand',
+          model: 'SKU-42',
+          category: 'shirt',
+          image_reference: 'https://i.ebayimg.com/live-source.jpg',
+          provenance: 'ebay:browse',
+          destination: 'https://www.ebay.com/itm/ITEM-EXACT',
+          price: '30.00',
+          currency: 'USD',
+          result_class: 'LIKELY',
+          provider: 'ebay',
+        },
+        {
+          id: 'ITEM-EXACT-2',
+          title: 'Verified Shirt another seller',
+          brand: 'Brand',
+          model: 'SKU-42',
+          category: 'shirt',
+          image_reference: 'https://i.ebayimg.com/second.jpg',
+          provenance: 'ebay:browse',
+          destination: 'https://www.ebay.com/itm/ITEM-EXACT-2',
+          price: '28.00',
+          currency: 'USD',
+          result_class: 'LIKELY',
+          provider: 'ebay',
+        },
+        {
+          id: 'ITEM-SIMILAR',
+          title: 'Verified Shirt very similar words',
+          brand: 'Brand',
+          model: 'SKU-99',
+          category: 'shirt',
+          image_reference: 'https://i.ebayimg.com/similar.jpg',
+          provenance: 'ebay:browse',
+          destination: 'https://www.ebay.com/itm/ITEM-SIMILAR',
+          price: '25.00',
+          currency: 'USD',
+          result_class: 'SIMILAR',
+          provider: 'ebay',
+        },
+      ];
+    },
+  };
 
-  assert.equal(response.status, 200);
-  assert.equal(result.products[0].id.startsWith('verified:'), true, 'canonical verified product must stay first');
+  const result = await refreshVerifiedOffers([{ name: 'ebay', provider, tier: 'primary' }], mapping);
+
+  assert.deepEqual(calls, [['getItemById', 'ITEM-EXACT'], ['search', 'SKU-42']]);
+  assert.equal(result.products.length, 2, 'canonical listing plus second seller with same SKU');
+  assert.equal(result.products[0].id, 'ITEM-EXACT');
+  assert.equal(result.products[0].image_reference, 'https://i.ebayimg.com/live-source.jpg');
+  assert.equal(result.products[1].id, 'ITEM-EXACT-2');
+  assert.equal(result.products[1].image_reference, 'https://i.ebayimg.com/second.jpg');
   assert.equal(result.products.every((product) => product.result_class === 'EXACT'), true);
-  assert.equal(result.products.some((product) => product.id === 'ITEM-SIMILAR'), false, 'similar title-only offers must not leak into verified results');
-  assert.deepEqual(result.providers_used, ['ebay']);
-  assert.equal(result.cost_usage.commerce_calls.ebay, 1);
-  assert.equal(fetches.some((url) => url.includes('etsy') || url.includes('serpapi') || url.includes('brave')), false);
+  assert.equal(result.products.some((product) => product.id === 'ITEM-SIMILAR'), false);
+  assert.deepEqual(Array.from(result.providers_used), ['ebay']);
+  assert.equal(result.commerce_calls.ebay, 2);
 });
