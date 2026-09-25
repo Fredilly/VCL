@@ -154,9 +154,12 @@ export function chooseSameVideoVerifiedReuse(input: {
       || (signals.visibleOverlap.shared >= 3 && signals.visibleOverlap.ratio >= 0.75)
       || (signals.identityOverlap.shared >= 4 && signals.identityOverlap.ratio >= 0.65);
     const partialIdentity = signals.identityOverlap.shared >= 1 && signals.secondarySignals >= 3;
+    const structuralCandidate = signals.identityOverlap.shared === 0
+      && signals.color === true
+      && signals.secondarySignals >= 3;
 
-    if (strongText || partialIdentity) {
-      const confidence = strongText ? 0.9 : 0.82;
+    if (strongText || partialIdentity || structuralCandidate) {
+      const confidence = strongText ? 0.9 : partialIdentity ? 0.82 : 0.72;
       matches.push({
         mapping,
         canonical_key: identity.canonical_key,
