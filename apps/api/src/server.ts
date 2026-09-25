@@ -203,7 +203,7 @@ const SUFFICIENT_CANDIDATE_THRESHOLD = 3;
 
 function verifiedIdentityTokens(value: string): string[] {
   const stop = new Set(['the','a','an','and','or','for','with','to','of','in','on','by','unisex','men','women','mens','womens']);
-  return canonical('model', value).split(' ').filter((token) => token.length > 1 && !stop.has(token));
+  return (canonical('model', value) ?? '').split(' ').filter((token) => token.length > 1 && !stop.has(token));
 }
 
 function verifiedOfferMatches(mapping: VerifiedProductMapping, product: ProductCandidate): boolean {
