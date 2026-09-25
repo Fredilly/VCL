@@ -180,3 +180,9 @@ test('verified result UI uses consumer-facing Scoop Verified copy without SKU/ad
   assert.doesNotMatch(content, /Identity source: verified product data/);
   assert.doesNotMatch(content, /providerLabel\.textContent = product\.provider;[\s\S]*isScoopVerified/);
 });
+
+
+test('Scoop Verified offer rows keep merchant name and verified label', () => {
+  assert.match(content, /product\.provider\.toLowerCase\(\) === 'ebay' \? 'eBay' : product\.provider/);
+  assert.match(content, /verifiedLabel\.textContent = 'Scoop Verified'/);
+});
