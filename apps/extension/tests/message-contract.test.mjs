@@ -207,3 +207,11 @@ test('YouTube Shorts surface context keeps a stable content_ref for exact verifi
   assert.equal(value.content_ref, 'youtube:J9Vx9RhSetM');
   assert.equal(value.timestamp_ms, 12000);
 });
+
+
+test('verified rows show their source and omit feedback/admin controls', () => {
+  assert.match(content, /function productSourceLabel\(product: ProductCandidate\)/);
+  assert.match(content, /return new URL\(product\.destination\)\.hostname\.replace/);
+  assert.match(content, /if \(!isScoopVerified\) \{/);
+  assert.match(content, /verifiedLabel\.textContent = 'Scoop Verified'/);
+});

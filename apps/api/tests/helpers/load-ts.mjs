@@ -13,8 +13,8 @@ export function loadModule(file, globals = {}) {
     const source = ts.transpileModule(readFileSync(filename, 'utf8'), {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
     }).outputText;
-    vm.runInNewContext(source, { exports, URL, Request, Response, AbortSignal, Uint8Array, btoa, atob, crypto: globalThis.crypto,
-      fetch: globalThis.fetch, setTimeout, console,
+    vm.runInNewContext(source, { exports, URL, Request, Response, AbortSignal, AbortController, Uint8Array, TextDecoder, btoa, atob, crypto: globalThis.crypto,
+      fetch: globalThis.fetch, setTimeout, clearTimeout, console,
       require: (specifier) => load(resolve(dirname(filename), specifier.replace(/\.js$/, '.ts'))), ...globals }, { filename });
     return exports;
   };
