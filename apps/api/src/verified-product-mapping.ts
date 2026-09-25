@@ -138,7 +138,7 @@ export function verifiedMappingProduct(mapping: VerifiedProductMapping): Product
     verification_status: 'metadata_only',
     verification_score: 100,
     verification_reasons: [`${mapping.provenance} product mapping for this content`],
-    provider: mapping.provider ?? mapping.provenance,
+    ...(mapping.provider ? { provider: mapping.provider } : {}),
     identity_key: `verified:${mapping.product_id}`,
   };
 }
