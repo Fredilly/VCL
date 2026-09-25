@@ -109,15 +109,15 @@ function basePanel(titleText: string) {
   const panel = document.createElement('div');
   panel.id = RESULT_ID;
   Object.assign(panel.style, {
-    position: 'fixed', right: '20px', bottom: '20px', zIndex: '2147483647', width: '360px',
-    maxWidth: 'calc(100vw - 40px)', maxHeight: '75vh', overflowY: 'auto', padding: '14px', borderRadius: '18px',
-    background: 'rgba(18,18,22,0.76)', backdropFilter: 'blur(24px) saturate(140%)', WebkitBackdropFilter: 'blur(24px) saturate(140%)',
-    border: '1px solid rgba(255,255,255,0.16)', color: '#fff', boxShadow: '0 18px 50px rgba(0,0,0,0.32)',
-    font: '13px system-ui, sans-serif',
+    position: 'fixed', right: '20px', bottom: '20px', zIndex: '2147483647', width: '388px',
+    maxWidth: 'calc(100vw - 40px)', maxHeight: '78vh', overflowY: 'auto', padding: '18px', borderRadius: '24px',
+    background: 'rgba(22,22,26,0.82)', backdropFilter: 'blur(30px) saturate(160%)', WebkitBackdropFilter: 'blur(30px) saturate(160%)',
+    border: '1px solid rgba(255,255,255,0.14)', color: '#fff', boxShadow: '0 24px 70px rgba(0,0,0,0.38)',
+    font: '13px -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
   });
   const title = document.createElement('div');
   title.textContent = titleText;
-  Object.assign(title.style, { fontWeight: '700', marginBottom: '10px' });
+  Object.assign(title.style, { fontWeight: '650', fontSize: '15px', letterSpacing: '-0.01em', marginBottom: '14px', paddingRight: '38px' });
   panel.appendChild(title);
   document.documentElement.appendChild(panel);
   return panel;
@@ -171,7 +171,7 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
   const admin = adminPayload ? await browser.runtime.sendMessage({ type: 'VCL_ADMIN_STATUS' }).catch(() => ({ admin: false })) : { admin: false };
   const heading = document.createElement('div');
   heading.textContent = `Products · ${commerce.products.length} · ${formatLatency(commerce.latency_ms)}`;
-  Object.assign(heading.style, { fontWeight: '700', margin: '12px 0 8px' });
+  Object.assign(heading.style, { fontWeight: '650', margin: '18px 0 8px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,.10)', letterSpacing: '-0.01em' });
   panel.appendChild(heading);
 
   if (__VCL_DEBUG_PROVENANCE__ && commerce.providers_used?.length) {
@@ -210,20 +210,21 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
       }
     }
     Object.assign((row as HTMLElement).style, {
-      display: 'grid', gridTemplateColumns: product.image_reference ? '56px 1fr' : '1fr', gap: '8px',
-      padding: '10px 0', borderTop: '1px solid rgba(255,255,255,.10)', color: '#fff', textDecoration: 'none',
+        display: 'grid', gridTemplateColumns: product.image_reference ? '64px 1fr' : '1fr', gap: '10px',
+      padding: '10px', margin: '8px 0 0', border: '1px solid rgba(255,255,255,.10)', borderRadius: '14px',
+      background: 'rgba(255,255,255,.045)', color: '#fff', textDecoration: 'none',
     });
     if (product.image_reference) {
       const img = document.createElement('img');
       img.src = product.image_reference;
       img.alt = '';
-      Object.assign(img.style, { width: '56px', height: '56px', objectFit: 'cover', borderRadius: '8px' });
+      Object.assign(img.style, { width: '64px', height: '64px', objectFit: 'cover', borderRadius: '10px' });
       row.appendChild(img);
     }
     const text = document.createElement('div');
     const title = document.createElement('div');
     title.textContent = product.title;
-    Object.assign(title.style, { fontWeight: '600', lineHeight: '1.3' });
+    Object.assign(title.style, { fontWeight: '650', lineHeight: '1.28', letterSpacing: '-0.01em' });
     const meta = document.createElement('div');
     const isScoopVerified = ['admin_verified', 'creator_verified', 'brand_verified', 'test_fixture'].includes(product.provenance ?? '');
     const parts = [
@@ -320,13 +321,13 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
   const controller = new AbortController();
   activeCapture = controller;
   const imageWrap = document.createElement('div');
-  Object.assign(imageWrap.style, { display: 'flex', justifyContent: 'center', marginBottom: '10px' });
+  Object.assign(imageWrap.style, { display: 'flex', justifyContent: 'center', marginBottom: '14px' });
   const scanSurface = document.createElement('div');
-  Object.assign(scanSurface.style, { position: 'relative', display: 'inline-block', overflow: 'hidden', borderRadius: '10px', background: '#000' });
+  Object.assign(scanSurface.style, { position: 'relative', display: 'inline-block', overflow: 'hidden', borderRadius: '14px', background: '#000' });
   const image = document.createElement('img');
   image.src = result.dataUrl;
   image.alt = 'Selected object crop';
-  Object.assign(image.style, { display: 'block', maxWidth: '100%', maxHeight: '180px', width: 'auto', height: 'auto' });
+  Object.assign(image.style, { display: 'block', maxWidth: '100%', maxHeight: '220px', width: 'auto', height: 'auto' });
   const scanLine = document.createElement('div');
   Object.assign(scanLine.style, { position: 'absolute', left: '4%', right: '4%', top: '6%', height: '1px', borderRadius: '999px',
     background: 'rgba(255,255,255,.82)', boxShadow: '0 0 8px rgba(255,255,255,.6)', pointerEvents: 'none' });
@@ -496,21 +497,21 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       exactBadge.textContent = '✓ Exact match';
       Object.assign(exactBadge.style, {
         display: 'inline-flex', alignItems: 'center', gap: '6px', width: 'fit-content',
-        padding: '6px 9px', marginBottom: '8px', borderRadius: '999px',
-        background: 'rgba(255,255,255,.14)', border: '1px solid rgba(255,255,255,.28)',
-        fontWeight: '800', fontSize: '12px', letterSpacing: '.01em',
+        padding: '5px 9px', margin: '0 0 10px', borderRadius: '999px',
+        background: 'rgba(48,209,88,.14)', border: '1px solid rgba(48,209,88,.28)', color: '#e7ffed',
+        fontWeight: '650', fontSize: '12px', letterSpacing: '-0.005em',
       });
-      summary.before(exactBadge);
 
       summary.textContent = verifiedProduct.title;
-      Object.assign(summary.style, { fontSize: '15px', marginBottom: '4px' });
+      Object.assign(summary.style, { fontSize: '17px', lineHeight: '1.22', letterSpacing: '-0.02em', marginBottom: '8px' });
+      summary.after(exactBadge);
 
       attrs.textContent = verifiedProduct.brand ?? '';
       attrs.style.display = verifiedProduct.brand ? '' : 'none';
 
       confidence.textContent = 'Matched from visible text and shirt details';
       identityConfidence.remove();
-      Object.assign(confidence.style, { opacity: '0.62', marginTop: '8px', fontSize: '12px' });
+      Object.assign(confidence.style, { opacity: '0.66', marginTop: '2px', fontSize: '12px', lineHeight: '1.4' });
 
       for (const control of improveControls) control.remove();
 
