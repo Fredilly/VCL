@@ -7,7 +7,7 @@ export type SameVideoReuseDecision = {
   mapping: VerifiedProductMapping | null;
   canonical_key: string | null;
   confidence: number;
-  reason: 'model_exact' | 'visible_text_exact' | 'visible_text_strong' | 'brand_conflict' | 'model_conflict' | 'object_mismatch' | 'weak_evidence' | 'no_candidate';
+  reason: 'model_exact' | 'visible_text_exact' | 'visible_text_strong' | 'brand_conflict' | 'model_conflict' | 'object_mismatch' | 'weak_evidence' | 'ambiguous' | 'no_candidate';
 };
 
 function tokens(values: string[]): string[] {
@@ -36,31 +36,33 @@ export function chooseSameVideoVerifiedReuse(input: {
   description: ObjectDescription;
   candidates: Array<{ mapping: VerifiedProductMapping; identity: CanonicalProductIdentity }>;
 }): SameVideoReuseDecision {
-  let best: SameVideoReuseDecision = { mapping: null, canonical_key: null, confidence: 0, reason: 'no_candidate' };
+  const matches: SameVideoReuseDecision[] = [];
+  let strongestMiss: SameVideoReuseDecision = { mapping: null, canonical_key: null, confidence: 0, reason: 'no_candidate' };
 
   for (const candidate of input.candidates) {
     const { mapping, identity } = candidate;
     if (!mapping.canonical_key || mapping.canonical_key !== identity.canonical_key) continue;
     if (!objectCompatible(identity, input.description)) {
-      if (best.reason === 'no_candidate') best = { mapping: null, canonical_key: null, confidence: 0, reason: 'object_mismatch' };
+      if (strongestMiss.reason === 'no_candidate') strongestMiss = { mapping: null, canonical_key: null, confidence: 0, reason: 'object_mismatch' };
       continue;
     }
 
     const expectedBrand = normalizeIdentityText(identity.brand);
     const observedBrand = normalizeIdentityText(input.description.brand_candidate);
     if (expectedBrand && observedBrand && expectedBrand !== observedBrand) {
-      best = { mapping: null, canonical_key: null, confidence: 0, reason: 'brand_conflict' };
+      strongestMiss = { mapping: null, canonical_key: null, confidence: 0, reason: 'brand_conflict' };
       continue;
     }
 
     const expectedModel = normalizeIdentityText(identity.model);
     const observedModel = normalizeIdentityText(input.description.model_candidate);
     if (expectedModel && observedModel && expectedModel !== observedModel) {
-      best = { mapping: null, canonical_key: null, confidence: 0, reason: 'model_conflict' };
+      strongestMiss = { mapping: null, canonical_key: null, confidence: 0, reason: 'model_conflict' };
       continue;
     }
     if (expectedModel && observedModel && expectedModel === observedModel) {
-      return { mapping, canonical_key: identity.canonical_key, confidence: 1, reason: 'model_exact' };
+      matches.push({ mapping, canonical_key: identity.canonical_key, confidence: 1, reason: 'model_exact' });
+      continue;
     }
 
     const storedText = tokens(identity.visible_text);
@@ -69,20 +71,22 @@ export function chooseSameVideoVerifiedReuse(input: {
       const storedPhrase = normalizeIdentityText(identity.visible_text.join(' '));
       const observedPhrase = normalizeIdentityText((input.description.visible_text ?? []).join(' '));
       if (storedPhrase && observedPhrase && storedPhrase === observedPhrase) {
-        return { mapping, canonical_key: identity.canonical_key, confidence: 0.99, reason: 'visible_text_exact' };
+        matches.push({ mapping, canonical_key: identity.canonical_key, confidence: 0.99, reason: 'visible_text_exact' });
+        continue;
       }
       const textOverlap = overlap(storedText, observedText);
       if (textOverlap.shared >= 4 && textOverlap.ratio >= 0.8) {
-        const decision = { mapping, canonical_key: identity.canonical_key, confidence: 0.95, reason: 'visible_text_strong' as const };
-        if (decision.confidence > best.confidence) best = decision;
+        matches.push({ mapping, canonical_key: identity.canonical_key, confidence: 0.95, reason: 'visible_text_strong' });
         continue;
       }
     }
 
-    if (best.reason === 'no_candidate' || best.reason === 'object_mismatch') {
-      best = { mapping: null, canonical_key: null, confidence: 0.2, reason: 'weak_evidence' };
+    if (strongestMiss.reason === 'no_candidate' || strongestMiss.reason === 'object_mismatch') {
+      strongestMiss = { mapping: null, canonical_key: null, confidence: 0.2, reason: 'weak_evidence' };
     }
   }
 
-  return best;
+  const uniqueKeys = new Set(matches.map((match) => match.canonical_key));
+  if (uniqueKeys.size > 1) return { mapping: null, canonical_key: null, confidence: 0, reason: 'ambiguous' };
+  return matches.sort((a, b) => b.confidence - a.confidence)[0] ?? strongestMiss;
 }
