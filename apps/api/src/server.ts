@@ -201,41 +201,127 @@ function filterByCategory(providers: NamedCommerceProvider[], query: ProductQuer
 const LIKELY_CANDIDATE_THRESHOLD = 3;
 const SUFFICIENT_CANDIDATE_THRESHOLD = 3;
 
-function verifiedIdentityTokens(value: string): string[] {
-  const stop = new Set(['the','a','an','and','or','for','with','to','of','in','on','by','unisex','men','women','mens','womens']);
-  return (canonical('model', value) ?? '').split(' ').filter((token) => token.length > 1 && !stop.has(token));
-}
-
 function verifiedOfferHasExactIdentity(mapping: VerifiedProductMapping, product: ProductCandidate): boolean {
-  return Boolean(product.model && mapping.product_id
-    && canonical('model', product.model) === canonical('model', mapping.product_id));
+  const expectedModel = canonical('model', mapping.product_id);
+  if (!expectedModel) return false;
+  if (product.model && canonical('model', product.model) === expectedModel) return true;
+  if (product.id && canonical('model', product.id) === expectedModel) return true;
+  if (product.destination && mapping.destination) {
+    try {
+      const actual = new URL(product.destination);
+      const expected = new URL(mapping.destination);
+      if (actual.origin === expected.origin && actual.pathname.replace(/\/$/, '') === expected.pathname.replace(/\/$/, '')) return true;
+    } catch {}
+  }
+  return false;
 }
 
-function verifiedOfferTitleSimilar(mapping: VerifiedProductMapping, product: ProductCandidate): boolean {
-  const expected = verifiedIdentityTokens(mapping.title);
-  const actual = new Set(verifiedIdentityTokens(product.title));
-  if (!expected.length) return false;
-  const overlap = expected.filter((token) => actual.has(token)).length / expected.length;
-  return expected.length >= 3 ? overlap >= 0.72 : overlap === 1;
+const verifiedSourceImageCache = new Map<string, { image: string | null; expires_at: number }>();
+
+function safeVerifiedSourceUrl(value: string): URL | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    const host = url.hostname.toLowerCase();
+    if (host === 'localhost' || host.endsWith('.local') || /^127\./.test(host) || /^10\./.test(host)
+      || /^192\.168\./.test(host) || /^169\.254\./.test(host)
+      || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || host === '::1') return null;
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function metaImageFromHtml(html: string, base: URL): string | null {
+  const tags = html.match(/<meta\b[^>]*>/gi) ?? [];
+  for (const tag of tags) {
+    const property = tag.match(/\b(?:property|name)\s*=\s*["']([^"']+)["']/i)?.[1]?.toLowerCase();
+    if (property !== 'og:image' && property !== 'og:image:secure_url' && property !== 'twitter:image') continue;
+    const content = tag.match(/\bcontent\s*=\s*["']([^"']+)["']/i)?.[1];
+    if (!content) continue;
+    try {
+      const image = new URL(content.replace(/&amp;/g, '&'), base);
+      if (image.protocol === 'https:' || image.protocol === 'http:') return image.toString();
+    } catch {}
+  }
+  return null;
+}
+
+async function sourceImageForVerifiedMapping(mapping: VerifiedProductMapping): Promise<string | null> {
+  if (mapping.image_reference) return mapping.image_reference;
+  const source = safeVerifiedSourceUrl(mapping.destination);
+  if (!source) return null;
+  const cached = verifiedSourceImageCache.get(source.toString());
+  if (cached && cached.expires_at > Date.now()) return cached.image;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1800);
+  try {
+    const response = await fetch(source.toString(), {
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: { accept: 'text/html,application/xhtml+xml' },
+    });
+    if (!response.ok || !(response.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) {
+      verifiedSourceImageCache.set(source.toString(), { image: null, expires_at: Date.now() + 5 * 60_000 });
+      return null;
+    }
+    const reader = response.body?.getReader();
+    if (!reader) return null;
+    const decoder = new TextDecoder();
+    let html = '';
+    let bytes = 0;
+    while (bytes < 300_000) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      html += decoder.decode(value, { stream: true });
+      if (/<meta\b[^>]*(?:og:image|twitter:image)/i.test(html)) break;
+    }
+    try { await reader.cancel(); } catch {}
+    html += decoder.decode();
+    const image = metaImageFromHtml(html, new URL(response.url || source.toString()));
+    verifiedSourceImageCache.set(source.toString(), { image, expires_at: Date.now() + (image ? 30 * 60_000 : 5 * 60_000) });
+    return image;
+  } catch {
+    verifiedSourceImageCache.set(source.toString(), { image: null, expires_at: Date.now() + 5 * 60_000 });
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function refreshVerifiedOffers(
   providers: NamedCommerceProvider[],
   mapping: VerifiedProductMapping,
 ): Promise<{ products: ProductCandidate[]; providers_used: string[]; commerce_calls: Record<string, number>; provider_retrieval_ms: number }> {
+  const started = Date.now();
+  const sourceImage = await sourceImageForVerifiedMapping(mapping);
+  const hydratedMapping = sourceImage && !mapping.image_reference ? { ...mapping, image_reference: sourceImage } : mapping;
+  const fallback = verifiedMappingProduct(hydratedMapping);
+
+  // A known exact mapping must not fan out into broad shopping retrieval.
+  // Only query the original commerce source, and only keep candidates whose
+  // SKU/model/item identity is demonstrably the same verified product.
+  const sourceProviderName = (mapping.provider ?? '').trim().toLowerCase();
+  const sourceProviders = sourceProviderName
+    ? providers.filter(({ name }) => name.toLowerCase() === sourceProviderName)
+    : [];
+  if (!sourceProviders.length) {
+    return { products: [fallback], providers_used: [], commerce_calls: {}, provider_retrieval_ms: Date.now() - started };
+  }
+
   const query: ProductQuery = {
-    query: mapping.title,
+    query: mapping.product_id || mapping.title,
     category: mapping.object_type,
     subcategory: mapping.object_type,
     brand: mapping.brand || null,
     model: mapping.product_id || null,
     attributes: [],
   };
-  const eligible = filterByCategory(providers, query);
   const providersUsed: string[] = [];
   const commerceCalls: Record<string, number> = {};
-  const started = Date.now();
-  const batches = await Promise.all(eligible.map(async ({ name, provider }) => {
+  const batches = await Promise.all(sourceProviders.map(async ({ name, provider }) => {
     providersUsed.push(name);
     commerceCalls[name] = (commerceCalls[name] ?? 0) + 1;
     try {
@@ -245,26 +331,23 @@ async function refreshVerifiedOffers(
       return [];
     }
   }));
-  const fallback = verifiedMappingProduct(mapping);
-  const refreshed = batches.flat()
-    .filter((product) => verifiedOfferTitleSimilar(mapping, product))
-    .map((product): ProductCandidate => {
-      const exactIdentity = verifiedOfferHasExactIdentity(mapping, product);
-      return {
-        ...product,
-        result_class: exactIdentity ? 'EXACT' : 'SIMILAR',
-        provenance: exactIdentity ? mapping.provenance : product.provenance,
-        provider: product.provider || product.provenance || mapping.provider || 'verified',
-        identity_key: exactIdentity ? `verified:${mapping.product_id}` : product.identity_key,
-        verification_status: exactIdentity ? 'metadata_only' : product.verification_status,
-        verification_score: exactIdentity ? 100 : product.verification_score,
-        verification_reasons: exactIdentity
-          ? [`${mapping.provenance} product identity; fresh merchant offer`]
-          : ['Title is similar to the verified product, but SKU/model identity was not confirmed'],
-      };
-    });
+
+  const exactOffers = batches.flat()
+    .filter((product) => verifiedOfferHasExactIdentity(mapping, product))
+    .map((product): ProductCandidate => ({
+      ...product,
+      result_class: 'EXACT',
+      provenance: mapping.provenance,
+      provider: product.provider || product.provenance || mapping.provider || undefined,
+      identity_key: `verified:${mapping.product_id}`,
+      verification_status: 'metadata_only',
+      verification_score: 100,
+      verification_reasons: [`${mapping.provenance} product identity; same verified SKU/model`],
+    }));
+
+  // Canonical verified source is always first. Additional rows are exact offers only.
   return {
-    products: dedupeProducts([...refreshed, fallback]).slice(0, 5),
+    products: dedupeProducts([fallback, ...exactOffers]).slice(0, 5),
     providers_used: providersUsed,
     commerce_calls: commerceCalls,
     provider_retrieval_ms: Date.now() - started,
