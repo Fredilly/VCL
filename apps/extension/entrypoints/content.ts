@@ -47,7 +47,18 @@ type CommerceResponse = {
   state?: 'RESULTS' | 'NO_RESULTS' | 'TEMPORARILY_UNAVAILABLE';
   providers_used?: string[];
   timing?: { provider_retrieval_ms?: number; candidate_verification_ms?: number; total_ms?: number };
-  verified_mapping?: { hit: boolean; provenance?: string; product_id?: string };
+  verified_mapping?: {
+    hit: boolean;
+    provenance?: string;
+    product_id?: string;
+    reuse?: string;
+    reason?: string;
+    confidence?: number;
+    visual_similarity?: number;
+    visual_confidence?: number;
+    candidates_compared?: number;
+    visual_failures?: number;
+  };
 };
 
 function parseObjectDescription(value: unknown): ObjectDescription {
@@ -173,6 +184,18 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
   heading.textContent = `Products · ${commerce.products.length} · ${formatLatency(commerce.latency_ms)}`;
   Object.assign(heading.style, { fontWeight: '650', margin: '18px 0 8px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,.10)', letterSpacing: '-0.01em' });
   panel.appendChild(heading);
+
+  if (admin?.admin && commerce.verified_mapping?.reuse === 'same_video' && !commerce.verified_mapping.hit) {
+    const debug = document.createElement('div');
+    const vm = commerce.verified_mapping;
+    const visual = typeof vm.visual_similarity === 'number' && typeof vm.visual_confidence === 'number'
+      ? ` · visual ${vm.visual_similarity.toFixed(2)}/${vm.visual_confidence.toFixed(2)}`
+      : '';
+    const compared = typeof vm.candidates_compared === 'number' ? ` · compared ${vm.candidates_compared}` : '';
+    debug.textContent = `Reuse: ${vm.reason ?? 'unknown'}${visual}${compared}`;
+    Object.assign(debug.style, { fontSize: '10px', opacity: '0.5', margin: '-2px 0 8px' });
+    panel.appendChild(debug);
+  }
 
   if (__VCL_DEBUG_PROVENANCE__ && commerce.providers_used?.length) {
     const counts = new Map<string, number>();
