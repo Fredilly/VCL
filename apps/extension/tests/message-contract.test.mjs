@@ -172,3 +172,11 @@ test('feedback UI uses reversible selected thumbs without thank-you copy', () =>
   assert.match(content, /selectedFeedback === 'wrong_item'/);
   assert.doesNotMatch(content, /Thanks — this helps Scoop learn/);
 });
+
+
+test('verified result UI uses consumer-facing Scoop Verified copy without SKU/admin jargon', () => {
+  assert.match(content, /Scoop Verified/);
+  assert.doesNotMatch(content, /SKU \$\{verifiedProduct\.model\}/);
+  assert.doesNotMatch(content, /Identity source: verified product data/);
+  assert.doesNotMatch(content, /providerLabel\.textContent = product\.provider;[\s\S]*isScoopVerified/);
+});
