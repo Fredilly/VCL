@@ -206,8 +206,12 @@ function verifiedIdentityTokens(value: string): string[] {
   return (canonical('model', value) ?? '').split(' ').filter((token) => token.length > 1 && !stop.has(token));
 }
 
-function verifiedOfferMatches(mapping: VerifiedProductMapping, product: ProductCandidate): boolean {
-  if (product.model && mapping.product_id && canonical('model', product.model) === canonical('model', mapping.product_id)) return true;
+function verifiedOfferHasExactIdentity(mapping: VerifiedProductMapping, product: ProductCandidate): boolean {
+  return Boolean(product.model && mapping.product_id
+    && canonical('model', product.model) === canonical('model', mapping.product_id));
+}
+
+function verifiedOfferTitleSimilar(mapping: VerifiedProductMapping, product: ProductCandidate): boolean {
   const expected = verifiedIdentityTokens(mapping.title);
   const actual = new Set(verifiedIdentityTokens(product.title));
   if (!expected.length) return false;
@@ -243,17 +247,22 @@ async function refreshVerifiedOffers(
   }));
   const fallback = verifiedMappingProduct(mapping);
   const refreshed = batches.flat()
-    .filter((product) => verifiedOfferMatches(mapping, product))
-    .map((product): ProductCandidate => ({
-      ...product,
-      result_class: 'EXACT',
-      provenance: mapping.provenance,
-      provider: product.provider || product.provenance || mapping.provider || 'verified',
-      identity_key: `verified:${mapping.product_id}`,
-      verification_status: 'metadata_only',
-      verification_score: 100,
-      verification_reasons: [`${mapping.provenance} product identity; fresh merchant offer`],
-    }));
+    .filter((product) => verifiedOfferTitleSimilar(mapping, product))
+    .map((product): ProductCandidate => {
+      const exactIdentity = verifiedOfferHasExactIdentity(mapping, product);
+      return {
+        ...product,
+        result_class: exactIdentity ? 'EXACT' : 'SIMILAR',
+        provenance: exactIdentity ? mapping.provenance : product.provenance,
+        provider: product.provider || product.provenance || mapping.provider || 'verified',
+        identity_key: exactIdentity ? `verified:${mapping.product_id}` : product.identity_key,
+        verification_status: exactIdentity ? 'metadata_only' : product.verification_status,
+        verification_score: exactIdentity ? 100 : product.verification_score,
+        verification_reasons: exactIdentity
+          ? [`${mapping.provenance} product identity; fresh merchant offer`]
+          : ['Title is similar to the verified product, but SKU/model identity was not confirmed'],
+      };
+    });
   return {
     products: dedupeProducts([...refreshed, fallback]).slice(0, 5),
     providers_used: providersUsed,

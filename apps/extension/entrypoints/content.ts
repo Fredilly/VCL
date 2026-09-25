@@ -77,7 +77,14 @@ function surfaceContext(currentTime?: number) {
     || document.querySelector('h1.title yt-formatted-string')?.textContent?.trim()
     || document.title.replace(/\s*-\s*YouTube\s*$/i, '').trim();
   const youtubeMatch = location.hostname.includes('youtube.com') && typeof location.search === 'string' ? location.search.match(/[?&]v=([^&]+)/) : null;
-  const youtubeId = youtubeMatch?.[1] ? decodeURIComponent(youtubeMatch[1]) : null;
+  const youtubeShortsMatch = location.hostname.includes('youtube.com') && typeof location.pathname === 'string'
+    ? location.pathname.match(/^\/shorts\/([^/?#]+)/)
+    : null;
+  const youtubeId = youtubeMatch?.[1]
+    ? decodeURIComponent(youtubeMatch[1])
+    : youtubeShortsMatch?.[1]
+      ? decodeURIComponent(youtubeShortsMatch[1])
+      : null;
   return {
     platform: location.hostname.includes('youtube.com') ? 'youtube' : 'generic-html5',
     title: youtubeTitle || null,
@@ -206,7 +213,7 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
     title.textContent = product.title;
     Object.assign(title.style, { fontWeight: '600', lineHeight: '1.3' });
     const meta = document.createElement('div');
-    const isScoopVerified = ['admin_verified', 'creator_verified', 'brand_verified'].includes(product.provenance ?? '');
+    const isScoopVerified = ['admin_verified', 'creator_verified', 'brand_verified', 'test_fixture'].includes(product.provenance ?? '');
     const parts = [
       !isScoopVerified ? product.result_class : null,
       product.price && product.currency ? `${product.price} ${product.currency}` : null,
@@ -215,7 +222,7 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
     meta.textContent = parts.filter(Boolean).join(' · ');
     Object.assign(meta.style, { opacity: '0.7', marginTop: '4px' });
     text.append(title, meta);
-    if (product.provider) {
+    if (product.provider && !isScoopVerified) {
       const providerLabel = document.createElement('div');
       providerLabel.textContent = product.provider.toLowerCase() === 'ebay' ? 'eBay' : product.provider;
       Object.assign(providerLabel.style, { fontSize: '11px', opacity: '0.62', marginTop: '2px' });
@@ -287,7 +294,7 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
             product,
           },
         }).then((response) => {
-          verify.textContent = response?.accepted ? '✓ Verified' : 'Try again';
+          verify.textContent = response?.accepted ? '✓ Verified' : (typeof response?.error === 'string' ? response.error : 'Try again');
           verify.disabled = Boolean(response?.accepted);
         }).catch(() => { verify.textContent = 'Try again'; verify.disabled = false; });
       });
@@ -489,9 +496,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       summary.textContent = verifiedProduct.title;
       Object.assign(summary.style, { fontSize: '15px', marginBottom: '4px' });
 
-      attrs.textContent = isTestFixture
-        ? (verifiedProduct.brand || 'Known test product')
-        : [verifiedProduct.brand, 'Scoop Verified'].filter(Boolean).join(' · ');
+      attrs.textContent = [verifiedProduct.brand, 'Scoop Verified'].filter(Boolean).join(' · ');
 
       const visualTitle = [
         analysis.subcategory || analysis.category,
@@ -499,9 +504,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       ].filter(Boolean).join(' ');
       const visualDetails = detailParts.join(' · ');
       confidence.textContent = `Visually detected: ${[visualTitle, visualDetails].filter(Boolean).join(' · ')}`;
-      identityConfidence.textContent = isTestFixture
-        ? 'Known test product'
-        : 'Scoop Verified';
+      identityConfidence.textContent = 'Scoop Verified';
       Object.assign(confidence.style, { opacity: '0.72', marginTop: '8px' });
       Object.assign(identityConfidence.style, { opacity: '0.72', marginTop: '3px' });
 
