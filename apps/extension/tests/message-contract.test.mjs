@@ -148,3 +148,9 @@ test('feedback messages are forwarded to the feedback endpoint', async () => {
   assert.deepEqual(seen.body, { event_id: 'evt-1', result_id: 'result-1', feedback_type: 'correct_match' });
   assert.equal(response.accepted, true);
 });
+
+
+test('admin verification control can promote a non-EXACT candidate to verified identity', async () => {
+  assert.match(content, /if \(admin\?\.admin && adminPayload\)/);
+  assert.doesNotMatch(content, /admin\?\.admin && product\.result_class === 'EXACT'/);
+});
