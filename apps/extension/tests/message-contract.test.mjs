@@ -186,3 +186,23 @@ test('Scoop Verified offer rows keep merchant name and verified label', () => {
   assert.match(content, /product\.provider\.toLowerCase\(\) === 'ebay' \? 'eBay' : product\.provider/);
   assert.match(content, /verifiedLabel\.textContent = 'Scoop Verified'/);
 });
+
+
+test('YouTube Shorts surface context keeps a stable content_ref for exact verification', () => {
+  const context = vm.createContext({
+    exports: {},
+    location: {
+      hostname: 'www.youtube.com',
+      search: '',
+      pathname: '/shorts/J9Vx9RhSetM',
+    },
+    document: {
+      title: 'Short title - YouTube',
+      querySelector: () => null,
+    },
+  });
+  vm.runInContext(compile(content.slice(content.indexOf('const OVERLAY_ID'), content.indexOf('function removeOverlay'))), context);
+  const value = vm.runInContext('surfaceContext(12)', context);
+  assert.equal(value.content_ref, 'youtube:J9Vx9RhSetM');
+  assert.equal(value.timestamp_ms, 12000);
+});
