@@ -30,8 +30,8 @@ import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerc
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
-import { chooseSameVideoVerifiedReuse, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
-import { canonicalProductIdentity } from './canonical-product-memory.js';
+import { chooseSameVideoVerifiedReuse, confirmSameVideoVisual, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
+import { canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 export { AlphaAccessLedger } from './alpha-access.js';
 export { VerifiedProductLedger } from './verified-product-ledger.js';
@@ -448,6 +448,100 @@ export async function refreshVerifiedOffers(
   };
 }
 
+type SameVideoVisualCheck = {
+  decision: SameVideoReuseDecision;
+  compared: number;
+  failures: number;
+  failure_reasons: Record<string, number>;
+  usage?: {
+    provider: string;
+    model: string;
+    requests: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    cost_usd?: number;
+  };
+  timing?: {
+    image_fetch_ms: number;
+    model_ms: number;
+    total_ms: number;
+    batches: Array<{
+      batch_index: number;
+      candidates: number;
+      images_loaded: number;
+      comparisons: number;
+      image_fetch_ms: number;
+      model_ms: number;
+      total_ms: number;
+    }>;
+  };
+};
+
+async function confirmSameVideoReuseWithImage(
+  env: Env,
+  description: ReturnType<typeof normalizeObjectDescription>,
+  context: ProductContext | undefined,
+  sourceImage: ReturnType<typeof parseSourceImage>,
+  decision: SameVideoReuseDecision,
+  identity: CanonicalProductIdentity | null,
+): Promise<SameVideoVisualCheck> {
+  const empty = { decision, compared: 0, failures: 0, failure_reasons: {} };
+  if (!decision.mapping || !decision.requires_visual) return empty;
+  if (!sourceImage || !identity) return { ...empty, decision: confirmSameVideoVisual(decision, null) };
+
+  const merchantRef = identity.merchant_refs.find((ref) => Boolean(ref.image_reference && ref.destination));
+  if (!merchantRef?.image_reference) return { ...empty, decision: confirmSameVideoVisual(decision, null) };
+
+  const useOpenRouter = env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
+  const key = useOpenRouter ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY;
+  if (!key) return { ...empty, decision: confirmSameVideoVisual(decision, null) };
+  const model = useOpenRouter ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
+
+  const candidate: ProductCandidate = {
+    id: identity.canonical_key,
+    title: identity.title,
+    brand: identity.brand,
+    model: identity.model,
+    category: identity.object_type,
+    image_reference: merchantRef.image_reference,
+    provenance: 'canonical_verified',
+    destination: merchantRef.destination,
+    price: null,
+    currency: null,
+    result_class: 'SIMILAR',
+    metadata: {
+      ...(identity.brand ? { brand: identity.brand } : {}),
+      ...(identity.model ? { model: identity.model } : {}),
+      category: identity.object_type,
+      ...(identity.color ? { color: identity.color } : {}),
+      ...(identity.material ? { material: identity.material } : {}),
+    },
+  };
+
+  const images = await compareCandidateImages(
+    key,
+    model,
+    sourceImage,
+    description,
+    [candidate],
+    context,
+    imageRequestBudget(),
+    { provider: useOpenRouter ? 'openrouter' : 'gemini' },
+  ).catch(() => null);
+
+  if (!images) return { ...empty, decision: confirmSameVideoVisual(decision, null), failures: 1, failure_reasons: { visual_check_failed: 1 } };
+  const comparison = images.comparisons.get(candidateKey(candidate));
+  return {
+    decision: confirmSameVideoVisual(decision, comparison),
+    compared: images.compared,
+    failures: images.failures,
+    failure_reasons: images.failure_reasons ?? {},
+    usage: images.usage,
+    timing: images.timing,
+  };
+}
+
 export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages, routing?: { commerce_action: 'SKIP' | 'SEARCH_NORMAL' | 'SEARCH_BROAD'; verification_action: 'LIGHT' | 'FULL'; telemetry: JevRouterTelemetry; broad_search_on_miss?: boolean }, useMarkingEvidence = false) {
   const routingActive = Boolean(routing && !routing.telemetry.failed);
   let attempts = 0;
@@ -818,6 +912,12 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           model: typeof product.model === 'string' ? product.model : null,
           merchantItemId: typeof product.id === 'string' ? product.id : null,
           visibleText: description.visible_text,
+          color: description.color,
+          material: description.material,
+          styleAttributes: description.style_attributes,
+          logosMarkings: description.logos_markings,
+          distinctiveFeatures: description.distinctive_features,
+          shapeSilhouette: description.shape_silhouette,
         });
         const canonical = await persistCanonicalProductIdentity(env, identity);
         const mapping: VerifiedProductMapping = { ...mappingBase, canonical_key: canonical.canonical_key };
@@ -1056,6 +1156,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       const description = normalizeObjectDescription(record.description);
       const context = normalizeContext(record.context);
       const contentRef = context?.content_ref ?? null;
+      const verifiedResolutionStarted = Date.now();
       const durableMappings = await durableVerifiedMappings(env, context?.platform ?? null, contentRef).catch(() => []);
       let verifiedMapping = lookupVerifiedProductMapping({
         rawRegistry: env.VERIFIED_PRODUCT_MAPPINGS_JSON,
@@ -1072,32 +1173,51 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         confidence: 0,
         reason: 'no_candidate',
       };
+      let sameVideoVisualCheck: SameVideoVisualCheck = {
+        decision: sameVideoReuse,
+        compared: 0,
+        failures: 0,
+        failure_reasons: {},
+      };
       if (!verifiedMapping && durableMappings.length) {
         const canonicalMappings = durableMappings.filter((mapping) => Boolean(mapping.canonical_key));
-        const canonicalRows = await Promise.all(canonicalMappings.map(async (mapping) => {
+        const canonicalRows = (await Promise.all(canonicalMappings.map(async (mapping) => {
           const identity = mapping.canonical_key
             ? await durableCanonicalProductIdentity(env, mapping.canonical_key).catch(() => null)
             : null;
           return identity ? { mapping, identity } : null;
-        }));
+        }))).filter((row): row is NonNullable<typeof row> => Boolean(row));
+
         sameVideoReuse = chooseSameVideoVerifiedReuse({
           description,
-          candidates: canonicalRows.filter((row): row is NonNullable<typeof row> => Boolean(row)),
+          candidates: canonicalRows,
         });
+
+        const reuseIdentity = sameVideoReuse.canonical_key
+          ? canonicalRows.find((row) => row.identity.canonical_key === sameVideoReuse.canonical_key)?.identity ?? null
+          : null;
+        sameVideoVisualCheck = await confirmSameVideoReuseWithImage(
+          env,
+          description,
+          context,
+          sourceImage,
+          sameVideoReuse,
+          reuseIdentity,
+        );
+        sameVideoReuse = sameVideoVisualCheck.decision;
         if (sameVideoReuse.mapping) verifiedMapping = sameVideoReuse.mapping;
       }
       if (verifiedMapping) {
-        const started = Date.now();
         const configuredProviders = commerceProviders(env);
         const refreshed = await refreshVerifiedOffers(configuredProviders, verifiedMapping);
-        const total_ms = Date.now() - started;
+        const total_ms = Date.now() - verifiedResolutionStarted;
         recordAlphaScoop({
           telemetry: alphaTelemetry,
           state: 'RESULTS',
           totalMs: total_ms,
           providersUsed: refreshed.providers_used,
           resultRows: refreshed.products.map((product) => ({ id: product.id, result_class: product.result_class })),
-          verificationUsage: undefined,
+          verificationUsage: sameVideoVisualCheck.usage,
           commerceCalls: refreshed.commerce_calls,
           visionUsage: rawDescription?.provider_usage,
         });
@@ -1115,8 +1235,28 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           providers_configured: configuredProviders.map(({ name }) => name),
           providers_used: refreshed.providers_used,
           attempts: refreshed.providers_used.length,
-          verification: { retrieved: refreshed.products.length, metadata_prefiltered: 0, light_escalations: 0, compared: 0, image_failures: 0, image_failure_reasons: {}, rejected: 0, contradictions: {} },
-          cost_usage: { commerce_calls: refreshed.commerce_calls, verification_usage: { provider: 'none', model: 'none', requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0 } },
+          verification: {
+            retrieved: refreshed.products.length,
+            metadata_prefiltered: 0,
+            light_escalations: 0,
+            compared: sameVideoVisualCheck.compared,
+            image_failures: sameVideoVisualCheck.failures,
+            image_failure_reasons: sameVideoVisualCheck.failure_reasons,
+            rejected: 0,
+            contradictions: {},
+          },
+          cost_usage: {
+            commerce_calls: refreshed.commerce_calls,
+            verification_usage: sameVideoVisualCheck.usage ?? {
+              provider: 'none',
+              model: 'none',
+              requests: 0,
+              prompt_tokens: 0,
+              completion_tokens: 0,
+              total_tokens: 0,
+              cost_usd: 0,
+            },
+          },
           verified_mapping: {
             hit: true,
             provenance: verifiedMapping.provenance,
@@ -1129,7 +1269,14 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             } : {}),
           },
           latency_ms: total_ms,
-          timing: { provider_retrieval_ms: refreshed.provider_retrieval_ms, candidate_verification_ms: 0, candidate_image_fetch_ms: 0, candidate_model_verification_ms: 0, verification_batches: [], total_ms },
+          timing: {
+            provider_retrieval_ms: refreshed.provider_retrieval_ms,
+            candidate_verification_ms: sameVideoVisualCheck.timing?.total_ms ?? 0,
+            candidate_image_fetch_ms: sameVideoVisualCheck.timing?.image_fetch_ms ?? 0,
+            candidate_model_verification_ms: sameVideoVisualCheck.timing?.model_ms ?? 0,
+            verification_batches: sameVideoVisualCheck.timing?.batches ?? [],
+            total_ms,
+          },
         });
       }
       const providers = commerceProviders(env);
@@ -1181,6 +1328,25 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       const started = Date.now();
       const markingVerifyV1 = record.benchmark_marking_verify_v1 === true;
       const resolved = await resolveProducts(routedProviders, routedQueries, description, env, context, sourceImage, compareCandidateImages, routing, markingVerifyV1);
+      if (sameVideoVisualCheck.usage) {
+        const usage = resolved.cost_usage.verification_usage;
+        usage.requests += sameVideoVisualCheck.usage.requests ?? 0;
+        usage.prompt_tokens += sameVideoVisualCheck.usage.prompt_tokens ?? 0;
+        usage.completion_tokens += sameVideoVisualCheck.usage.completion_tokens ?? 0;
+        usage.total_tokens += sameVideoVisualCheck.usage.total_tokens ?? 0;
+        usage.cost_usd += sameVideoVisualCheck.usage.cost_usd ?? 0;
+        resolved.verification.compared += sameVideoVisualCheck.compared;
+        resolved.verification.image_failures += sameVideoVisualCheck.failures;
+        for (const [reason, count] of Object.entries(sameVideoVisualCheck.failure_reasons)) {
+          resolved.verification.image_failure_reasons[reason] = (resolved.verification.image_failure_reasons[reason] ?? 0) + count;
+        }
+        if (sameVideoVisualCheck.timing) {
+          resolved.timing.candidate_verification_ms += sameVideoVisualCheck.timing.total_ms;
+          resolved.timing.candidate_image_fetch_ms += sameVideoVisualCheck.timing.image_fetch_ms;
+          resolved.timing.candidate_model_verification_ms += sameVideoVisualCheck.timing.model_ms;
+          resolved.timing.verification_batches.push(...sameVideoVisualCheck.timing.batches);
+        }
+      }
       const feedbackEvidenceKey = evidenceFingerprint(description);
       let feedbackLearning = { penalized: 0, suppressed: 0 };
       if (env.FEEDBACK_LEDGER && resolved.products.length) {
@@ -1193,7 +1359,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           logSafeError(error);
         }
       }
-      const total_ms = Date.now() - started;
+      const total_ms = Date.now() - started + (sameVideoVisualCheck.timing?.total_ms ?? 0);
       const failureState = resolved.state === 'TEMPORARILY_UNAVAILABLE' ? 'TEMPORARILY_UNAVAILABLE' : resolved.state === 'NO_RESULTS' ? 'NO_RESULTS' : undefined;
       if (resolved.state === 'TEMPORARILY_UNAVAILABLE') recordFailureState('commerce', 'PROVIDER_UNAVAILABLE', true);
       else if (resolved.state === 'NO_RESULTS') recordFailureState('commerce', 'NO_RESULTS', false);
