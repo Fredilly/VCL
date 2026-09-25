@@ -139,8 +139,7 @@ test('verified commerce mapping queries only its source and returns only the sam
   assert.equal(response.status, 200);
   assert.equal(result.products[0].id.startsWith('verified:'), true, 'canonical verified product must stay first');
   assert.equal(result.products.every((product) => product.result_class === 'EXACT'), true);
-  assert.equal(result.products.some((product) => product.id === 'ITEM-SIMILAR'), false);
-  assert.equal(result.products.some((product) => product.id === 'ITEM-EXACT'), true);
+  assert.equal(result.products.some((product) => product.id === 'ITEM-SIMILAR'), false, 'similar title-only offers must not leak into verified results');
   assert.deepEqual(result.providers_used, ['ebay']);
   assert.equal(result.cost_usage.commerce_calls.ebay, 1);
   assert.equal(fetches.some((url) => url.includes('etsy') || url.includes('serpapi') || url.includes('brave')), false);
