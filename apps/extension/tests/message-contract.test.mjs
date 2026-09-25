@@ -174,17 +174,18 @@ test('feedback UI uses reversible selected thumbs without thank-you copy', () =>
 });
 
 
-test('verified result UI uses consumer-facing Scoop Verified copy without SKU/admin jargon', () => {
-  assert.match(content, /Scoop Verified/);
+test('verified result UI uses one exact-match badge and concise evidence copy without SKU/admin jargon', () => {
+  assert.match(content, /exactBadge\.textContent = '✓ Exact match'/);
+  assert.match(content, /Matched from visible text and shirt details/);
+  assert.doesNotMatch(content, /Scoop Verified/);
   assert.doesNotMatch(content, /SKU \$\{verifiedProduct\.model\}/);
   assert.doesNotMatch(content, /Identity source: verified product data/);
-  assert.doesNotMatch(content, /providerLabel\.textContent = product\.provider;[\s\S]*isScoopVerified/);
 });
 
 
-test('Scoop Verified offer rows keep merchant name and verified label', () => {
+test('verified offer rows keep merchant name without redundant verified labels', () => {
   assert.match(content, /product\.provider\.toLowerCase\(\) === 'ebay' \? 'eBay' : product\.provider/);
-  assert.match(content, /verifiedLabel\.textContent = 'Scoop Verified'/);
+  assert.doesNotMatch(content, /verifiedLabel\.textContent = 'Scoop Verified'/);
 });
 
 
@@ -213,5 +214,5 @@ test('verified rows show their source and omit feedback/admin controls', () => {
   assert.match(content, /function productSourceLabel\(product: ProductCandidate\)/);
   assert.match(content, /return new URL\(product\.destination\)\.hostname\.replace/);
   assert.match(content, /if \(!isScoopVerified\) \{/);
-  assert.match(content, /verifiedLabel\.textContent = 'Scoop Verified'/);
+  assert.doesNotMatch(content, /verifiedLabel\.textContent = 'Scoop Verified'/);
 });
