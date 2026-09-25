@@ -90,7 +90,7 @@ test('verified commerce mapping hydrates its thumbnail and returns every same-SK
     title: 'Verified Shirt',
     destination: 'https://www.ebay.com/itm/ITEM-EXACT',
     image_reference: 'https://i.ebayimg.com/stale-saved.jpg',
-    provider: 'ebay:browse',
+    provider: 'admin_verified',
     provenance: 'test_fixture',
   };
 
