@@ -2,7 +2,7 @@ import type { ObjectDescription } from './types.js';
 import type { CanonicalProductIdentity } from './canonical-product-memory.js';
 import type { VerifiedProductMapping } from './verified-product-mapping.js';
 import { normalizeIdentityText } from './canonical-product-memory.js';
-import { canonical } from './verification-evidence.js';
+import { canonical, compatible, type ImageComparison } from './verification-evidence.js';
 
 export type SameVideoReuseReason =
   | 'model_exact'
@@ -175,4 +175,59 @@ export function chooseSameVideoVerifiedReuse(input: {
   const uniqueKeys = new Set(matches.map((match) => match.canonical_key));
   if (uniqueKeys.size > 1) return { mapping: null, canonical_key: null, confidence: 0, reason: 'ambiguous' };
   return matches.sort((a, b) => b.confidence - a.confidence)[0] ?? strongestMiss;
+}
+
+
+export function confirmSameVideoVisual(
+  decision: SameVideoReuseDecision,
+  comparison: ImageComparison | null | undefined,
+): SameVideoReuseDecision {
+  if (!decision.mapping || !decision.requires_visual) return decision;
+  if (!comparison) return { ...decision, mapping: null, canonical_key: null, confidence: 0, reason: 'visual_unavailable' };
+
+  const critical = ['subtype', 'color', 'sleeve', 'brand', 'model'] as const;
+  for (const key of critical) {
+    const source = comparison.source[key];
+    const candidate = comparison.candidate[key];
+    const a = canonical(key, source?.value);
+    const b = canonical(key, candidate?.value);
+    if (!a || !b || !source || !candidate) continue;
+    if (source.confidence >= 0.8 && candidate.confidence >= 0.8 && !compatible(key, a, b)) {
+      return {
+        ...decision,
+        mapping: null,
+        canonical_key: null,
+        confidence: 0,
+        reason: 'visual_rejected',
+        visual_similarity: comparison.similarity,
+        visual_confidence: comparison.confidence,
+      };
+    }
+  }
+
+  const specificDetails = (comparison.matching_details ?? []).filter((detail) => {
+    const useful = distinctiveWords([detail]);
+    return useful.length >= 2;
+  });
+
+  if (comparison.confidence < 0.85 || comparison.similarity < 0.92 || specificDetails.length < 1) {
+    return {
+      ...decision,
+      mapping: null,
+      canonical_key: null,
+      confidence: 0,
+      reason: 'visual_rejected',
+      visual_similarity: comparison.similarity,
+      visual_confidence: comparison.confidence,
+    };
+  }
+
+  return {
+    ...decision,
+    confidence: Math.min(0.99, Math.max(decision.confidence, comparison.similarity)),
+    reason: 'visual_confirmed',
+    requires_visual: false,
+    visual_similarity: comparison.similarity,
+    visual_confidence: comparison.confidence,
+  };
 }
