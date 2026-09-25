@@ -1,4 +1,5 @@
 import type { VerifiedProductMapping } from './verified-product-mapping.js';
+import { mergeCanonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 
 type DurableObjectStubLike = { fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> };
 export type VerifiedProductLedgerNamespaceLike = {
@@ -58,8 +59,30 @@ export async function revokeAdminVerifiedMapping(
   return Boolean(result?.revoked);
 }
 
+export async function persistCanonicalProductIdentity(
+  env: VerifiedProductLedgerEnv,
+  identity: CanonicalProductIdentity,
+): Promise<CanonicalProductIdentity> {
+  const result = await postJson<{ identity?: CanonicalProductIdentity }>(env, '/canonical/upsert', identity);
+  if (!result?.identity) throw new Error('canonical product ledger unavailable');
+  return result.identity;
+}
+
+export async function durableCanonicalProductIdentity(
+  env: VerifiedProductLedgerEnv,
+  canonicalKey: string,
+): Promise<CanonicalProductIdentity | null> {
+  if (!canonicalKey) return null;
+  const result = await postJson<{ identity?: CanonicalProductIdentity | null }>(env, '/canonical/get', { canonical_key: canonicalKey });
+  return result?.identity ?? null;
+}
+
 function contentKey(platform: string, contentRef: string): string {
   return `content:${bounded(platform, 40).toLowerCase()}:${bounded(contentRef, 180).toLowerCase()}`;
+}
+
+function canonicalKey(value: string): string {
+  return `canonical:${bounded(value, 220).toLowerCase()}`;
 }
 
 export class VerifiedProductLedger {
@@ -82,6 +105,31 @@ export class VerifiedProductLedger {
       const contentRef = bounded(body.content_ref, 180);
       if (!platform || !contentRef) return Response.json({ mappings: [] });
       return Response.json({ mappings: await this.storage.get<VerifiedProductMapping[]>(contentKey(platform, contentRef)) ?? [] });
+    }
+
+    if (path === '/canonical/get') {
+      const body = await request.json() as Record<string, unknown>;
+      const key = bounded(body.canonical_key, 220);
+      if (!key) return Response.json({ identity: null });
+      return Response.json({ identity: await this.storage.get<CanonicalProductIdentity>(canonicalKey(key)) ?? null });
+    }
+
+    if (path === '/canonical/upsert') {
+      const incoming = await request.json() as CanonicalProductIdentity;
+      const key = bounded(incoming.canonical_key, 220);
+      if (!key || !bounded(incoming.title, 300) || !bounded(incoming.object_type, 100)) {
+        return Response.json({ error: 'Invalid canonical product identity' }, { status: 400 });
+      }
+      const storageKey = canonicalKey(key);
+      const existing = await this.storage.get<CanonicalProductIdentity>(storageKey);
+      let identity: CanonicalProductIdentity;
+      try {
+        identity = existing ? mergeCanonicalProductIdentity(existing, incoming) : incoming;
+      } catch {
+        return Response.json({ error: 'Conflicting canonical product identity' }, { status: 409 });
+      }
+      await this.storage.put(storageKey, identity);
+      return Response.json({ accepted: true, identity });
     }
 
     if (path === '/verify') {

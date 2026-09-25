@@ -16,6 +16,7 @@ export type VerifiedProductMapping = {
   destination: string;
   image_reference?: string | null;
   provider?: string | null;
+  canonical_key?: string | null;
   provenance: VerifiedProductProvenance;
 };
 
@@ -96,6 +97,9 @@ export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProd
       destination: (record.destination as string).trim(),
       image_reference: typeof record.image_reference === 'string' && record.image_reference.trim() ? record.image_reference.trim() : null,
       provider: typeof record.provider === 'string' && record.provider.trim() ? record.provider.trim() : null,
+      ...(typeof record.canonical_key === 'string' && record.canonical_key.trim()
+        ? { canonical_key: record.canonical_key.trim().slice(0, 220) }
+        : {}),
       provenance,
     }];
   });
