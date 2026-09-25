@@ -314,7 +314,7 @@ async function sourceImageForVerifiedMapping(mapping: VerifiedProductMapping): P
   }
 }
 
-async function refreshVerifiedOffers(
+export async function refreshVerifiedOffers(
   providers: NamedCommerceProvider[],
   mapping: VerifiedProductMapping,
 ): Promise<{ products: ProductCandidate[]; providers_used: string[]; commerce_calls: Record<string, number>; provider_retrieval_ms: number }> {
