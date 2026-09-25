@@ -205,6 +205,14 @@ function verifiedIdentityKey(value: string | null | undefined): string {
   return (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
+function verifiedSourceProviderName(value: string | null | undefined): string {
+  const raw = (value ?? '').trim().toLowerCase();
+  if (!raw) return '';
+  const root = raw.split(':', 1)[0];
+  if (root === 'ebay' || root === 'etsy' || root === 'serpapi' || root === 'brave') return root;
+  return raw;
+}
+
 function verifiedOfferHasExactIdentity(mapping: VerifiedProductMapping, product: ProductCandidate): boolean {
   const expectedModel = verifiedIdentityKey(mapping.product_id);
   if (!expectedModel) return false;
@@ -319,7 +327,7 @@ export async function refreshVerifiedOffers(
   mapping: VerifiedProductMapping,
 ): Promise<{ products: ProductCandidate[]; providers_used: string[]; commerce_calls: Record<string, number>; provider_retrieval_ms: number }> {
   const started = Date.now();
-  const sourceProviderName = (mapping.provider ?? '').trim().toLowerCase();
+  const sourceProviderName = verifiedSourceProviderName(mapping.provider);
   const sourceProviders = sourceProviderName
     ? providers.filter(({ name }) => name.toLowerCase() === sourceProviderName)
     : [];
@@ -787,9 +795,9 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             ? product.image_reference.trim().slice(0, 1200)
             : null,
           provider: typeof product.provider === 'string' && product.provider.trim()
-            ? product.provider.trim().slice(0, 80)
+            ? verifiedSourceProviderName(product.provider).slice(0, 80)
             : typeof product.provenance === 'string' && product.provenance.trim()
-              ? product.provenance.trim().slice(0, 80)
+              ? verifiedSourceProviderName(product.provenance).slice(0, 80)
               : null,
           provenance: 'admin_verified',
         };
