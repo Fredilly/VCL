@@ -201,11 +201,15 @@ function filterByCategory(providers: NamedCommerceProvider[], query: ProductQuer
 const LIKELY_CANDIDATE_THRESHOLD = 3;
 const SUFFICIENT_CANDIDATE_THRESHOLD = 3;
 
+function verifiedIdentityKey(value: string | null | undefined): string {
+  return (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
 function verifiedOfferHasExactIdentity(mapping: VerifiedProductMapping, product: ProductCandidate): boolean {
-  const expectedModel = canonical('model', mapping.product_id);
+  const expectedModel = verifiedIdentityKey(mapping.product_id);
   if (!expectedModel) return false;
-  if (product.model && canonical('model', product.model) === expectedModel) return true;
-  if (product.id && canonical('model', product.id) === expectedModel) return true;
+  if (product.model && verifiedIdentityKey(product.model) === expectedModel) return true;
+  if (product.id && verifiedIdentityKey(product.id) === expectedModel) return true;
   if (product.destination && mapping.destination) {
     try {
       const actual = new URL(product.destination);
