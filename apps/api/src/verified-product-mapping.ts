@@ -14,6 +14,8 @@ export type VerifiedProductMapping = {
   product_id: string;
   title: string;
   destination: string;
+  image_reference?: string | null;
+  provider?: string | null;
   provenance: VerifiedProductProvenance;
 };
 
@@ -92,6 +94,8 @@ export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProd
       product_id: (record.product_id as string).trim(),
       title: (record.title as string).trim(),
       destination: (record.destination as string).trim(),
+      image_reference: typeof record.image_reference === 'string' && record.image_reference.trim() ? record.image_reference.trim() : null,
+      provider: typeof record.provider === 'string' && record.provider.trim() ? record.provider.trim() : null,
       provenance,
     }];
   });
@@ -124,7 +128,7 @@ export function verifiedMappingProduct(mapping: VerifiedProductMapping): Product
     brand: mapping.brand,
     model: mapping.product_id,
     category: mapping.object_type,
-    image_reference: null,
+    image_reference: mapping.image_reference ?? null,
     provenance: mapping.provenance,
     destination: mapping.destination,
     price: null,
@@ -134,7 +138,7 @@ export function verifiedMappingProduct(mapping: VerifiedProductMapping): Product
     verification_status: 'metadata_only',
     verification_score: 100,
     verification_reasons: [`${mapping.provenance} product mapping for this content`],
-    provider: mapping.provenance,
+    provider: mapping.provider ?? mapping.provenance,
     identity_key: `verified:${mapping.product_id}`,
   };
 }
