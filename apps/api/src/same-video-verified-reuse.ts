@@ -6,6 +6,7 @@ import { canonical, compatible, type ImageComparison } from './verification-evid
 
 export type SameVideoReuseReason =
   | 'model_exact'
+  | 'distinctive_text_exact'
   | 'fingerprint_candidate'
   | 'brand_conflict'
   | 'model_conflict'
@@ -267,6 +268,43 @@ export function eligibleSameVideoCanonicalCandidates(input: {
   }
 
   return [...unique.values()];
+}
+
+export function distinctiveTextSameVideoReuse(input: {
+  description: ObjectDescription;
+  candidates: SameVideoCanonicalCandidate[];
+}): SameVideoReuseDecision {
+  const eligible = eligibleSameVideoCanonicalCandidates(input);
+  const matches = eligible.filter(({ mapping, identity }) => {
+    // This shortcut is only authoritative for explicitly promoted product tracks.
+    if (!mapping.track_id || mapping.track_id !== identity.canonical_key) return false;
+    const signals = candidateSignals(identity, input.description);
+    // Require a genuinely distinctive phrase, not generic apparel words. Exact phrase
+    // is preferred; fragmented OCR may still qualify when at least three distinctive
+    // words cover most of the stored phrase.
+    const stored = distinctiveWords(identity.visible_text);
+    if (stored.length < 3) return false;
+    return signals.exactVisiblePhrase
+      || (signals.visibleOverlap.shared >= 3 && signals.visibleOverlap.ratio >= 0.75);
+  });
+
+  const keys = new Set(matches.map(({ identity }) => identity.canonical_key));
+  if (keys.size !== 1 || matches.length !== 1) {
+    return {
+      mapping: null,
+      canonical_key: null,
+      confidence: 0,
+      reason: matches.length > 1 ? 'ambiguous' : 'no_candidate',
+    };
+  }
+
+  return {
+    mapping: matches[0].mapping,
+    canonical_key: matches[0].identity.canonical_key,
+    confidence: 0.96,
+    reason: 'distinctive_text_exact',
+    requires_visual: false,
+  };
 }
 
 export function exactModelSameVideoReuse(input: {
