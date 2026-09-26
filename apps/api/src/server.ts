@@ -573,8 +573,6 @@ export async function refreshVerifiedOffers(
           return makeExact({
           id: fresh?.id || ref.item_id || ref.destination,
           title: fresh?.title || remembered.title,
-          id: ref.item_id || ref.destination,
-          title: remembered.title,
           brand: fresh?.brand || remembered.brand,
           model: fresh?.model || remembered.model,
           category: fresh?.category || remembered.object_type,
