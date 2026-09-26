@@ -270,3 +270,26 @@ test('visually weak canonical candidate stays non-exact', () => {
   assert.equal(winner.mapping, null);
   assert.equal(winner.reason, 'visual_rejected');
 });
+
+
+test('unique same-video canonical match at 0.90/0.90 is visually confirmed', () => {
+  const candidate = mod.chooseSameVideoVerifiedReuse({ description, candidates: [{ mapping, identity }] });
+  const result = mod.confirmSameVideoVisual(candidate, {
+    ...visualMatch,
+    similarity: 0.90,
+    confidence: 0.90,
+  });
+  assert.equal(result.mapping?.product_id, 'merchant-item-1');
+  assert.equal(result.reason, 'visual_confirmed');
+});
+
+test('same-video visual confirmation still rejects below 0.90 confidence', () => {
+  const candidate = mod.chooseSameVideoVerifiedReuse({ description, candidates: [{ mapping, identity }] });
+  const result = mod.confirmSameVideoVisual(candidate, {
+    ...visualMatch,
+    similarity: 0.94,
+    confidence: 0.89,
+  });
+  assert.equal(result.mapping, null);
+  assert.equal(result.reason, 'visual_rejected');
+});
