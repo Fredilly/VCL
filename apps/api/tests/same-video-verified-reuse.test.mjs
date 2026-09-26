@@ -383,3 +383,65 @@ test('different distinctive slogan does not reconnect to promoted track', () => 
   });
   assert.equal(result.mapping, null);
 });
+
+
+test('VPM candidate set excludes legacy canonical mappings once explicit memories exist', () => {
+  const promoted = { ...mapping, track_id: identity.canonical_key };
+  const legacyIdentity = { ...identity, canonical_key: 'product:v1:legacy' };
+  const legacyMapping = { ...mapping, product_id: 'legacy-item', canonical_key: legacyIdentity.canonical_key };
+  const result = mod.verifiedProductMemoryCandidates({
+    description,
+    candidates: [
+      { mapping: promoted, identity },
+      { mapping: legacyMapping, identity: legacyIdentity },
+    ],
+  });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].mapping.product_id, 'merchant-item-1');
+});
+
+test('occluded VPM product remains eligible from compatible object evidence without lowering Exact', () => {
+  const promoted = { ...mapping, track_id: identity.canonical_key };
+  const occluded = {
+    ...description,
+    visible_text: [],
+    logos_markings: [],
+    search_terms: ['black oversized t-shirt'],
+  };
+  const result = mod.verifiedProductMemoryCandidates({
+    description: occluded,
+    candidates: [{ mapping: promoted, identity }],
+  });
+  assert.equal(result.length, 1);
+
+  const winner = mod.selectSameVideoVisualWinner({
+    candidates: result,
+    comparisons: new Map([[identity.canonical_key, visualMatch]]),
+  });
+  assert.equal(winner.mapping?.product_id, 'merchant-item-1');
+  assert.equal(winner.reason, 'visual_confirmed');
+});
+
+test('occluded VPM product still fails closed on weak visual evidence', () => {
+  const promoted = { ...mapping, track_id: identity.canonical_key };
+  const occluded = { ...description, visible_text: [], logos_markings: [], search_terms: ['black t-shirt'] };
+  const result = mod.verifiedProductMemoryCandidates({
+    description: occluded,
+    candidates: [{ mapping: promoted, identity }],
+  });
+  const winner = mod.selectSameVideoVisualWinner({
+    candidates: result,
+    comparisons: new Map([[identity.canonical_key, { ...visualMatch, similarity: 0.84, confidence: 0.96 }]]),
+  });
+  assert.equal(winner.mapping, null);
+  assert.equal(winner.reason, 'visual_rejected');
+});
+
+test('VPM hard color contradiction is eliminated before visual fallback', () => {
+  const promoted = { ...mapping, track_id: identity.canonical_key };
+  const result = mod.verifiedProductMemoryCandidates({
+    description: { ...description, color: 'white', visible_text: [], logos_markings: [] },
+    candidates: [{ mapping: promoted, identity }],
+  });
+  assert.equal(result.length, 0);
+});
