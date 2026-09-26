@@ -407,7 +407,18 @@ export async function refreshVerifiedOffers(
     const exactLookup = (exactLookupSource.provider as CommerceProvider & {
       getItemById(itemId: string, query: ProductQuery): Promise<ProductCandidate | null>;
     }).getItemById.bind(exactLookupSource.provider);
-    exactSource = await exactLookup(mapping.product_id, query).catch(() => null);
+
+    // Older promoted mappings may store a canonical SKU in product_id rather than
+    // the merchant listing ID. Recover the eBay item ID from the saved URL first.
+    let lookupItemId = mapping.product_id;
+    if (exactLookupSource.name === 'ebay' && mapping.destination) {
+      try {
+        const url = new URL(mapping.destination);
+        const pathMatch = url.pathname.match(/\/itm\/(?:[^/]+\/)?([^/?#]+)/i);
+        if (pathMatch?.[1]) lookupItemId = decodeURIComponent(pathMatch[1]);
+      } catch {}
+    }
+    exactSource = await exactLookup(lookupItemId, query).catch(() => null);
     if (exactSource?.model) canonicalModel = exactSource.model;
   }
 
