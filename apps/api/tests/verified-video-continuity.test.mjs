@@ -107,25 +107,20 @@ test('promoted SKU is confirmed from pixels earlier, at promotion, and later des
   assert.equal(h.calls.filter((url) => url.includes('generateContent')).length, 3);
 });
 
-test('unclear or unavailable confirmation keeps memory and does not discover a replacement SKU', async () => {
+test('unclear confirmation preserves memory but falls through to normal matching', async () => {
   const h = harness();
   const saved = await h.promote();
   h.control.similarity = 0.8;
-  let result = await h.scoop(300_000);
-  assert.equal(result.body.identity_confirmation, 'required');
-  assert.equal(result.body.verified_mapping.reason, 'weak_evidence');
-  assert.deepEqual(result.body.products, []);
-  assert.equal(result.body.attempts, 0);
-  h.control.unavailable = true;
-  result = await h.scoop(1_000);
-  assert.equal(result.body.identity_confirmation, 'required');
-  assert.equal(result.body.verified_mapping.reason, 'visual_unavailable');
+  const result = await h.scoop(300_000);
+  // This harness has no commerce providers. Reaching the normal commerce guard
+  // proves weak persistence confirmation no longer suppresses discovery.
+  assert.equal(result.status, 503);
+  assert.match(result.body.error, /Shopping sources/);
   const identity = await h.ledgerModule.durableCanonicalProductIdentity(h.env, saved.canonical_key);
   assert.equal(identity.model, 'SKU-42');
-  h.control.unavailable = false;
   h.control.similarity = 0.96;
-  result = await h.scoop(350_000);
-  assert.equal(result.body.products[0].canonical_key, saved.canonical_key);
+  const confirmed = await h.scoop(350_000);
+  assert.equal(confirmed.body.products[0].canonical_key, saved.canonical_key);
 });
 
 test('matching a guessed model or a nearby timestamp never bypasses pixel confirmation', async () => {
@@ -186,15 +181,14 @@ test('a saved-memory read failure does not become a fresh discovery request', as
   assert.equal(h.calls.length, 0);
 });
 
-test('two different visually confirmed saved products remain ambiguous', async () => {
+test('ambiguous saved identities fall through instead of suppressing normal matching', async () => {
   const h = harness();
   await h.promote();
   await h.promote({ ...product, id: 'listing-other', model: 'SKU-OTHER',
     destination: 'https://shop.example.com/item/other', image_reference: 'https://images.example.com/other.jpg' });
-  const { body } = await h.scoop(300_000);
-  assert.equal(body.verified_mapping.reason, 'ambiguous');
-  assert.equal(body.identity_confirmation, 'required');
-  assert.deepEqual(body.products, []);
+  const result = await h.scoop(300_000);
+  assert.equal(result.status, 503);
+  assert.match(result.body.error, /Shopping sources/);
 });
 
 test('a demoted offer image cannot be used to confirm canonical identity', async () => {
@@ -211,4 +205,24 @@ test('a demoted offer image cannot be used to confirm canonical identity', async
   const { body } = await h.scoop(300_000);
   assert.equal(body.verified_mapping.hit, true);
   assert.equal(h.calls.includes('https://images.example.com/demoted.jpg'), false);
+});
+
+test('demote uses the displayed offer destination even when rendered id is canonical SKU', async () => {
+  const h = harness();
+  const saved = await h.promote();
+  const response = await h.server.default.fetch(new Request('https://api.example.com/admin/verified-product', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-scoop-admin-session': 'test-session' },
+    body: JSON.stringify({
+      action: 'demote',
+      platform: context.platform,
+      content_ref: context.content_ref,
+      canonical_key: saved.canonical_key,
+      product: { ...product, id: 'SKU-42' },
+    }),
+  }), h.env);
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.accepted, true);
+  assert.equal(body.relationship, 'SIMILAR');
 });
