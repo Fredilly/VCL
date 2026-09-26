@@ -303,7 +303,7 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
     title.textContent = product.title;
     Object.assign(title.style, { fontWeight: '650', lineHeight: '1.28', letterSpacing: '-0.01em' });
     const meta = document.createElement('div');
-    const isScoopVerified = ['admin_verified', 'creator_verified', 'brand_verified', 'test_fixture'].includes(product.provenance ?? '');
+    const isCandidateVerified = relationship === 'EXACT' && ['admin_verified', 'creator_verified', 'brand_verified', 'test_fixture'].includes(product.provenance ?? '');
     const parts = [
       product.price && product.currency ? `${product.price} ${product.currency}` : null,
     ];
@@ -321,7 +321,7 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
     row.appendChild(text);
     card.appendChild(row);
 
-    if (!isScoopVerified) {
+    if (!isCandidateVerified) {
       const feedback = document.createElement('div');
       Object.assign(feedback.style, {
         display: 'flex',
@@ -370,10 +370,10 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
       no.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void submit('wrong_item'); });
       paintFeedback();
       feedback.append(yes, no);
-      if (admin?.admin && adminPayload) {
-        const verify = button(commerce.verified_mapping?.hit && commerce.verified_mapping?.provenance === 'admin_verified' ? '✓ Verified' : 'Verify exact');
-        Object.assign(verify.style, { height: '32px', padding: '0 9px', fontSize: '11px', opacity: commerce.verified_mapping?.hit ? '0.72' : '0.9' });
-        verify.disabled = Boolean(commerce.verified_mapping?.hit && commerce.verified_mapping?.provenance === 'admin_verified');
+      if (admin?.admin && adminPayload && relationship === 'SIMILAR') {
+        const verify = button('Promote to Exact');
+        Object.assign(verify.style, { height: '32px', padding: '0 9px', fontSize: '11px', opacity: '0.9' });
+        verify.disabled = false;
         verify.addEventListener('click', (event) => {
           event.preventDefault(); event.stopPropagation();
           verify.disabled = true; verify.textContent = 'Saving…';
