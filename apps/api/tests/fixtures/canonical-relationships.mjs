@@ -78,9 +78,9 @@ function incompleteCase() {
 
 export const canonicalRelationshipCases = [
   { id: 'same-design-merchant-b', expected: 'EXACT', ...exactCase() },
-  { id: 'same-design-visible-marking', expected: 'EXACT', ...visibleMarkingExactCase() },
   { id: 'same-phrase-different-layout', expected: 'SIMILAR', ...similarCase() },
   { id: 'same-theme-different-identity', expected: 'RELATED', ...relatedCase() },
+  { id: 'same-design-visible-marking', expected: 'EXACT', ...visibleMarkingExactCase() },
   { id: 'hard-text-lookalike', expected: 'SIMILAR', ...textLookalikeCase() },
   { id: 'incomplete-visual-evidence', expected: 'SIMILAR', ...incompleteCase() },
 ];
