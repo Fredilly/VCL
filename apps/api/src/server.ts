@@ -515,13 +515,14 @@ async function confirmSameVideoReuseWithImage(
     if (!merchantRef?.image_reference) {
       const refreshed = await refreshVerifiedOffers(providers, candidate.mapping).catch(() => null);
       const hydrated = refreshed?.products.find((product) => Boolean(product.image_reference && product.destination)) ?? null;
-      if (hydrated?.image_reference) {
+      const hydratedDestination = hydrated?.destination ?? null;
+      if (hydrated?.image_reference && hydratedDestination) {
         const hydratedIdentity: CanonicalProductIdentity = {
           ...identity,
           merchant_refs: [{
             source: hydrated.provider || hydrated.provenance || null,
             item_id: hydrated.id || candidate.mapping.product_id,
-            destination: hydrated.destination,
+            destination: hydratedDestination,
             image_reference: hydrated.image_reference,
           }],
         };
