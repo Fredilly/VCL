@@ -21,6 +21,25 @@ This is a side-quest MVP. Optimize for:
 
 Do not optimize for scale, fundraising, creator dashboards, ad auctions, or broad platform coverage until the core interaction works.
 
+## Moat phase guardrail
+
+The automated ContentProductGraph / partner-video ingestion architecture is reserved future work.
+
+Do **not** build it before the commercial trigger in `project-system/11_DECISIONS_AND_DO_NOTS.md` D-018 is met:
+- 3 paying partner/creator clients requesting automated integration, or
+- 1 anchor partner with enough recurring video volume or revenue to justify it.
+
+Until then:
+- prioritize alpha launch and reliability,
+- instrument real usage, cost, corrections, repeated products/videos, and mapping-reuse opportunities,
+- keep user-triggered Scoop as the active path,
+- do not broadly crawl/pre-map YouTube,
+- do not require partners to manually tag every SKU,
+- keep future ContentProductGraph, CanonicalProductGraph, evidence, and offer layers conceptually separate,
+- treat Jev as a replaceable routing/decision layer whose savings must be benchmarked, never as product truth.
+
+See GitHub issue #249 and project-system docs 07, 08, 11, and 14.
+
 ## Read first
 
 Read these project-system files before making architectural or product decisions:
