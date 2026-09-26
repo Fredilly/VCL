@@ -6,12 +6,6 @@ export type CanonicalMerchantRef = {
   item_id: string | null;
   destination: string;
   image_reference: string | null;
-  /** Offer-level data. Never used as canonical product identity evidence. */
-  price?: string | null;
-  currency?: string | null;
-  availability?: string | null;
-  fetched_at?: string | null;
-  relationship?: CanonicalRelationship;
 };
 
 export type CanonicalProductIdentity = {
@@ -167,11 +161,6 @@ export function canonicalProductIdentity(input: CanonicalIdentityInput): Canonic
       item_id: merchantItemId,
       destination: mapping.destination,
       image_reference: mapping.image_reference ?? null,
-      price: null,
-      currency: null,
-      availability: null,
-      fetched_at: input.verifiedAt ?? new Date().toISOString(),
-      relationship: 'EXACT',
     }],
   };
 }
@@ -200,15 +189,9 @@ export function mergeCanonicalProductIdentity(
       continue;
     }
     const current = merchantRefs[duplicateIndex];
-    merchantRefs[duplicateIndex] = {
-      ...current,
-      ...(ref.image_reference ? { image_reference: ref.image_reference } : {}),
-      ...(ref.price !== undefined ? { price: ref.price } : {}),
-      ...(ref.currency !== undefined ? { currency: ref.currency } : {}),
-      ...(ref.availability !== undefined ? { availability: ref.availability } : {}),
-      ...(ref.fetched_at !== undefined ? { fetched_at: ref.fetched_at } : {}),
-      ...(ref.relationship !== undefined ? { relationship: ref.relationship } : {}),
-    };
+    if (!current.image_reference && ref.image_reference) {
+      merchantRefs[duplicateIndex] = { ...current, image_reference: ref.image_reference };
+    }
   }
 
   return {
