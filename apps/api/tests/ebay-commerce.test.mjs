@@ -585,3 +585,29 @@ test('eBay adapter: unconfigured affiliate context leaves ordinary request and d
   assert.equal(capturedHeaders['X-EBAY-C-ENDUSERCTX'], undefined);
   assert.equal(result.destination, 'https://example.test/plain');
 });
+
+
+test('eBay adapter: getItemById returns live listing price and currency', async () => {
+  let capturedUrl = '';
+  const ctx = makeEbayContext(makeMockAuth(), {
+    fetch: async (url) => {
+      capturedUrl = String(url);
+      return Response.json({
+        itemId: '820170111522',
+        title: 'Building Is My Love Language Shirt',
+        itemWebUrl: 'https://www.ebay.com/itm/820170111522',
+        price: { value: '17.95', currency: 'USD' },
+      });
+    },
+  });
+  loadModule(ebaySource, ctx);
+  const { EbayCommerceProvider } = ctx.exports;
+
+  const provider = new EbayCommerceProvider(makeMockAuth());
+  const result = await provider.getItemById('820170111522', query);
+
+  assert.ok(capturedUrl.includes('/buy/browse/v1/item/820170111522'));
+  assert.equal(result?.id, '820170111522');
+  assert.equal(result?.price, '17.95');
+  assert.equal(result?.currency, 'USD');
+});
