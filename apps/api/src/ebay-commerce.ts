@@ -4,6 +4,7 @@ import {
   type CommerceProvider,
   type ProductCandidate,
   type ProductQuery,
+  type MerchantOfferRef,
 } from './commerce.js';
 import type { EbayAuth } from './ebay-auth.js';
 
@@ -82,6 +83,11 @@ export class EbayCommerceProvider implements CommerceProvider {
     url.searchParams.set('limit', '12');
 
     return this.fetchItems(url, token, query, { method: 'GET' });
+  }
+
+  async refreshOffer(offer: MerchantOfferRef, query: ProductQuery): Promise<ProductCandidate | null> {
+    if (!offer.item_id) return null;
+    return this.getItemById(offer.item_id, query);
   }
 
   async getItemById(itemId: string, query: ProductQuery): Promise<ProductCandidate | null> {
