@@ -4,14 +4,19 @@ Scoop helps you identify something you see in a supported online video and find 
 
 ## Install
 
-1. Download the Scoop alpha extension folder provided with your invite.
-2. Open `brave://extensions` or `chrome://extensions`.
-3. Turn on **Developer mode**.
-4. Choose **Load unpacked**.
-5. Select the Scoop extension folder.
-6. Pin Scoop to your browser toolbar.
+Scoop alpha currently supports **Chrome and Brave**.
 
-If Scoop is updated during alpha, replace/rebuild the extension folder you were given, then press **Reload** on the extensions page.
+1. Download the `scoop-alpha-extension` ZIP from your invite.
+2. Unzip it.
+3. Open:
+   - Chrome: `chrome://extensions`
+   - Brave: `brave://extensions`
+4. Turn on **Developer mode**.
+5. Click **Load unpacked**.
+6. Select the unzipped Scoop extension folder.
+7. Pin Scoop to the browser toolbar.
+
+When a new alpha build is shared, replace the old folder and press **Reload** on the extensions page.
 
 ## Scoop an item
 
@@ -23,9 +28,8 @@ If Scoop is updated during alpha, replace/rebuild the extension folder you were 
 4. Click the item you want.
 5. Use **− Tighter** or **+ Wider** so the whole object is visible.
 6. Press **Analyze**.
-7. Review the object description and product results.
-
-If the object changes angle quickly, you can use **Improve with nearby frames** after the first result.
+7. Review the product results.
+8. Use **thumbs up/down** on the result. Your feedback is saved and helps Scoop learn which mappings are useful or wrong.
 
 ## What to expect
 
@@ -41,10 +45,9 @@ Scoop prefers returning no result over confidently returning the wrong product.
 
 ## Reporting a bad result
 
-For the alpha, in-app thumbs up/down feedback is not wired yet.
+Use thumbs down first.
 
-When a result is wrong or not useful, send the tester contact supplied with your invite:
-
+If the problem needs explanation, send:
 - a screenshot of the selected crop and result;
 - what you clicked;
 - what Scoop said it was;
@@ -58,10 +61,8 @@ Do not send passwords, private messages, account details, or anything unrelated 
 - YouTube is the main supported surface.
 - Small, partly hidden, blurry, or fast-moving objects are harder.
 - Brand/model identification can be wrong when logos or distinctive details are not visible.
-- Different vision providers may perform differently during alpha.
 - Product availability and price can vary by region.
 - Some protected video cannot be captured by the browser.
-- Nearby-frame analysis is optional and may not work on every video.
 - Scoop is not continuously scanning your viewing activity.
 
 ## Privacy
