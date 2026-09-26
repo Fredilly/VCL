@@ -1688,8 +1688,8 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       // durable for later selections in the same video while leaving offer refresh dynamic.
       // SIMILAR/RELATED results never create or overwrite canonical memory.
       const exactProducts = resolved.products.filter((product) => product.relationship === 'EXACT');
-      if (exactProducts.length === 1 && env.VERIFIED_PRODUCT_LEDGER) {
-        const memory = automaticExactMemory(exactProducts[0], description, context);
+      if (exactProducts.length && env.VERIFIED_PRODUCT_LEDGER) {
+        const memory = automaticExactMemory(exactProducts, description, context);
         if (memory) {
           try {
             const savedIdentity = await persistCanonicalProductIdentity(env, memory.identity);
