@@ -1696,6 +1696,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         verified_mapping: {
           hit: false,
           reuse: 'same_video',
+          ...(sameVideoReuse.canonical_key ? { canonical_key: sameVideoReuse.canonical_key } : {}),
           confidence: sameVideoReuse.confidence,
           reason: sameVideoReuse.reason,
           ...(typeof sameVideoReuse.visual_similarity === 'number' ? { visual_similarity: sameVideoReuse.visual_similarity } : {}),
