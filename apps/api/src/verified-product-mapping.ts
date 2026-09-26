@@ -138,6 +138,7 @@ export function verifiedMappingProduct(mapping: VerifiedProductMapping): Product
     price: null,
     currency: null,
     result_class: 'EXACT',
+    relationship: 'EXACT',
     metadata: { brand: mapping.brand, model: mapping.product_id, category: mapping.object_type },
     verification_status: 'metadata_only',
     verification_score: 100,
