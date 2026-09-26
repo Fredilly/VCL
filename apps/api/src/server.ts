@@ -402,7 +402,7 @@ export async function refreshVerifiedOffers(
   const makeExact = (product: ProductCandidate, reason = `${mapping.provenance} product identity; same verified SKU/model`): ProductCandidate => ({
     ...product,
     result_class: 'EXACT',
-    relationship: 'EXACT',
+    relationship: 'EXACT' as const,
     provenance: mapping.provenance,
     provider: product.provider || mapping.provider || undefined,
     identity_key: identityKey,
@@ -553,7 +553,7 @@ export async function refreshVerifiedOffers(
     const remembered = await durableCanonicalProductIdentity(visual.env, mapping.canonical_key).catch(() => null);
     if (remembered) {
       rememberedExact = remembered.merchant_refs
-        .filter((ref) => Boolean(ref.destination))
+        .filter((ref) => Boolean(ref.destination) && (ref.relationship ?? 'EXACT') === 'EXACT')
         .map((ref) => makeExact({
           id: ref.item_id || ref.destination,
           title: remembered.title,
@@ -564,8 +564,8 @@ export async function refreshVerifiedOffers(
           provenance: remembered.provenance,
           provider: ref.source || undefined,
           destination: ref.destination,
-          price: null,
-          currency: null,
+          price: ref.price ?? null,
+          currency: ref.currency ?? null,
           result_class: 'EXACT',
           metadata: {
             ...(remembered.brand ? { brand: remembered.brand } : {}),
@@ -592,6 +592,11 @@ export async function refreshVerifiedOffers(
           item_id: product.id || null,
           destination: product.destination ?? '',
           image_reference: product.image_reference ?? null,
+          price: product.price ?? null,
+          currency: product.currency ?? null,
+          availability: null,
+          fetched_at: new Date().toISOString(),
+          relationship: 'EXACT' as const,
         })).filter((ref) => Boolean(ref.destination)),
       };
       await persistCanonicalProductIdentity(visual.env, learned).catch(() => null);
@@ -1089,6 +1094,31 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           return jsonResponse({ revoked });
         }
         const product = body.product && typeof body.product === 'object' && !Array.isArray(body.product) ? body.product as Record<string, unknown> : {};
+        if (body.action === 'demote') {
+          const canonicalKey = typeof body.canonical_key === 'string' ? body.canonical_key.slice(0, 220) : '';
+          const destination = typeof product.destination === 'string' ? product.destination.slice(0, 1200) : '';
+          const itemId = typeof product.id === 'string' ? product.id.trim().slice(0, 180) : '';
+          if (!canonicalKey || !destination) return jsonResponse({ error: 'Missing canonical offer identity' }, 400);
+          const existing = await durableCanonicalProductIdentity(env, canonicalKey);
+          if (!existing) return jsonResponse({ error: 'Canonical product not found' }, 404);
+          const current = existing.merchant_refs.find((ref) =>
+            ref.destination === destination && (!itemId || !ref.item_id || ref.item_id === itemId));
+          if (!current) return jsonResponse({ error: 'Merchant offer not found' }, 404);
+          const updated = await persistCanonicalProductIdentity(env, {
+            ...existing,
+            verified_at: new Date().toISOString(),
+            merchant_refs: [{ ...current, relationship: 'SIMILAR', fetched_at: new Date().toISOString() }],
+          });
+          const mappings = await durableVerifiedMappings(env, platform, contentRef);
+          const mappedOffer = mappings.find((entry) => entry.canonical_key === canonicalKey && entry.destination === destination);
+          if (mappedOffer) {
+            await revokeAdminVerifiedMapping(env, { platform, content_ref: contentRef, product_id: mappedOffer.product_id });
+          }
+          await auditAdminAction(env, authorized.admin_id!, 'canonical_offer_demoted', {
+            canonical_key: canonicalKey, destination, item_id: itemId || null,
+          });
+          return jsonResponse({ accepted: true, canonical_key: updated.canonical_key, relationship: 'SIMILAR' });
+        }
         const description = normalizeObjectDescription(body.description);
         const timestampMs = typeof body.timestamp_ms === 'number' && Number.isFinite(body.timestamp_ms) && body.timestamp_ms >= 0 ? Math.round(body.timestamp_ms) : null;
         if (timestampMs === null) return jsonResponse({ error: 'Missing timestamp' }, 400);
@@ -1141,6 +1171,11 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
               item_id: typeof product.id === 'string' ? product.id.trim().slice(0, 180) || null : null,
               destination: mappingBase.destination,
               image_reference: mappingBase.image_reference ?? null,
+              price: typeof product.price === 'string' ? product.price : null,
+              currency: typeof product.currency === 'string' ? product.currency : null,
+              availability: null,
+              fetched_at: new Date().toISOString(),
+              relationship: 'EXACT' as const,
             }],
           });
         } else {
