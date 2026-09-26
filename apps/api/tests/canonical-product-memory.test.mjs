@@ -34,6 +34,7 @@ test('canonical identity separates product fingerprint from merchant item id', (
   });
   assert.match(identity.canonical_key, /^product:v1:/);
   assert.equal(identity.model, null);
+  assert.equal(identity.relationship, 'EXACT');
   assert.equal(identity.merchant_refs[0].item_id, 'merchant-item-1');
   assert.equal(identity.merchant_refs[0].source, 'ebay');
   assert.match(identity.normalized_fingerprint, /building is my love language/);
@@ -76,6 +77,7 @@ test('canonical upsert is idempotent and merges merchant provenance', async () =
   const body = await response.json();
   assert.equal(response.status, 200);
   assert.equal(body.identity.merchant_refs.length, 2);
+  assert.equal(body.identity.relationship, 'EXACT');
 });
 
 test('conflicting identity evidence fails closed', async () => {
