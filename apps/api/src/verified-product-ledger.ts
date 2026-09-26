@@ -171,12 +171,18 @@ export class VerifiedProductLedger {
       }
       const key = contentKey(platform, contentRef);
       const current = await this.storage.get<VerifiedProductMapping[]>(key) ?? [];
-      const next = current.filter((entry) => !(
-        entry.product_id === mapping.product_id &&
-        entry.scope === mapping.scope &&
-        entry.timestamp_start_ms === mapping.timestamp_start_ms &&
-        entry.timestamp_end_ms === mapping.timestamp_end_ms
-      ));
+      const next = current.filter((entry) => {
+        // A canonical key is one product identity. Re-observing that identity at
+        // another timestamp must update its video mapping, not create another
+        // candidate that later competes with itself during reuse arbitration.
+        if (mapping.canonical_key && entry.canonical_key === mapping.canonical_key) return false;
+        return !(
+          entry.product_id === mapping.product_id &&
+          entry.scope === mapping.scope &&
+          entry.timestamp_start_ms === mapping.timestamp_start_ms &&
+          entry.timestamp_end_ms === mapping.timestamp_end_ms
+        );
+      });
       next.unshift(mapping);
       await this.storage.put(key, next.slice(0, 100));
       return Response.json({ accepted: true, mapping });
