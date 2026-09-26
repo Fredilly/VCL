@@ -1089,20 +1089,48 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
               : verifiedSourceProviderName(null, destination) || null,
           provenance: 'admin_verified',
         };
-        const identity = canonicalProductIdentity({
-          mapping: mappingBase,
-          model: typeof product.model === 'string' ? product.model : null,
-          merchantItemId: typeof product.id === 'string' ? product.id : null,
-          visibleText: description.visible_text,
-          color: description.color,
-          material: description.material,
-          styleAttributes: description.style_attributes,
-          logosMarkings: description.logos_markings,
-          distinctiveFeatures: description.distinctive_features,
-          shapeSilhouette: description.shape_silhouette,
-        });
-        const canonical = await persistCanonicalProductIdentity(env, identity);
+        const canonicalKeyHint = typeof body.canonical_key_hint === 'string' ? body.canonical_key_hint.slice(0, 220) : '';
+        const sameVideoMappings = canonicalKeyHint
+          ? await durableVerifiedMappings(env, platform, contentRef)
+          : [];
+        const hintedMapping = sameVideoMappings.find((entry) => entry.canonical_key === canonicalKeyHint);
+        const hintedIdentity = hintedMapping
+          ? await durableCanonicalProductIdentity(env, canonicalKeyHint)
+          : null;
+
+        let canonical: CanonicalProductIdentity;
+        if (hintedIdentity) {
+          canonical = await persistCanonicalProductIdentity(env, {
+            ...hintedIdentity,
+            verified_at: new Date().toISOString(),
+            merchant_refs: [{
+              source: mappingBase.provider,
+              item_id: typeof product.id === 'string' ? product.id.trim().slice(0, 180) || null : null,
+              destination: mappingBase.destination,
+              image_reference: mappingBase.image_reference ?? null,
+            }],
+          });
+        } else {
+          const identity = canonicalProductIdentity({
+            mapping: mappingBase,
+            model: typeof product.model === 'string' ? product.model : null,
+            merchantItemId: typeof product.id === 'string' ? product.id : null,
+            visibleText: description.visible_text,
+            color: description.color,
+            material: description.material,
+            styleAttributes: description.style_attributes,
+            logosMarkings: description.logos_markings,
+            distinctiveFeatures: description.distinctive_features,
+            shapeSilhouette: description.shape_silhouette,
+          });
+          canonical = await persistCanonicalProductIdentity(env, identity);
+        }
         const mapping: VerifiedProductMapping = { ...mappingBase, canonical_key: canonical.canonical_key };
+        if (hintedIdentity) {
+          // Rebind this merchant SKU to the chosen canonical node instead of
+          // leaving an older promotion behind as a competing same-video identity.
+          await revokeAdminVerifiedMapping(env, { platform, content_ref: contentRef, product_id: productId });
+        }
         const saved = await persistAdminVerifiedMapping(env, mapping);
         await auditAdminAction(env, authorized.admin_id!, 'verified_product_saved', {
           platform,
