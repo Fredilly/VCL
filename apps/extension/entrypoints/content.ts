@@ -52,6 +52,7 @@ type CommerceResponse = {
     hit: boolean;
     provenance?: string;
     product_id?: string;
+    canonical_key?: string;
     reuse?: string;
     reason?: string;
     confidence?: number;
@@ -384,6 +385,7 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
               platform: adminPayload.context.platform,
               content_ref: adminPayload.context.content_ref,
               timestamp_ms: adminPayload.timestamp_ms,
+              canonical_key_hint: commerce.verified_mapping?.hit ? commerce.verified_mapping.canonical_key : undefined,
               description: adminPayload.description,
               product,
             },
