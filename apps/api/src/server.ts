@@ -30,7 +30,7 @@ import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerc
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
-import { canonicalVisualExactOfferIds, eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
+import { eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 export { AlphaAccessLedger } from './alpha-access.js';
@@ -507,19 +507,16 @@ export async function refreshVerifiedOffers(
           comparedProducts.map((product) => [product.id, images.comparisons.get(candidateKey(product))]),
         );
         for (const [id, comparison] of offerComparisons) offerComparisonsForRelationship.set(id, comparison);
-        const exactOfferIds = canonicalVisualExactOfferIds({
-          mapping,
-          products: comparedProducts,
-          comparisons: offerComparisons,
-        });
         visualExact = comparedProducts.flatMap((product) => {
           const comparison = offerComparisons.get(product.id);
-          if (!exactOfferIds.has(product.id)) return [];
+          if (!comparison || !visual) return [];
+          const relationship = classifyCanonicalRelationship(visual.description, product, comparison);
+          if (relationship !== 'EXACT') return [];
           return [makeExact({
             ...product,
             verification_status: 'multimodal',
-            verification_image_similarity: comparison?.similarity,
-            verification_image_confidence: comparison?.confidence,
+            verification_image_similarity: comparison.similarity,
+            verification_image_confidence: comparison.confidence,
           }, 'visual match to the verified canonical product')];
         });
       }
