@@ -566,6 +566,7 @@ export async function refreshVerifiedOffers(
           destination: ref.destination,
           price: null,
           currency: null,
+          result_class: 'EXACT',
           metadata: {
             ...(remembered.brand ? { brand: remembered.brand } : {}),
             ...(remembered.model ? { model: remembered.model } : {}),
