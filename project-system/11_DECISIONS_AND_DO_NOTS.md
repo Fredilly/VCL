@@ -141,6 +141,45 @@ Guardrails:
 Detailed future plan:
 `13_APPLE_ON_DEVICE_AI_FUTURE.md`.
 
+### D-018 — Reserve automated ContentProductGraph ingestion; do not build it before demand
+
+Scoop's future moat should include automated mapping from partner video appearance windows/object tracks to canonical products so repeated Scoops can resolve from reusable graph evidence instead of repeating full inference.
+
+Target future layers:
+- ContentProductGraph,
+- CanonicalProductGraph,
+- mapping/evidence provenance,
+- merchant offer layer kept independent from identity.
+
+Target future ingestion:
+```text
+new partner video
+-> sparse/scene-aware sampling
+-> object detection/tracking
+-> decision/routing
+-> graph lookup first
+-> retrieval + verification on misses
+-> reusable content/product mapping
+```
+
+Partners should not be required to manually enter every SKU. Catalog/feed access is optional evidence and can narrow candidate search.
+
+Jev may be used as a replaceable routing/decision layer to skip redundant work and reduce expensive calls, but benefits must be benchmarked and Jev must never be treated as identity truth.
+
+**Build trigger:** begin implementation only when:
+- 3 paying partner/creator clients request automated video integration, or
+- 1 anchor partner has enough recurring video volume or revenue to justify the work.
+
+Until then:
+- launch alpha,
+- monitor usage/cost/corrections,
+- capture mapping-reuse opportunities,
+- validate partner demand,
+- do not crawl or pre-map YouTube broadly,
+- do not let this future moat delay launch.
+
+Tracking issue: GitHub #249.
+
 ## Commerce redundancy implementation queue
 
 Implement as six bounded PRs:
@@ -216,6 +255,8 @@ Each PR must pass:
 - Do not assume Apple system context is exposed to third-party apps.
 - Do not store raw video.
 - Do not continuously collect frames.
+- Do not build automated partner-video ingestion before D-018's commercial trigger is met.
+- Do not indiscriminately crawl or pre-map YouTube as a moat strategy.
 - Do not add microservices.
 - Do not over-engineer the database.
 - Do not confuse "model described the object" with "we solved product matching."
