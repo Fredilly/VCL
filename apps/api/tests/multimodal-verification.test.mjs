@@ -141,3 +141,43 @@ test('matching a guessed model to catalog metadata does not establish LIKELY', (
   comparison.matching_details = [];
   assert.equal(verifyCandidate(description, candidate, comparison).product.result_class, 'SIMILAR');
 });
+
+
+test('canonical relationship never becomes EXACT from matching text alone', () => {
+  const { description, candidate } = example(apparelCases[0]);
+  description.visible_text = ['BUILDING IS MY LOVE LANGUAGE'];
+  candidate.title = `${description.brand_candidate} Building is my Love Language ${description.subcategory}`;
+  const product = verifyCandidate(description, candidate).product;
+  assert.ok(product);
+  assert.notEqual(product.relationship, 'EXACT');
+});
+
+test('canonical relationship can become EXACT only with grounded identity and distinctive visual corroboration', () => {
+  const { description, candidate, comparison } = example(apparelCases[0]);
+  description.brand_candidate = 'Nike';
+  description.model_candidate = 'Style 123';
+  description.visible_text = ['Nike', 'Style 123'];
+  description.logos_markings = ['Nike'];
+  description.evidence_confidence = { visible_text: 0.95, logos_markings: 0.95 };
+  description.identity_confidence = 0.95;
+  candidate.title = 'Nike Style 123 t-shirt';
+  candidate.metadata = { ...candidate.metadata, brand: 'Nike', model: 'Style 123' };
+  comparison.source.brand = { value: 'Nike', confidence: 0.95, basis: 'image' };
+  comparison.source.model = { value: 'Style 123', confidence: 0.95, basis: 'image' };
+  comparison.candidate.brand = { value: 'Nike', confidence: 0.95, basis: 'image' };
+  comparison.candidate.model = { value: 'Style 123', confidence: 0.95, basis: 'image' };
+  comparison.similarity = 0.96;
+  comparison.confidence = 0.96;
+  comparison.matching_details = ['distinctive diagonal artwork placement'];
+  const product = verifyCandidate(description, candidate, comparison).product;
+  assert.equal(product.relationship, 'EXACT');
+});
+
+test('same-category visual agreement without grounded identity remains SIMILAR', () => {
+  const { description, candidate, comparison } = example(apparelCases[0]);
+  comparison.similarity = 0.95;
+  comparison.confidence = 0.95;
+  comparison.matching_details = ['distinctive artwork treatment differs'];
+  const product = verifyCandidate(description, candidate, comparison).product;
+  assert.equal(product.relationship, 'SIMILAR');
+});

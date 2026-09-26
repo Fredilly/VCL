@@ -1,5 +1,5 @@
 import type { ObjectDescription } from './types.js';
-import { accessoryContradiction, type ProductCandidate, type ProductContext } from './commerce.js';
+import { accessoryContradiction, type CanonicalRelationship, type ProductCandidate, type ProductContext } from './commerce.js';
 import { attributes, canonical, compatible, gender, ageGroup, normalize, phrase, productType, sleeve, type Attribute, type Evidence, type ImageComparison } from './verification-evidence.js';
 
 const HIGH = 0.85;
@@ -137,6 +137,30 @@ function groundedIdentity(description: ObjectDescription, observed: Evidence, co
   });
 }
 
+function canonicalRelationship(
+  description: ObjectDescription,
+  candidate: ProductCandidate,
+  comparison: ImageComparison | undefined,
+  matched: Set<Attribute>,
+  identityGrounded: boolean,
+  identityConflict: boolean,
+): CanonicalRelationship {
+  const typeAgrees = matched.has('subtype') || matched.has('category');
+  const textAgrees = description.visible_text.some((text) => phrase(candidate.title, text));
+  const strongVisual = Boolean(comparison && comparison.confidence >= IDENTITY_VISUAL && comparison.similarity >= IDENTITY_VISUAL);
+  const distinctiveVisual = Boolean(comparison?.matching_details?.some((detail) => {
+    const tokens = normalize(detail).split(' ').filter((token) => token.length >= 4 && !GENERIC_MARKING_TOKENS.has(token));
+    return tokens.length >= 2;
+  }));
+
+  // EXACT is a canonical design/identity decision, never a text-search decision.
+  // It requires independently grounded identity plus strong pixel agreement and
+  // distinctive visual corroboration. Text may support the decision but cannot create it.
+  if (!identityConflict && typeAgrees && identityGrounded && strongVisual && distinctiveVisual) return 'EXACT';
+  if (!identityConflict && typeAgrees && (textAgrees || (comparison?.similarity ?? 0) >= 0.6)) return 'SIMILAR';
+  return 'RELATED';
+}
+
 export function verifyCandidate(
   description: ObjectDescription, candidate: ProductCandidate,
   comparison?: ImageComparison, context?: ProductContext, useMarkingEvidence = false,
@@ -219,13 +243,14 @@ export function verifyCandidate(
   if (!strongVisual) reasons.push('strong visual agreement and comparison confidence required for LIKELY');
   // Search IDs and model guesses are not verified SKU evidence. Never manufacture EXACT.
   const result_class = likely ? 'LIKELY' : 'SIMILAR';
+  const relationship = canonicalRelationship(description, candidate, comparison, matched, identityGrounded, identityConflict);
   if (!comparison) reasons.push('image comparison unavailable; identity remains uncertain');
   const identity = matched.has('brand') && matched.has('model')
     ? [expected.brand?.value, expected.model?.value, expected.subtype?.value, expected.color?.value, expected.gender?.value].map(normalize).join(':')
     : `${candidate.provenance}:${candidate.id}`;
   return { product: { ...candidate, result_class, verification_score: Math.round(score / 125 * 100), verification_reasons: reasons,
     verification_image_similarity: comparison?.similarity, verification_image_confidence: comparison?.confidence,
-    verification_status: comparison ? 'multimodal' : 'metadata_only', identity_key: identity }, reasons };
+    verification_status: comparison ? 'multimodal' : 'metadata_only', identity_key: identity, relationship }, reasons };
 }
 
 export function rankVerified(products: ProductCandidate[]): ProductCandidate[] {
