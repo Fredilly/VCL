@@ -531,7 +531,7 @@ export async function refreshVerifiedOffers(
     if (exactOfferIds.has(product.id)) return [];
     const comparison = offerComparisonsForRelationship.get(product.id);
     if (!comparison) return [];
-    const relationship = comparison.similarity >= 0.6 ? 'SIMILAR' : 'RELATED';
+    const relationship: 'SIMILAR' | 'RELATED' = comparison.similarity >= 0.6 ? 'SIMILAR' : 'RELATED';
     return [{
       ...product,
       result_class: 'SIMILAR' as const,
