@@ -1235,7 +1235,14 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           });
           canonical = await persistCanonicalProductIdentity(env, identity);
         }
-        const mapping: VerifiedProductMapping = { ...mappingBase, canonical_key: canonical.canonical_key };
+        // Promotion anchors a persistent product track for this video. The original
+        // time window remains useful as an observation, but later frames can rejoin
+        // this track through the canonical identity instead of inheriting Exact by time.
+        const mapping: VerifiedProductMapping = {
+          ...mappingBase,
+          canonical_key: canonical.canonical_key,
+          track_id: canonical.canonical_key,
+        };
         const saved = await persistAdminVerifiedMapping(env, mapping);
         await auditAdminAction(env, authorized.admin_id!, 'verified_product_saved', {
           platform,
