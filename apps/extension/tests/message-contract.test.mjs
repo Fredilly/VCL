@@ -160,7 +160,7 @@ test('admin controls use per-admin session tokens and can promote non-EXACT cand
   assert.match(background, /scoop_admin_session/);
   assert.match(background, /\/admin\/auth/);
   assert.match(background, /X-Scoop-Admin-Session/);
-  assert.match(content, /if \(admin\?\.admin && adminPayload\)/);
+  assert.match(content, /adminPayload && relationship === 'SIMILAR'/);
   assert.doesNotMatch(content, /admin\?\.admin && product\.result_class === 'EXACT'/);
   assert.match(content, /VCL_ADMIN_CREATE_INVITE/);
 });
@@ -223,6 +223,6 @@ test('YouTube Shorts surface context keeps a stable content_ref for exact verifi
 test('verified rows show their source and omit feedback/admin controls', () => {
   assert.match(content, /function productSourceLabel\(product: ProductCandidate\)/);
   assert.match(content, /return new URL\(product\.destination\)\.hostname\.replace/);
-  assert.match(content, /if \(!isScoopVerified\) \{/);
+  assert.match(content, /if \\(!isCandidateVerified\\) \\{/);
   assert.doesNotMatch(content, /verifiedLabel\.textContent = 'Scoop Verified'/);
 });
