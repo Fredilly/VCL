@@ -1470,6 +1470,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             hit: true,
             provenance: verifiedMapping.provenance,
             product_id: verifiedMapping.product_id,
+            ...(verifiedMapping.canonical_key ? { canonical_key: verifiedMapping.canonical_key } : {}),
             ...(sameVideoReuse.mapping ? {
               reuse: 'same_video',
               canonical_key: sameVideoReuse.canonical_key,
