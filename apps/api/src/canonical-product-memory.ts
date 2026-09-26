@@ -176,11 +176,18 @@ export function mergeCanonicalProductIdentity(
 
   const merchantRefs = [...existing.merchant_refs];
   for (const ref of incoming.merchant_refs) {
-    const duplicate = merchantRefs.some((current) =>
+    const duplicateIndex = merchantRefs.findIndex((current) =>
       normalizeIdentityText(current.source) === normalizeIdentityText(ref.source)
       && normalizeIdentityText(current.item_id) === normalizeIdentityText(ref.item_id)
       && current.destination === ref.destination);
-    if (!duplicate) merchantRefs.push(ref);
+    if (duplicateIndex < 0) {
+      merchantRefs.push(ref);
+      continue;
+    }
+    const current = merchantRefs[duplicateIndex];
+    if (!current.image_reference && ref.image_reference) {
+      merchantRefs[duplicateIndex] = { ...current, image_reference: ref.image_reference };
+    }
   }
 
   return {
