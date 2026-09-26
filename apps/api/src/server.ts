@@ -1176,8 +1176,9 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           if (!canonicalKey || !destination) return jsonResponse({ error: 'Missing canonical offer identity' }, 400);
           const existing = await durableCanonicalProductIdentity(env, canonicalKey);
           if (!existing) return jsonResponse({ error: 'Canonical product not found' }, 404);
-          const current = existing.merchant_refs.find((ref) =>
-            ref.destination === destination && (!itemId || !ref.item_id || ref.item_id === itemId));
+          // The rendered product id may be the canonical SKU while merchant_refs keep
+          // the provider listing id. Destination identifies the offer shown to the admin.
+          const current = existing.merchant_refs.find((ref) => ref.destination === destination);
           if (!current) return jsonResponse({ error: 'Merchant offer not found' }, 404);
           const updated = await persistCanonicalProductIdentity(env, {
             ...existing,
@@ -1633,27 +1634,9 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           },
         });
       }
-      if (['weak_evidence', 'ambiguous', 'visual_unavailable'].includes(sameVideoReuse.reason)) {
-        // A failed/uncertain confirmation is not a new identity. Keep memory intact
-        // and ask for clearer evidence instead of discovering a replacement SKU.
-        const totalMs = Date.now() - verifiedResolutionStarted;
-        recordAlphaScoop({
-          telemetry: alphaTelemetry, state: 'NO_RESULTS', totalMs,
-          providersUsed: [], resultRows: [], visionUsage: rawDescription?.provider_usage,
-          verificationUsage: sameVideoVisualCheck.usage,
-        });
-        return jsonResponse({
-          state: 'NO_RESULTS', products: [], query: { query: '' },
-          identity_confirmation: 'required',
-          verified_mapping: {
-            hit: false, reuse: 'same_video', reason: sameVideoReuse.reason,
-            candidates_compared: sameVideoVisualCheck.compared,
-            visual_failures: sameVideoVisualCheck.failures,
-          },
-          providers_used: [], attempts: 0, latency_ms: totalMs,
-          cost_usage: { commerce_calls: {}, verification_usage: sameVideoVisualCheck.usage },
-        });
-      }
+      // Persistence must not replace normal matching. If saved identity cannot be
+      // confirmed from this frame, preserve it and continue through the existing
+      // discovery/verification pipeline so EXACT vs SIMILAR behaves as before.
       const providers = commerceProviders(env);
       if (!providers.length) {
         recordFailureState('commerce', 'NO_CONFIGURED_PROVIDER', false);
