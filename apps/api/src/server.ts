@@ -29,7 +29,7 @@ export { FeedbackLedger } from './feedback-ledger.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
-import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
+import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
 import { eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
@@ -1126,11 +1126,6 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           canonical = await persistCanonicalProductIdentity(env, identity);
         }
         const mapping: VerifiedProductMapping = { ...mappingBase, canonical_key: canonical.canonical_key };
-        if (hintedIdentity) {
-          // Rebind this merchant SKU to the chosen canonical node instead of
-          // leaving an older promotion behind as a competing same-video identity.
-          await revokeAdminVerifiedMapping(env, { platform, content_ref: contentRef, product_id: productId });
-        }
         const saved = await persistAdminVerifiedMapping(env, mapping);
         await auditAdminAction(env, authorized.admin_id!, 'verified_product_saved', {
           platform,
