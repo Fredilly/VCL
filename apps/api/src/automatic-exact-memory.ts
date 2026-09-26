@@ -19,11 +19,24 @@ function bounded(value: unknown, max: number): string {
  * window still requires the existing canonical evidence/visual reassociation checks.
  */
 export function automaticExactMemory(
-  product: ProductCandidate,
+  products: ProductCandidate | ProductCandidate[],
   description: ObjectDescription,
   context?: ProductContext,
 ): AutomaticExactMemory | null {
-  if (product.relationship !== 'EXACT') return null;
+  const exactProducts = (Array.isArray(products) ? products : [products])
+    .filter((product) => product.relationship === 'EXACT');
+  if (!exactProducts.length) return null;
+
+  // Multiple merchant listings may independently verify the same identity.
+  // They are safe to remember together only when the verifier supplied one
+  // shared identity key. Missing keys fall back to the offer ID and remain
+  // conservative, so distinct products never collapse into one memory entry.
+  const identityKeys = new Set(exactProducts.map((product) =>
+    bounded(product.identity_key, 240) || `${bounded(product.provider || product.provenance, 80)}:${bounded(product.id, 180)}`,
+  ));
+  if (identityKeys.size !== 1) return null;
+
+  const product = [...exactProducts].sort((a, b) => Number(Boolean(b.image_reference)) - Number(Boolean(a.image_reference)))[0];
 
   const platform = bounded(context?.platform, 40);
   const contentRef = bounded(context?.content_ref, 180);
@@ -73,6 +86,22 @@ export function automaticExactMemory(
     currency: product.currency,
     fetched_at: new Date().toISOString(),
   }));
+  const refs = exactProducts.flatMap((offer) => {
+    const offerDestination = bounded(offer.destination, 1200);
+    if (!offerDestination) return [];
+    try { new URL(offerDestination); } catch { return []; }
+    return [{
+      source: bounded(offer.provider, 80) || bounded(offer.provenance, 80) || null,
+      item_id: bounded(offer.id, 180) || null,
+      destination: offerDestination,
+      image_reference: bounded(offer.image_reference, 1200) || null,
+      price: offer.price,
+      currency: offer.currency,
+      fetched_at: new Date().toISOString(),
+      relationship: 'EXACT' as const,
+    }];
+  });
+  identity.merchant_refs = refs.length ? refs : identity.merchant_refs;
 
   return {
     identity,

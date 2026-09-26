@@ -67,6 +67,32 @@ test('SIMILAR and RELATED never create identity memory', () => {
   assert.equal(memory.automaticExactMemory({ ...exact, relationship: 'RELATED' }, description, context), null);
 });
 
+test('multiple exact offers for one verified identity persist all offer images', () => {
+  const second = {
+    ...exact,
+    id: 'merchant-offer-2',
+    provider: 'etsy',
+    provenance: 'etsy',
+    destination: 'https://etsy.example.com/nike-dx1234',
+    image_reference: 'https://etsy.example.com/nike.jpg',
+    identity_key: 'nike:dx1234:t-shirt:black',
+  };
+  const first = { ...exact, identity_key: second.identity_key };
+  const result = memory.automaticExactMemory([first, second], description, context);
+  assert.ok(result);
+  assert.equal(result.mapping.canonical_key, result.identity.canonical_key);
+  assert.deepEqual(result.identity.merchant_refs.map((ref) => ref.image_reference), [
+    first.image_reference,
+    second.image_reference,
+  ]);
+});
+
+test('different exact identities remain ambiguous and are not persisted', () => {
+  const second = { ...exact, id: 'other-item', identity_key: 'nike:other-model:t-shirt:black' };
+  const first = { ...exact, identity_key: 'nike:dx1234:t-shirt:black' };
+  assert.equal(memory.automaticExactMemory([first, second], description, context), null);
+});
+
 test('EXACT without stable video identity is not persisted', () => {
   assert.equal(memory.automaticExactMemory(exact, description, { timestamp_ms: 42000 }), null);
   assert.equal(memory.automaticExactMemory(exact, description, { platform: 'youtube', content_ref: 'youtube:video-1' }), null);
