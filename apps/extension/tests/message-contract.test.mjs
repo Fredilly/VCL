@@ -171,6 +171,10 @@ test('admin Exact promotion carries the active same-video canonical identity', (
   assert.match(content, /canonical_key_hint: commerce\.verified_mapping\?\.hit \? commerce\.verified_mapping\.canonical_key : undefined/);
 });
 
+test('admin Exact promotion is additive and never asks to revoke earlier verified history', () => {
+  assert.doesNotMatch(content, /VCL_ADMIN_REVOKE/);
+});
+
 test('feedback UI uses reversible selected thumbs without thank-you copy', () => {
   assert.match(content, /aria-pressed/);
   assert.match(content, /selectedFeedback === 'correct_match'/);
