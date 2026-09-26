@@ -30,7 +30,7 @@ import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerc
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
-import { confirmSameVideoVisual, eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
+import { canonicalVisualExactOfferIds, eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 export { AlphaAccessLedger } from './alpha-access.js';
@@ -500,16 +500,18 @@ export async function refreshVerifiedOffers(
       if (images) {
         verificationUsage = images.usage;
         visualCompared = images.compared;
-        visualExact = needsVisual.slice(0, 8).flatMap((product) => {
-          const comparison = images.comparisons.get(candidateKey(product));
-          const confirmed = confirmSameVideoVisual({
-            mapping,
-            canonical_key: mapping.canonical_key ?? null,
-            confidence: 0.7,
-            reason: 'fingerprint_candidate',
-            requires_visual: true,
-          }, comparison);
-          if (!confirmed.mapping || confirmed.reason !== 'visual_confirmed') return [];
+        const comparedProducts = needsVisual.slice(0, 8);
+        const offerComparisons = new Map<string, ImageComparison | undefined>(
+          comparedProducts.map((product) => [product.id, images.comparisons.get(candidateKey(product))]),
+        );
+        const exactOfferIds = canonicalVisualExactOfferIds({
+          mapping,
+          products: comparedProducts,
+          comparisons: offerComparisons,
+        });
+        visualExact = comparedProducts.flatMap((product) => {
+          const comparison = offerComparisons.get(product.id);
+          if (!exactOfferIds.has(product.id)) return [];
           return [makeExact({
             ...product,
             verification_status: 'multimodal',
