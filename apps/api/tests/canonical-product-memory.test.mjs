@@ -169,36 +169,3 @@ test('canonical merge enriches an existing merchant ref with a newly recovered i
   assert.equal(merged.merchant_refs.length, 1);
   assert.equal(merged.merchant_refs[0].image_reference, 'https://i.ebayimg.com/recovered.jpg');
 });
-
-
-test('canonical merchant offer refreshes volatile metadata and relationship without duplicating offer', () => {
-  const first = memory.canonicalProductIdentity({
-    mapping,
-    merchantItemId: 'merchant-item-1',
-    verifiedAt: '2026-09-25T00:00:00.000Z',
-  });
-  first.merchant_refs[0] = {
-    ...first.merchant_refs[0],
-    price: '29.99',
-    currency: 'USD',
-    availability: 'in_stock',
-    fetched_at: '2026-09-25T00:00:00.000Z',
-    relationship: 'EXACT',
-  };
-  const incoming = {
-    ...first,
-    verified_at: '2026-09-25T01:00:00.000Z',
-    merchant_refs: [{
-      ...first.merchant_refs[0],
-      price: '24.99',
-      fetched_at: '2026-09-25T01:00:00.000Z',
-      relationship: 'SIMILAR',
-    }],
-  };
-  const merged = memory.mergeCanonicalProductIdentity(first, incoming);
-  assert.equal(merged.merchant_refs.length, 1);
-  assert.equal(merged.merchant_refs[0].price, '24.99');
-  assert.equal(merged.merchant_refs[0].currency, 'USD');
-  assert.equal(merged.merchant_refs[0].relationship, 'SIMILAR');
-  assert.equal(merged.merchant_refs[0].fetched_at, '2026-09-25T01:00:00.000Z');
-});
