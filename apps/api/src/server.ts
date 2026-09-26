@@ -402,6 +402,7 @@ export async function refreshVerifiedOffers(
   const makeExact = (product: ProductCandidate, reason = `${mapping.provenance} product identity; same verified SKU/model`): ProductCandidate => ({
     ...product,
     result_class: 'EXACT',
+    relationship: 'EXACT',
     provenance: mapping.provenance,
     provider: product.provider || mapping.provider || undefined,
     identity_key: identityKey,
@@ -468,6 +469,7 @@ export async function refreshVerifiedOffers(
   }
 
   let visualExact: ProductCandidate[] = [];
+  const offerComparisonsForRelationship = new Map<string, ImageComparison | undefined>();
   let verificationUsage: {
     provider: string;
     model: string;
@@ -504,6 +506,7 @@ export async function refreshVerifiedOffers(
         const offerComparisons = new Map<string, ImageComparison | undefined>(
           comparedProducts.map((product) => [product.id, images.comparisons.get(candidateKey(product))]),
         );
+        for (const [id, comparison] of offerComparisons) offerComparisonsForRelationship.set(id, comparison);
         const exactOfferIds = canonicalVisualExactOfferIds({
           mapping,
           products: comparedProducts,
@@ -523,7 +526,29 @@ export async function refreshVerifiedOffers(
     }
   }
 
-  const exactProducts = dedupeProducts([canonicalProduct, ...metadataExact, ...visualExact]).slice(0, 8);
+  const exactOfferIds = new Set(visualExact.map((product) => product.id));
+  const visualAlternatives = needsVisual.slice(0, 8).flatMap((product) => {
+    if (exactOfferIds.has(product.id)) return [];
+    const comparison = offerComparisonsForRelationship.get(product.id);
+    if (!comparison) return [];
+    const relationship: 'SIMILAR' | 'RELATED' = comparison.similarity >= 0.6 ? 'SIMILAR' : 'RELATED';
+    return [{
+      ...product,
+      result_class: 'SIMILAR' as const,
+      relationship,
+      verification_status: 'multimodal' as const,
+      verification_image_similarity: comparison.similarity,
+      verification_image_confidence: comparison.confidence,
+      verification_reasons: [
+        ...(product.verification_reasons ?? []),
+        relationship === 'SIMILAR'
+          ? 'Visually similar to the verified canonical product, but exact identity was not confirmed'
+          : 'Related candidate; canonical design identity was not confirmed',
+      ],
+    }];
+  });
+
+  const exactProducts = dedupeProducts([canonicalProduct, ...metadataExact, ...visualExact, ...visualAlternatives]).slice(0, 8);
 
   // Teach canonical memory which merchant offers have now independently passed.
   if (mapping.canonical_key && visual?.env && visualExact.length) {
