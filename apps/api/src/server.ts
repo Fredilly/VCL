@@ -30,7 +30,7 @@ import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerc
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
-import { distinctiveTextSameVideoReuse, eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
+import { distinctiveTextSameVideoReuse, eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, verifiedProductMemoryCandidates, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 export { AlphaAccessLedger } from './alpha-access.js';
@@ -739,8 +739,12 @@ async function confirmSameVideoReuseWithImage(
   if (distinctiveText.mapping) return { ...empty, decision: distinctiveText };
 
   const eligible = eligibleSameVideoCanonicalCandidates({ description, candidates });
-  if (!eligible.length || !sourceImage) {
-    return { ...empty, decision: { ...noDecision, reason: eligible.length ? 'visual_unavailable' : 'no_candidate' } };
+  const vpm = verifiedProductMemoryCandidates({ description, candidates });
+  // Explicit VPM tracks are the authoritative memory set. Historical canonical
+  // mappings remain a legacy fallback only when this video has no compatible VPM.
+  const visualCandidates = vpm.length ? vpm : eligible;
+  if (!visualCandidates.length || !sourceImage) {
+    return { ...empty, decision: { ...noDecision, reason: visualCandidates.length ? 'visual_unavailable' : 'no_candidate' } };
   }
 
   const useOpenRouter = env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
@@ -750,7 +754,7 @@ async function confirmSameVideoReuseWithImage(
 
   const providers = commerceProviders(env);
   const rows: Array<{ identity: CanonicalProductIdentity; product: ProductCandidate }> = [];
-  for (const candidate of eligible) {
+  for (const candidate of visualCandidates) {
     let identity = candidate.identity;
     let merchantRef = identity.merchant_refs.find((ref) => Boolean(ref.image_reference && ref.destination));
 
@@ -830,7 +834,7 @@ async function confirmSameVideoReuseWithImage(
   }
 
   return {
-    decision: selectSameVideoVisualWinner({ candidates: eligible, comparisons }),
+    decision: selectSameVideoVisualWinner({ candidates: visualCandidates, comparisons }),
     compared: images.compared,
     failures: images.failures,
     failure_reasons: images.failure_reasons ?? {},
