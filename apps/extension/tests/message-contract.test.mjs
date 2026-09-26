@@ -184,9 +184,9 @@ test('product feedback and verify controls stay inside their product card', () =
 });
 
 
-test('verified result UI uses one exact-match badge and concise evidence copy without SKU/admin jargon', () => {
+test('verified result UI keeps one exact-match badge without redundant evidence or admin jargon', () => {
   assert.match(content, /exactBadge\.textContent = '✓ Exact match'/);
-  assert.match(content, /Matched from visible text and shirt details/);
+  assert.doesNotMatch(content, /Matched from visible text and shirt details/);
   assert.doesNotMatch(content, /Scoop Verified/);
   assert.doesNotMatch(content, /SKU \$\{verifiedProduct\.model\}/);
   assert.doesNotMatch(content, /Identity source: verified product data/);
