@@ -215,6 +215,56 @@ Stronger targets:
 - marketplaces/catalog owners,
 - retailers wanting visual search against large first-party catalogs.
 
+## Automated partner video mapping: reserved moat phase
+
+A future B2B advantage is making newly published partner video Scoop-ready without requiring the partner or Scoop team to manually tag every product.
+
+Target experience:
+
+```text
+partner connects content source
+        -> new video detected
+        -> sparse/scene-aware analysis
+        -> objects tracked across appearance windows
+        -> existing CanonicalProductGraph checked first
+        -> unresolved products retrieved and verified
+        -> ContentProductGraph populated
+        -> viewers receive graph-first resolution
+```
+
+The commercial value is not merely "AI analyzes video." It is that Scoop progressively knows which canonical products appear where in valuable content, can reuse those mappings across future intent events, and can keep merchant offers fresh independently.
+
+Partner/sponsor catalog access is commercially valuable because it can bound the candidate set and improve speed, precision, and economics. It should remain optional evidence rather than a manual prerequisite.
+
+### Build trigger
+
+Do not build the automated ingestion system merely because it is strategically attractive.
+
+Start implementation when either:
+- **3 paying partner/creator clients** request automated video integration, or
+- **1 anchor partner** has enough recurring video volume or revenue to justify the work.
+
+Until then:
+1. finish and launch alpha,
+2. monitor real Scoop usage, cost, corrections, repeated products, and repeated videos,
+3. record partner demand for automatic ingestion,
+4. measure mapping-reuse opportunities,
+5. keep the current user-triggered path reliable.
+
+This preserves the moat direction without turning it into a pre-launch sidequest.
+
+### Jev / decision routing
+
+Jev or a future replaceable decision layer may help automated ingestion by:
+- skipping redundant frames/scenes,
+- deciding which objects merit expensive processing,
+- choosing graph lookup versus fresh retrieval/verification,
+- reducing unnecessary provider calls.
+
+Treat these as hypotheses until benchmarked. Jev is a routing/decision component, not product identity evidence.
+
+Tracking issue: GitHub #249.
+
 ## Exact-match strategy
 
 Never promise that every visual selection will produce an exact match.
