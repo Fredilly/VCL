@@ -22,6 +22,25 @@ function exactCase() {
   return value;
 }
 
+function visibleMarkingExactCase() {
+  const value = example(apparelCases[0], '-visible-marking-exact');
+  value.description.brand_candidate = null;
+  value.description.model_candidate = null;
+  value.description.visible_text = ['BUILDING IS MY LOVE LANGUAGE'];
+  value.description.logos_markings = [];
+  value.description.evidence_confidence = { visible_text: 0.96, logos_markings: 0 };
+  value.candidate.title = 'Building Is My Love Language black t-shirt';
+  value.candidate.metadata = {};
+  value.comparison.source.brand = { value: null, confidence: 0, basis: 'image' };
+  value.comparison.source.model = { value: null, confidence: 0, basis: 'image' };
+  value.comparison.candidate.brand = { value: null, confidence: 0, basis: 'image' };
+  value.comparison.candidate.model = { value: null, confidence: 0, basis: 'image' };
+  value.comparison.similarity = 0.96;
+  value.comparison.confidence = 0.96;
+  value.comparison.matching_details = ['matching typography placement and letter spacing', 'matching stacked text layout'];
+  return value;
+}
+
 function similarCase() {
   const value = example(apparelCases[0], '-different-layout');
   value.description.visible_text = ['BUILDING IS MY LOVE LANGUAGE'];
@@ -59,6 +78,7 @@ function incompleteCase() {
 
 export const canonicalRelationshipCases = [
   { id: 'same-design-merchant-b', expected: 'EXACT', ...exactCase() },
+  { id: 'same-design-visible-marking', expected: 'EXACT', ...visibleMarkingExactCase() },
   { id: 'same-phrase-different-layout', expected: 'SIMILAR', ...similarCase() },
   { id: 'same-theme-different-identity', expected: 'RELATED', ...relatedCase() },
   { id: 'hard-text-lookalike', expected: 'SIMILAR', ...textLookalikeCase() },
