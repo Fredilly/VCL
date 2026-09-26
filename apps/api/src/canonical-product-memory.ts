@@ -1,3 +1,4 @@
+import type { CanonicalRelationship } from './commerce.js';
 import type { VerifiedProductMapping, VerifiedProductProvenance } from './verified-product-mapping.js';
 
 export type CanonicalMerchantRef = {
@@ -21,6 +22,8 @@ export type CanonicalProductIdentity = {
   distinctive_features?: string[];
   shape_silhouette?: string[];
   normalized_fingerprint: string;
+  /** Relationship of this verified identity to its canonical product/design node. */
+  relationship: CanonicalRelationship;
   provenance: VerifiedProductProvenance;
   verified_at: string;
   merchant_refs: CanonicalMerchantRef[];
@@ -150,6 +153,7 @@ export function canonicalProductIdentity(input: CanonicalIdentityInput): Canonic
     distinctive_features: distinctiveFeatures,
     shape_silhouette: shapeSilhouette,
     normalized_fingerprint,
+    relationship: 'EXACT',
     provenance: mapping.provenance,
     verified_at: input.verifiedAt ?? new Date().toISOString(),
     merchant_refs: [{
