@@ -229,7 +229,7 @@ test('YouTube Shorts surface context keeps a stable content_ref for exact verifi
 });
 
 
-test('verified rows show their source and omit feedback/admin controls', () => {
+test('verified rows show their source while admins retain Exact sanitation controls', () => {
   assert.match(content, /function productSourceLabel\(product: ProductCandidate\)/);
   assert.match(content, /return new URL\(product\.destination\)\.hostname\.replace/);
   assert.match(content, /if \(!isCandidateVerified\) \{/);
