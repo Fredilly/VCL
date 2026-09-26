@@ -46,6 +46,7 @@ type CommerceResponse = {
   products: ProductCandidate[];
   latency_ms: number;
   state?: 'RESULTS' | 'NO_RESULTS' | 'TEMPORARILY_UNAVAILABLE';
+  identity_confirmation?: 'required';
   providers_used?: string[];
   timing?: { provider_retrieval_ms?: number; candidate_verification_ms?: number; total_ms?: number };
   verified_mapping?: {
@@ -213,7 +214,9 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
 
   if (!commerce.products.length) {
     const empty = document.createElement('div');
-    empty.textContent = commerce.state === 'TEMPORARILY_UNAVAILABLE'
+    empty.textContent = commerce.identity_confirmation === 'required'
+      ? 'Try a clearer view to confirm whether this is the product already verified in this video.'
+      : commerce.state === 'TEMPORARILY_UNAVAILABLE'
       ? 'Shopping sources are temporarily unavailable. Try again.'
       : 'No useful product candidates returned.';
     Object.assign(empty.style, { opacity: '0.75' });

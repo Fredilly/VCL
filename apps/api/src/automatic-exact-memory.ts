@@ -61,6 +61,7 @@ export function automaticExactMemory(
     object_type: objectType,
     brand: bounded(product.brand, 120) || bounded(description.brand_candidate, 120),
     product_id: productId,
+    merchant_item_id: bounded(product.id, 180) || null,
     title,
     destination,
     image_reference: bounded(product.image_reference, 1200) || null,

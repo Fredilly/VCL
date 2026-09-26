@@ -39,6 +39,7 @@ export type ProductCandidate = {
   verification_image_similarity?: number;
   verification_image_confidence?: number;
   identity_key?: string;
+  canonical_key?: string;
   verification_score?: number;
   verification_reasons?: string[];
   provider?: string;
