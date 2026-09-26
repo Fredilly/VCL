@@ -578,7 +578,9 @@ export async function refreshVerifiedOffers(
     }
   }
 
-  const exactProducts = dedupeProducts([canonicalProduct, ...rememberedExact, ...metadataExact, ...visualExact, ...visualAlternatives]).slice(0, 8);
+  // Prefer fresh provider rows over remembered rows for the same destination so
+  // volatile offer fields (price/currency) are not shadowed by older memory.
+  const exactProducts = dedupeProducts([...metadataExact, ...visualExact, canonicalProduct, ...rememberedExact, ...visualAlternatives]).slice(0, 8);
 
   // Teach canonical memory which merchant offers have now independently passed.
   if (mapping.canonical_key && visual?.env && visualExact.length) {
