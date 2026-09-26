@@ -213,7 +213,7 @@ export function confirmSameVideoVisual(
     return useful.length >= 2;
   });
 
-  if (comparison.confidence < 0.85 || comparison.similarity < 0.92 || specificDetails.length < 1) {
+  if (comparison.confidence < 0.90 || comparison.similarity < 0.90 || specificDetails.length < 1) {
     return {
       ...decision,
       mapping: null,
