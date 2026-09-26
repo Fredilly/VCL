@@ -168,7 +168,7 @@ test('admin controls use per-admin session tokens and can promote non-EXACT cand
 
 test('admin Exact promotion carries the active same-video canonical identity', () => {
   assert.match(content, /canonical_key\?: string/);
-  assert.match(content, /canonical_key_hint: commerce\.verified_mapping\?\.hit \? commerce\.verified_mapping\.canonical_key : undefined/);
+  assert.match(content, /canonical_key_hint: commerce\.verified_mapping\?\.canonical_key/);
 });
 
 test('admin Exact promotion is additive and never revokes earlier verified history', () => {
@@ -229,9 +229,10 @@ test('YouTube Shorts surface context keeps a stable content_ref for exact verifi
 });
 
 
-test('verified rows show their source and omit feedback/admin controls', () => {
+test('verified rows show their source while admins retain Exact sanitation controls', () => {
   assert.match(content, /function productSourceLabel\(product: ProductCandidate\)/);
   assert.match(content, /return new URL\(product\.destination\)\.hostname\.replace/);
-  assert.match(content, /if \(!isCandidateVerified\) \{/);
+  assert.match(content, /if \(!isCandidateVerified \|\| \(admin\?\.admin && adminPayload && relationship === 'EXACT'\)\) \{/);
+  assert.match(content, /Demote to Similar/);
   assert.doesNotMatch(content, /verifiedLabel\.textContent = 'Scoop Verified'/);
 });

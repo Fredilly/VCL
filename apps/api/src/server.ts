@@ -552,20 +552,36 @@ export async function refreshVerifiedOffers(
   if (mapping.canonical_key && visual?.env) {
     const remembered = await durableCanonicalProductIdentity(visual.env, mapping.canonical_key).catch(() => null);
     if (remembered) {
-      rememberedExact = remembered.merchant_refs
-        .filter((ref) => Boolean(ref.destination) && (ref.relationship ?? 'EXACT') === 'EXACT')
-        .map((ref) => makeExact({
-          id: ref.item_id || ref.destination,
-          title: remembered.title,
-          brand: remembered.brand,
-          model: remembered.model,
-          category: remembered.object_type,
-          image_reference: ref.image_reference,
-          provenance: remembered.provenance,
-          provider: ref.source || undefined,
+      const exactRefs = remembered.merchant_refs
+        .filter((ref) => Boolean(ref.destination) && (ref.relationship ?? 'EXACT') === 'EXACT');
+      const providerByName = new Map(providers.map((entry) => [entry.name, entry.provider]));
+      const refreshedByDestination = new Map<string, ProductCandidate>();
+      await Promise.all(exactRefs.map(async (ref) => {
+        const provider = ref.source ? providerByName.get(ref.source) : undefined;
+        if (!provider?.refreshOffer) return;
+        commerceCalls[ref.source!] = (commerceCalls[ref.source!] ?? 0) + 1;
+        const fresh = await provider.refreshOffer({
+          provider: ref.source,
+          item_id: ref.item_id,
           destination: ref.destination,
-          price: ref.price ?? null,
-          currency: ref.currency ?? null,
+        }, searchQuery).catch(() => null);
+        if (fresh) refreshedByDestination.set(ref.destination, fresh);
+      }));
+      rememberedExact = exactRefs
+        .map((ref) => {
+          const fresh = refreshedByDestination.get(ref.destination);
+          return makeExact({
+          id: fresh?.id || ref.item_id || ref.destination,
+          title: fresh?.title || remembered.title,
+          brand: fresh?.brand || remembered.brand,
+          model: fresh?.model || remembered.model,
+          category: fresh?.category || remembered.object_type,
+          image_reference: fresh?.image_reference || ref.image_reference,
+          provenance: remembered.provenance,
+          provider: fresh?.provider || ref.source || undefined,
+          destination: fresh?.destination || ref.destination,
+          price: fresh?.price ?? ref.price ?? null,
+          currency: fresh?.currency ?? ref.currency ?? null,
           result_class: 'EXACT',
           metadata: {
             ...(remembered.brand ? { brand: remembered.brand } : {}),
@@ -574,10 +590,35 @@ export async function refreshVerifiedOffers(
             ...(remembered.color ? { color: remembered.color } : {}),
             ...(remembered.material ? { material: remembered.material } : {}),
           },
-        }, 'previously verified merchant offer from canonical memory'));
+        }, fresh
+          ? 'canonical identity with merchant-refreshed offer data'
+          : 'previously verified merchant offer from canonical memory');
+        });
+      const refreshedRefs = exactRefs.flatMap((ref) => {
+        const fresh = refreshedByDestination.get(ref.destination);
+        return fresh ? [{
+          ...ref,
+          item_id: fresh.id || ref.item_id,
+          destination: fresh.destination || ref.destination,
+          image_reference: fresh.image_reference || ref.image_reference,
+          price: fresh.price,
+          currency: fresh.currency,
+          fetched_at: new Date().toISOString(),
+        }] : [];
+      });
+      if (refreshedRefs.length) {
+        await persistCanonicalProductIdentity(visual.env, {
+          ...remembered,
+          verified_at: new Date().toISOString(),
+          merchant_refs: refreshedRefs,
+        }).catch(() => null);
+      }
     }
   }
 
+  // Preserve canonical/verified history at the front of the bounded result set.
+  // Remembered offers have already been refreshed directly when the provider supports it,
+  // so live price/currency do not require search results to displace verified offers.
   const exactProducts = dedupeProducts([canonicalProduct, ...rememberedExact, ...metadataExact, ...visualExact, ...visualAlternatives]).slice(0, 8);
 
   // Teach canonical memory which merchant offers have now independently passed.
@@ -1694,6 +1735,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         verified_mapping: {
           hit: false,
           reuse: 'same_video',
+          ...(sameVideoReuse.canonical_key ? { canonical_key: sameVideoReuse.canonical_key } : {}),
           confidence: sameVideoReuse.confidence,
           reason: sameVideoReuse.reason,
           ...(typeof sameVideoReuse.visual_similarity === 'number' ? { visual_similarity: sameVideoReuse.visual_similarity } : {}),

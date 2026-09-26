@@ -46,8 +46,20 @@ export type ProductCandidate = {
   click_ref?: string;
 };
 
+export type MerchantOfferRef = {
+  provider: string | null;
+  item_id: string | null;
+  destination: string;
+};
+
 export interface CommerceProvider {
   search(query: ProductQuery): Promise<ProductCandidate[]>;
+  /**
+   * Refresh volatile commerce truth for a known merchant offer.
+   * Identity comes from canonical memory; price/availability/etc. come from the provider.
+   * Providers that cannot directly refresh an offer may omit this capability.
+   */
+  refreshOffer?(offer: MerchantOfferRef, query: ProductQuery): Promise<ProductCandidate | null>;
 }
 
 export class CommerceNoResultsError extends Error {

@@ -217,6 +217,35 @@ test('eBay adapter: normalizes candidates and never emits EXACT', async () => {
   assert.equal(candidate.provenance, 'ebay:browse');
 });
 
+test('eBay adapter: refreshOffer pulls a known offer directly by item id with live price', async () => {
+  let capturedUrl = '';
+  const ctx = makeEbayContext(makeMockAuth(), {
+    fetch: async (url) => {
+      capturedUrl = String(url);
+      return Response.json({
+        itemId: 'known-123',
+        title: 'Known exact offer',
+        itemWebUrl: 'https://ebay.test/itm/known-123',
+        price: { value: '17.95', currency: 'USD' },
+      });
+    },
+  });
+  loadModule(ebaySource, ctx);
+  const { EbayCommerceProvider } = ctx.exports;
+
+  const provider = new EbayCommerceProvider(makeMockAuth());
+  const result = await provider.refreshOffer({
+    provider: 'ebay',
+    item_id: 'known-123',
+    destination: 'https://ebay.test/itm/known-123',
+  }, query);
+
+  assert.match(capturedUrl, /\/buy\/browse\/v1\/item\/known-123$/);
+  assert.equal(result.id, 'known-123');
+  assert.equal(result.price, '17.95');
+  assert.equal(result.currency, 'USD');
+});
+
 test('eBay adapter: empty results throws CommerceNoResultsError', async () => {
   const ctx = makeEbayContext(makeMockAuth(), {
     fetch: async () => Response.json({ itemSummaries: [] }),

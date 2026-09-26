@@ -322,7 +322,7 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
     row.appendChild(text);
     card.appendChild(row);
 
-    if (!isCandidateVerified) {
+    if (!isCandidateVerified || (admin?.admin && adminPayload && relationship === 'EXACT')) {
       const feedback = document.createElement('div');
       Object.assign(feedback.style, {
         display: 'flex',
@@ -407,7 +407,7 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
               platform: adminPayload.context.platform,
               content_ref: adminPayload.context.content_ref,
               timestamp_ms: adminPayload.timestamp_ms,
-              canonical_key_hint: commerce.verified_mapping?.hit ? commerce.verified_mapping.canonical_key : undefined,
+              canonical_key_hint: commerce.verified_mapping?.canonical_key,
               description: adminPayload.description,
               product,
             },
