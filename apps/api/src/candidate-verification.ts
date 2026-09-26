@@ -148,8 +148,15 @@ function groundedDistinctiveMarking(description: ObjectDescription, candidate: P
   // on them. A distinctive readable marking can still ground identity when OCR is
   // high-confidence, the candidate independently carries the same marking, and pixels
   // strongly agree on the design. Text alone is never enough.
-  return (description.evidence_confidence?.visible_text ?? 0) >= HIGH
-    && description.visible_text.some((raw) => {
+  // Live vision responses do not always include a per-field OCR confidence. Do not
+  // turn that missing optional field into a hard veto. The marking is grounded by
+  // three independent facts here: distinctive readable source text, the same text
+  // on the merchant candidate, and >=0.90 pixel comparison with positive design detail.
+  // When a per-field confidence is present, reject an explicitly low-confidence read.
+  const visibleTextConfidence = description.evidence_confidence?.visible_text;
+  if (typeof visibleTextConfidence === 'number' && visibleTextConfidence < HIGH) return false;
+
+  return description.visible_text.some((raw) => {
       const text = normalize(raw);
       const meaningful = text.split(' ').filter((token) => token.length >= 3 && !GENERIC_MARKING_TOKENS.has(token));
       return text.length >= 8 && meaningful.length >= 2 && phrase(candidateText, text);
