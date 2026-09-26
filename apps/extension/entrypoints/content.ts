@@ -371,6 +371,28 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
       no.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); void submit('wrong_item'); });
       paintFeedback();
       feedback.append(yes, no);
+      if (admin?.admin && adminPayload && relationship === 'EXACT' && commerce.verified_mapping?.canonical_key) {
+        const demote = button('Demote to Similar');
+        Object.assign(demote.style, { height: '32px', padding: '0 9px', fontSize: '11px', opacity: '0.9' });
+        demote.addEventListener('click', (event) => {
+          event.preventDefault(); event.stopPropagation();
+          demote.disabled = true; demote.textContent = 'Saving…';
+          void browser.runtime.sendMessage({
+            type: 'VCL_ADMIN_VERIFY',
+            payload: {
+              action: 'demote',
+              platform: adminPayload.context.platform,
+              content_ref: adminPayload.context.content_ref,
+              canonical_key: commerce.verified_mapping?.canonical_key,
+              product,
+            },
+          }).then((response) => {
+            demote.textContent = response?.accepted ? '✓ Similar' : (typeof response?.error === 'string' ? response.error : 'Try again');
+            demote.disabled = Boolean(response?.accepted);
+          }).catch(() => { demote.textContent = 'Try again'; demote.disabled = false; });
+        });
+        feedback.appendChild(demote);
+      }
       if (admin?.admin && adminPayload && relationship === 'SIMILAR') {
         const verify = button('Promote to Exact');
         Object.assign(verify.style, { height: '32px', padding: '0 9px', fontSize: '11px', opacity: '0.9' });
