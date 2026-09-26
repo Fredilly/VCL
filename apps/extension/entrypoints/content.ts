@@ -225,6 +225,25 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
   const exactProducts = commerce.products.filter((product) => relationshipOf(product) === 'EXACT');
   const similarProducts = commerce.products.filter((product) => relationshipOf(product) === 'SIMILAR');
   const visibleProducts = [...exactProducts, ...similarProducts].slice(0, 8);
+
+  const resultsMeta = document.createElement('div');
+  const resultsCount = document.createElement('span');
+  const resultsTime = document.createElement('span');
+  resultsCount.textContent = `${visibleProducts.length} ${visibleProducts.length === 1 ? 'result' : 'results'}`;
+  resultsTime.textContent = formatLatency(commerce.latency_ms);
+  Object.assign(resultsMeta.style, {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    margin: '0 0 14px',
+    fontSize: '12px',
+    lineHeight: '1.2',
+    opacity: '0.58',
+    fontVariantNumeric: 'tabular-nums',
+  });
+  resultsMeta.append(resultsCount, resultsTime);
+  panel.appendChild(resultsMeta);
+
   let currentSection: 'EXACT' | 'SIMILAR' | null = null;
 
   const appendSectionHeading = (relationship: 'EXACT' | 'SIMILAR') => {
@@ -233,7 +252,7 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
     const detail = document.createElement('div');
     title.textContent = relationship === 'EXACT' ? 'Exact matches' : 'Similar options';
     detail.textContent = relationship === 'EXACT'
-      ? `Same design · ${formatLatency(commerce.latency_ms)}`
+      ? 'Same design'
       : 'Same idea, different design';
     Object.assign(section.style, {
       margin: relationship === 'EXACT' ? '0 0 8px' : '20px 0 8px',
