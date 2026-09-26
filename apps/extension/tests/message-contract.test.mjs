@@ -166,6 +166,11 @@ test('admin controls use per-admin session tokens and can promote non-EXACT cand
 });
 
 
+test('admin Exact promotion carries the active same-video canonical identity', () => {
+  assert.match(content, /canonical_key\?: string/);
+  assert.match(content, /canonical_key_hint: commerce\.verified_mapping\?\.hit \? commerce\.verified_mapping\.canonical_key : undefined/);
+});
+
 test('feedback UI uses reversible selected thumbs without thank-you copy', () => {
   assert.match(content, /aria-pressed/);
   assert.match(content, /selectedFeedback === 'correct_match'/);
