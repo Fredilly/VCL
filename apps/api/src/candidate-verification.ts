@@ -137,29 +137,6 @@ function groundedIdentity(description: ObjectDescription, observed: Evidence, co
   });
 }
 
-function groundedDistinctiveMarking(description: ObjectDescription, candidate: ProductCandidate, comparison?: ImageComparison): boolean {
-  if (!comparison || comparison.confidence < IDENTITY_VISUAL || comparison.similarity < IDENTITY_VISUAL) return false;
-  const candidateText = normalize([candidate.title, candidate.metadata?.description].filter(Boolean).join(' '));
-  const negativeDetail = comparison.matching_details?.some((detail) =>
-    /\b(different|mismatch|mismatched|unlike|changed|wrong|not matching)\b/i.test(detail));
-  if (negativeDetail) return false;
-
-  // Some products, especially graphic apparel, have no useful brand/model SKU printed
-  // on them. A distinctive readable marking can still ground identity when OCR is
-  // high-confidence, the candidate independently carries the same marking, and pixels
-  // strongly agree on the design. Text alone is never enough.
-  return (description.evidence_confidence?.visible_text ?? 0) >= HIGH
-    && description.visible_text.some((raw) => {
-      const text = normalize(raw);
-      const meaningful = text.split(' ').filter((token) => token.length >= 3 && !GENERIC_MARKING_TOKENS.has(token));
-      return text.length >= 8 && meaningful.length >= 2 && phrase(candidateText, text);
-    })
-    && Boolean(comparison.matching_details?.some((detail) => {
-      const tokens = normalize(detail).split(' ').filter((token) => token.length >= 4 && !GENERIC_MARKING_TOKENS.has(token));
-      return tokens.length >= 2;
-    }));
-}
-
 function canonicalRelationshipFromEvidence(
   description: ObjectDescription,
   candidate: ProductCandidate,
@@ -179,8 +156,7 @@ function canonicalRelationshipFromEvidence(
   // EXACT is a canonical design/identity decision, never a text-search decision.
   // It requires independently grounded identity plus strong pixel agreement and
   // distinctive visual corroboration. Text may support the decision but cannot create it.
-  const markingGrounded = groundedDistinctiveMarking(description, candidate, comparison);
-  if (!identityConflict && typeAgrees && (identityGrounded || markingGrounded) && strongVisual && distinctiveVisual) return 'EXACT';
+  if (!identityConflict && typeAgrees && identityGrounded && strongVisual && distinctiveVisual) return 'EXACT';
   if (!identityConflict && typeAgrees && (textAgrees || (comparison?.similarity ?? 0) >= 0.6)) return 'SIMILAR';
   return 'RELATED';
 }

@@ -102,7 +102,7 @@ test('same slogan with materially different pixels stays unverified', () => {
     matching_details: ['same black t-shirt category'],
   });
   assert.equal(result.mapping, null);
-  assert.equal(result.reason, 'weak_evidence');
+  assert.equal(result.reason, 'visual_rejected');
 });
 
 test('visual attribute contradiction fails closed even at high similarity', () => {
@@ -268,7 +268,7 @@ test('visually weak canonical candidate stays non-exact', () => {
     comparisons: new Map([[identity.canonical_key, { ...visualMatch, similarity: 0.8 }]]),
   });
   assert.equal(winner.mapping, null);
-  assert.equal(winner.reason, 'weak_evidence');
+  assert.equal(winner.reason, 'visual_rejected');
 });
 
 
@@ -291,7 +291,7 @@ test('same-video visual confirmation still rejects below 0.90 confidence', () =>
     confidence: 0.89,
   });
   assert.equal(result.mapping, null);
-  assert.equal(result.reason, 'weak_evidence');
+  assert.equal(result.reason, 'visual_rejected');
 });
 
 

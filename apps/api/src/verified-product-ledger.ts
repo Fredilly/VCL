@@ -42,21 +42,13 @@ export async function durableVerifiedMappings(
   return Array.isArray(result?.mappings) ? result!.mappings! : [];
 }
 
-export async function persistVerifiedMapping(
+export async function persistAdminVerifiedMapping(
   env: VerifiedProductLedgerEnv,
   mapping: VerifiedProductMapping,
 ): Promise<VerifiedProductMapping> {
   const result = await postJson<{ mapping?: VerifiedProductMapping }>(env, '/verify', mapping);
   if (!result?.mapping) throw new Error('verified product ledger unavailable');
   return result.mapping;
-}
-
-export async function persistAdminVerifiedMapping(
-  env: VerifiedProductLedgerEnv,
-  mapping: VerifiedProductMapping,
-): Promise<VerifiedProductMapping> {
-  if (mapping.provenance !== 'admin_verified') throw new Error('admin verified mapping requires admin provenance');
-  return await persistVerifiedMapping(env, mapping);
 }
 
 export async function revokeAdminVerifiedMapping(
@@ -165,24 +157,17 @@ export class VerifiedProductLedger {
       const mapping = await request.json() as VerifiedProductMapping;
       const platform = bounded(mapping.platform, 40);
       const contentRef = bounded(mapping.content_ref, 180);
-      const durableProvenance = mapping.provenance === 'admin_verified' || mapping.provenance === 'automatic_verified';
-      if (!platform || !contentRef || !durableProvenance) {
+      if (!platform || !contentRef || mapping.provenance !== 'admin_verified') {
         return Response.json({ error: 'Invalid verified mapping' }, { status: 400 });
       }
       const key = contentKey(platform, contentRef);
       const current = await this.storage.get<VerifiedProductMapping[]>(key) ?? [];
-      const next = current.filter((entry) => {
-        // A canonical key is one product identity. Re-observing that identity at
-        // another timestamp must update its video mapping, not create another
-        // candidate that later competes with itself during reuse arbitration.
-        if (mapping.canonical_key && entry.canonical_key === mapping.canonical_key) return false;
-        return !(
-          entry.product_id === mapping.product_id &&
-          entry.scope === mapping.scope &&
-          entry.timestamp_start_ms === mapping.timestamp_start_ms &&
-          entry.timestamp_end_ms === mapping.timestamp_end_ms
-        );
-      });
+      const next = current.filter((entry) => !(
+        entry.product_id === mapping.product_id &&
+        entry.scope === mapping.scope &&
+        entry.timestamp_start_ms === mapping.timestamp_start_ms &&
+        entry.timestamp_end_ms === mapping.timestamp_end_ms
+      ));
       next.unshift(mapping);
       await this.storage.put(key, next.slice(0, 100));
       return Response.json({ accepted: true, mapping });

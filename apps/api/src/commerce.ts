@@ -39,7 +39,6 @@ export type ProductCandidate = {
   verification_image_similarity?: number;
   verification_image_confidence?: number;
   identity_key?: string;
-  canonical_key?: string;
   verification_score?: number;
   verification_reasons?: string[];
   provider?: string;
@@ -47,20 +46,8 @@ export type ProductCandidate = {
   click_ref?: string;
 };
 
-export type MerchantOfferRef = {
-  provider: string | null;
-  item_id: string | null;
-  destination: string;
-};
-
 export interface CommerceProvider {
   search(query: ProductQuery): Promise<ProductCandidate[]>;
-  /**
-   * Refresh volatile commerce truth for a known merchant offer.
-   * Identity comes from canonical memory; price/availability/etc. come from the provider.
-   * Providers that cannot directly refresh an offer may omit this capability.
-   */
-  refreshOffer?(offer: MerchantOfferRef, query: ProductQuery): Promise<ProductCandidate | null>;
 }
 
 export class CommerceNoResultsError extends Error {
