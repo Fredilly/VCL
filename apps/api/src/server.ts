@@ -29,9 +29,10 @@ export { FeedbackLedger } from './feedback-ledger.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
-import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
+import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistVerifiedMapping, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
 import { eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
+import { automaticExactMemory } from './automatic-exact-memory.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 export { AlphaAccessLedger } from './alpha-access.js';
 export { VerifiedProductLedger } from './verified-product-ledger.js';
@@ -1683,6 +1684,27 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           logSafeError(error);
         }
       }
+      // Commit only an unambiguous evidence-backed EXACT result. This makes identity
+      // durable for later selections in the same video while leaving offer refresh dynamic.
+      // SIMILAR/RELATED results never create or overwrite canonical memory.
+      const exactProducts = resolved.products.filter((product) => product.relationship === 'EXACT');
+      if (exactProducts.length === 1 && env.VERIFIED_PRODUCT_LEDGER) {
+        const memory = automaticExactMemory(exactProducts[0], description, context);
+        if (memory) {
+          try {
+            const savedIdentity = await persistCanonicalProductIdentity(env, memory.identity);
+            await persistVerifiedMapping(env, {
+              ...memory.mapping,
+              canonical_key: savedIdentity.canonical_key,
+            });
+          } catch (error) {
+            // Memory is an optimization/trust-preserving reuse path. A storage failure
+            // must not turn a valid current Scoop into a user-visible commerce failure.
+            logSafeError(error);
+          }
+        }
+      }
+
       const total_ms = Date.now() - started + (sameVideoVisualCheck.timing?.total_ms ?? 0);
       const failureState = resolved.state === 'TEMPORARILY_UNAVAILABLE' ? 'TEMPORARILY_UNAVAILABLE' : resolved.state === 'NO_RESULTS' ? 'NO_RESULTS' : undefined;
       if (resolved.state === 'TEMPORARILY_UNAVAILABLE') recordFailureState('commerce', 'PROVIDER_UNAVAILABLE', true);
