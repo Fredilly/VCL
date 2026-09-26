@@ -248,6 +248,7 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
 
   for (const product of visibleProducts) {
     const relationship = relationshipOf(product);
+    if (relationship === 'RELATED') continue;
     if (relationship !== currentSection) {
       currentSection = relationship;
       appendSectionHeading(relationship);
