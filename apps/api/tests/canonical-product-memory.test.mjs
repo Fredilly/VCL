@@ -147,3 +147,23 @@ test('legacy non-admin mapping is not upgraded implicitly', async () => {
   const result = await ledger.backfillLegacyAdminCanonicalMappings({}, [fixture]);
   assert.equal(result[0].canonical_key, undefined);
 });
+
+
+test('canonical merge enriches an existing merchant ref with a newly recovered image', () => {
+  const first = memory.canonicalProductIdentity({
+    mapping: { ...mapping, image_reference: null },
+    merchantItemId: 'merchant-item-1',
+    visibleText: [],
+    verifiedAt: '2026-09-25T00:00:00.000Z',
+  });
+  const second = memory.canonicalProductIdentity({
+    mapping: { ...mapping, image_reference: 'https://i.ebayimg.com/recovered.jpg' },
+    merchantItemId: 'merchant-item-1',
+    visibleText: [],
+    verifiedAt: '2026-09-25T01:00:00.000Z',
+  });
+
+  const merged = memory.mergeCanonicalProductIdentity(first, second);
+  assert.equal(merged.merchant_refs.length, 1);
+  assert.equal(merged.merchant_refs[0].image_reference, 'https://i.ebayimg.com/recovered.jpg');
+});

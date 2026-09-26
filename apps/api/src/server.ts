@@ -506,31 +506,58 @@ async function confirmSameVideoReuseWithImage(
   if (!key) return { ...empty, decision: { ...noDecision, reason: 'visual_unavailable' } };
   const model = useOpenRouter ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
 
-  const rows = eligible.flatMap(({ identity }) => {
-    const merchantRef = identity.merchant_refs.find((ref) => Boolean(ref.image_reference && ref.destination));
-    if (!merchantRef?.image_reference) return [];
-    const product: ProductCandidate = {
-      id: identity.canonical_key,
-      title: identity.title,
-      brand: identity.brand,
-      model: identity.model,
-      category: identity.object_type,
-      image_reference: merchantRef.image_reference,
-      provenance: 'canonical_verified',
-      destination: merchantRef.destination,
-      price: null,
-      currency: null,
-      result_class: 'SIMILAR',
-      metadata: {
-        ...(identity.brand ? { brand: identity.brand } : {}),
-        ...(identity.model ? { model: identity.model } : {}),
+  const providers = commerceProviders(env);
+  const rows: Array<{ identity: CanonicalProductIdentity; product: ProductCandidate }> = [];
+  for (const candidate of eligible) {
+    let identity = candidate.identity;
+    let merchantRef = identity.merchant_refs.find((ref) => Boolean(ref.image_reference && ref.destination));
+
+    if (!merchantRef?.image_reference) {
+      const refreshed = await refreshVerifiedOffers(providers, candidate.mapping).catch(() => null);
+      const hydrated = refreshed?.products.find((product) => Boolean(product.image_reference && product.destination)) ?? null;
+      const hydratedDestination = hydrated?.destination ?? null;
+      if (hydrated?.image_reference && hydratedDestination) {
+        const hydratedIdentity: CanonicalProductIdentity = {
+          ...identity,
+          merchant_refs: [{
+            source: hydrated.provider || hydrated.provenance || null,
+            item_id: hydrated.id || candidate.mapping.product_id,
+            destination: hydratedDestination,
+            image_reference: hydrated.image_reference,
+          }],
+        };
+        identity = await persistCanonicalProductIdentity(env, hydratedIdentity).catch(() => hydratedIdentity);
+        merchantRef = identity.merchant_refs.find((ref) => Boolean(ref.image_reference && ref.destination))
+          ?? hydratedIdentity.merchant_refs[0];
+      }
+    }
+
+    if (!merchantRef?.image_reference) continue;
+
+    rows.push({
+      identity,
+      product: {
+        id: identity.canonical_key,
+        title: identity.title,
+        brand: identity.brand,
+        model: identity.model,
         category: identity.object_type,
-        ...(identity.color ? { color: identity.color } : {}),
-        ...(identity.material ? { material: identity.material } : {}),
+        image_reference: merchantRef.image_reference,
+        provenance: 'canonical_verified',
+        destination: merchantRef.destination,
+        price: null,
+        currency: null,
+        result_class: 'SIMILAR',
+        metadata: {
+          ...(identity.brand ? { brand: identity.brand } : {}),
+          ...(identity.model ? { model: identity.model } : {}),
+          category: identity.object_type,
+          ...(identity.color ? { color: identity.color } : {}),
+          ...(identity.material ? { material: identity.material } : {}),
+        },
       },
-    };
-    return [{ identity, product }];
-  });
+    });
+  }
 
   if (!rows.length) return { ...empty, decision: { ...noDecision, reason: 'visual_unavailable' } };
 
