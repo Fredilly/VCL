@@ -137,7 +137,7 @@ function groundedIdentity(description: ObjectDescription, observed: Evidence, co
   });
 }
 
-function canonicalRelationship(
+function canonicalRelationshipFromEvidence(
   description: ObjectDescription,
   candidate: ProductCandidate,
   comparison: ImageComparison | undefined,
@@ -159,6 +159,49 @@ function canonicalRelationship(
   if (!identityConflict && typeAgrees && identityGrounded && strongVisual && distinctiveVisual) return 'EXACT';
   if (!identityConflict && typeAgrees && (textAgrees || (comparison?.similarity ?? 0) >= 0.6)) return 'SIMILAR';
   return 'RELATED';
+}
+
+export function classifyCanonicalRelationship(
+  description: ObjectDescription,
+  candidate: ProductCandidate,
+  comparison?: ImageComparison,
+): CanonicalRelationship {
+  const expected = sourceEvidence(description);
+  const observed = candidateEvidence(candidate);
+  const matched = new Set<Attribute>();
+  let identityConflict = false;
+
+  for (const key of attributes) {
+    const source = comparison?.source[key];
+    if (source && canonical(key, source.value) && source.confidence >= HIGH) expected[key] = source;
+    const selected = expected[key];
+    const a = canonical(key, selected?.value);
+    if (!a || !selected) continue;
+    const evidence = [observed[key], comparison?.candidate[key]].filter((item) => item && canonical(key, item.value));
+    for (const item of evidence) {
+      if (!item) continue;
+      const b = canonical(key, item.value)!;
+      if (!compatible(key, a, b)) {
+        if (selected.confidence >= HIGH && item.confidence >= HIGH) identityConflict = true;
+      } else if (selected.confidence >= 0.6 && item.confidence >= 0.6) {
+        matched.add(key);
+      }
+    }
+  }
+
+  for (const key of ['brand', 'model'] as const) {
+    const value = expected[key]?.value;
+    if (!identityConflict && value && phrase(candidate.title, value) && (expected[key]?.confidence ?? 0) >= 0.6) matched.add(key);
+  }
+
+  return canonicalRelationshipFromEvidence(
+    description,
+    candidate,
+    comparison,
+    matched,
+    groundedIdentity(description, observed, comparison),
+    identityConflict,
+  );
 }
 
 export function verifyCandidate(
@@ -243,7 +286,7 @@ export function verifyCandidate(
   if (!strongVisual) reasons.push('strong visual agreement and comparison confidence required for LIKELY');
   // Search IDs and model guesses are not verified SKU evidence. Never manufacture EXACT.
   const result_class = likely ? 'LIKELY' : 'SIMILAR';
-  const relationship = canonicalRelationship(description, candidate, comparison, matched, identityGrounded, identityConflict);
+  const relationship = canonicalRelationshipFromEvidence(description, candidate, comparison, matched, identityGrounded, identityConflict);
   if (!comparison) reasons.push('image comparison unavailable; identity remains uncertain');
   const identity = matched.has('brand') && matched.has('model')
     ? [expected.brand?.value, expected.model?.value, expected.subtype?.value, expected.color?.value, expected.gender?.value].map(normalize).join(':')

@@ -5,7 +5,7 @@ import { loadModule } from './helpers/load-ts.mjs';
 import { canonicalRelationshipCases } from './fixtures/canonical-relationships.mjs';
 
 const file = (name) => fileURLToPath(new URL(`../src/${name}.ts`, import.meta.url));
-const { verifyCandidate } = loadModule(file('candidate-verification'));
+const { classifyCanonicalRelationship, verifyCandidate } = loadModule(file('candidate-verification'));
 
 test('canonical relationship frozen gate: Exact / Similar / Related stay conservative', (t) => {
   let exactClaims = 0;
@@ -26,4 +26,23 @@ test('canonical relationship frozen gate: Exact / Similar / Related stay conserv
   assert.ok(exactClaims > 0, 'gate must exercise a real EXACT claim');
   assert.equal(falseExact, 0, 'false EXACT is a hard failure');
   t.diagnostic(JSON.stringify({ version: 1, cases: observed.length, exactClaims, falseExact, observed }));
+});
+
+
+test('shared per-candidate classifier can produce Exact, Similar and Related in one result set', () => {
+  const relationships = canonicalRelationshipCases.slice(0, 3).map((item) =>
+    classifyCanonicalRelationship(item.description, item.candidate, item.comparison));
+  assert.deepEqual(relationships, ['EXACT', 'SIMILAR', 'RELATED']);
+});
+
+test('shared per-candidate classifier agrees with normal verification relationship', () => {
+  for (const item of canonicalRelationshipCases) {
+    const verified = verifyCandidate(item.description, item.candidate, item.comparison).product;
+    assert.ok(verified, item.id);
+    assert.equal(
+      classifyCanonicalRelationship(item.description, item.candidate, item.comparison),
+      verified.relationship,
+      item.id,
+    );
+  }
 });
