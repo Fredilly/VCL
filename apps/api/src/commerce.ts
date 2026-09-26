@@ -18,6 +18,8 @@ export type ProductContext = {
   timestamp_ms?: number | null;
 };
 
+export type CanonicalRelationship = 'EXACT' | 'SIMILAR' | 'RELATED';
+
 export type ProductCandidate = {
   id: string;
   title: string;
@@ -30,6 +32,8 @@ export type ProductCandidate = {
   price: string | null;
   currency: string | null;
   result_class: 'EXACT' | 'LIKELY' | 'SIMILAR';
+  /** Canonical product/design relationship. Separate from result_class confidence. */
+  relationship?: CanonicalRelationship;
   metadata?: { brand?: string; model?: string; category?: string; description?: string; gender?: string; color?: string; sleeve?: string; material?: string; freshness?: string };
   verification_status?: 'multimodal' | 'metadata_only';
   verification_image_similarity?: number;
