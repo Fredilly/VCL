@@ -34,6 +34,56 @@ creator/publisher provenance
 
 Raw copyrighted frames are not the moat and should not be accumulated casually.
 
+## ContentProductGraph and automated video mapping
+
+A first-class future moat is the ability to resolve products in commercially valuable video before a viewer has to pay the full cost of fresh inference.
+
+Separate the graph into four related layers:
+
+1. **ContentProductGraph** — where and when a canonical product appears in content, represented as an appearance window/object track rather than a single timestamp.
+2. **CanonicalProductGraph** — normalized product identity across videos, catalogs, merchants, identifiers, images, and historical mappings.
+3. **Evidence layer** — why a mapping exists: visual evidence, text/logo evidence, partner metadata, verification, corrections, provenance, and confidence.
+4. **Offer layer** — current merchant availability, price, geography, and commercial destination. Offer freshness is independent from product identity.
+
+Target future partner flow:
+
+```text
+new partner video
+  -> automated ingestion
+  -> sparse / scene-aware frame sampling
+  -> product/object detection + tracking
+  -> cheap routing / decision layer
+  -> existing canonical product lookup first
+  -> candidate retrieval + multi-frame verification on misses
+  -> ContentProductGraph mapping
+  -> current merchant offers
+```
+
+Partners should not be required to manually tag every product or submit SKU spreadsheets. Where platform and partner permissions allow, Scoop should detect new partner content and build mappings automatically. Partner or sponsor catalogs are optional high-value evidence because they reduce the candidate search space; they are not a requirement for the system to work.
+
+The decision/routing layer may use Jev or a future replaceable equivalent to skip redundant frames, prioritize commercially useful scenes, choose graph lookup versus fresh resolution, and reduce expensive provider calls. Jev is not product truth. Any claimed cost or latency gain must be benchmarked.
+
+Do not indiscriminately crawl or pre-map all of YouTube. Build coverage demand-first:
+- paying partner videos,
+- high-value partner back catalogs,
+- products repeatedly requested by users,
+- successful Scoop resolutions that can be reused,
+- corrections and confirmed identities.
+
+Every successful resolution should be capable of leaving reusable derived evidence so a later Scoop can become a graph hit instead of repeating the entire inference pipeline.
+
+### Build timing
+
+Reserve this architecture now, but do not build the automated ingestion system before commercial demand justifies it.
+
+Implementation trigger:
+- **3 paying partner/creator clients** requesting automated video integration, or
+- **1 anchor partner** with enough recurring video volume or revenue to justify the work.
+
+Before that trigger, launch alpha, instrument reuse opportunities, measure real demand, and protect founder/engineering attention from premature infrastructure work.
+
+Tracking issue: GitHub #249.
+
 ## Compounding loops
 
 ### Recognition loop
