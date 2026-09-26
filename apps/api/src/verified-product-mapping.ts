@@ -1,7 +1,7 @@
 import type { ProductCandidate } from './commerce.js';
 import type { ObjectDescription } from './types.js';
 
-export type VerifiedProductProvenance = 'creator_verified' | 'brand_verified' | 'admin_verified' | 'test_fixture';
+export type VerifiedProductProvenance = 'creator_verified' | 'brand_verified' | 'admin_verified' | 'automatic_verified' | 'test_fixture';
 
 export type VerifiedProductMapping = {
   platform: string;
@@ -76,7 +76,7 @@ export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProd
     if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
     const record = value as Record<string, unknown>;
     const provenance = record.provenance;
-    if (provenance !== 'creator_verified' && provenance !== 'brand_verified' && provenance !== 'admin_verified' && provenance !== 'test_fixture') return [];
+    if (provenance !== 'creator_verified' && provenance !== 'brand_verified' && provenance !== 'admin_verified' && provenance !== 'automatic_verified' && provenance !== 'test_fixture') return [];
     const required = ['platform', 'content_ref', 'object_type', 'brand', 'product_id', 'title', 'destination'] as const;
     if (required.some((key) => typeof record[key] !== 'string' || !(record[key] as string).trim())) return [];
     if (record.scope !== 'entire_video' && record.scope !== 'time_window') return [];
