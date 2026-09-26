@@ -162,12 +162,20 @@ export class VerifiedProductLedger {
       }
       const key = contentKey(platform, contentRef);
       const current = await this.storage.get<VerifiedProductMapping[]>(key) ?? [];
-      const next = current.filter((entry) => !(
-        entry.product_id === mapping.product_id &&
-        entry.scope === mapping.scope &&
-        entry.timestamp_start_ms === mapping.timestamp_start_ms &&
-        entry.timestamp_end_ms === mapping.timestamp_end_ms
-      ));
+      // One durable row per promoted product track. Re-promoting the same
+      // canonical product updates that track; promoting a different product adds
+      // another track for the same video instead of overwriting it.
+      const trackId = bounded(mapping.track_id ?? mapping.canonical_key, 220);
+      const next = current.filter((entry) => {
+        const existingTrackId = bounded(entry.track_id ?? entry.canonical_key, 220);
+        if (trackId && existingTrackId) return existingTrackId !== trackId;
+        return !(
+          entry.product_id === mapping.product_id &&
+          entry.scope === mapping.scope &&
+          entry.timestamp_start_ms === mapping.timestamp_start_ms &&
+          entry.timestamp_end_ms === mapping.timestamp_end_ms
+        );
+      });
       next.unshift(mapping);
       await this.storage.put(key, next.slice(0, 100));
       return Response.json({ accepted: true, mapping });

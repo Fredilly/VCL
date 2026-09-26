@@ -17,6 +17,9 @@ export type VerifiedProductMapping = {
   image_reference?: string | null;
   provider?: string | null;
   canonical_key?: string | null;
+  // A promoted product becomes a persistent identity track for this video.
+  // Track membership is resolved from canonical visual/text evidence, not time alone.
+  track_id?: string | null;
   provenance: VerifiedProductProvenance;
 };
 
@@ -99,6 +102,9 @@ export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProd
       provider: typeof record.provider === 'string' && record.provider.trim() ? record.provider.trim() : null,
       ...(typeof record.canonical_key === 'string' && record.canonical_key.trim()
         ? { canonical_key: record.canonical_key.trim().slice(0, 220) }
+        : {}),
+      ...(typeof record.track_id === 'string' && record.track_id.trim()
+        ? { track_id: record.track_id.trim().slice(0, 220) }
         : {}),
       provenance,
     }];
