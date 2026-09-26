@@ -7,7 +7,7 @@ import { normalizeObjectDescription } from './types.js';
 import { mergeOcrEvidence, shouldRunOcrRecovery } from './ocr-evidence.js';
 import { parseSelectionPoint, TargetLocalizationError, type SelectionPoint } from './selection-target.js';
 import { CommerceNoResultsError, buildProductQueryVariants, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
-import { highConfidenceMetadataContradiction, verifyCandidate, rankVerified } from './candidate-verification.js';
+import { classifyCanonicalRelationship, highConfidenceMetadataContradiction, verifyCandidate, rankVerified } from './candidate-verification.js';
 import { canonical } from './verification-evidence.js';
 import { candidateKey, compareCandidateImages, parseSourceImage, imageRequestBudget } from './candidate-images.js';
 import type { ImageComparison } from './verification-evidence.js';
@@ -527,23 +527,23 @@ export async function refreshVerifiedOffers(
   }
 
   const exactOfferIds = new Set(visualExact.map((product) => product.id));
-  const visualAlternatives = needsVisual.slice(0, 8).flatMap((product) => {
+  const visualAlternatives = needsVisual.slice(0, 8).flatMap((product): ProductCandidate[] => {
     if (exactOfferIds.has(product.id)) return [];
     const comparison = offerComparisonsForRelationship.get(product.id);
-    if (!comparison) return [];
-    const relationship: 'SIMILAR' | 'RELATED' = comparison.similarity >= 0.6 ? 'SIMILAR' : 'RELATED';
+    if (!comparison || !visual) return [];
+    const relationship = classifyCanonicalRelationship(visual.description, product, comparison);
     return [{
       ...product,
-      result_class: 'SIMILAR' as const,
+      result_class: 'SIMILAR',
       relationship,
-      verification_status: 'multimodal' as const,
+      verification_status: 'multimodal',
       verification_image_similarity: comparison.similarity,
       verification_image_confidence: comparison.confidence,
       verification_reasons: [
         ...(product.verification_reasons ?? []),
         relationship === 'SIMILAR'
-          ? 'Visually similar to the verified canonical product, but exact identity was not confirmed'
-          : 'Related candidate; canonical design identity was not confirmed',
+          ? 'Same product idea/design family, but canonical identity was not confirmed'
+          : 'Related product; canonical design identity was not confirmed',
       ],
     }];
   });
