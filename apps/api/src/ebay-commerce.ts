@@ -85,13 +85,49 @@ export class EbayCommerceProvider implements CommerceProvider {
   }
 
   async getItemById(itemId: string, query: ProductQuery): Promise<ProductCandidate | null> {
-    if (!itemId.trim()) return null;
+    const rawId = itemId.trim();
+    if (!rawId) return null;
     const token = await this.auth.getAccessToken();
     const baseUrl = this.auth.getBrowseBaseUrl();
-    const url = new URL(`/buy/browse/v1/item/${encodeURIComponent(itemId.trim())}`, baseUrl);
+
+    const fetchItem = async (id: string): Promise<ProductCandidate | null> => {
+      const url = new URL(`/buy/browse/v1/item/${encodeURIComponent(id)}`, baseUrl);
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
+          },
+          signal: AbortSignal.timeout(this.timeoutMs),
+        });
+      } catch {
+        return null;
+      }
+      if (!response.ok) return null;
+      try {
+        const item = await response.json() as EbayItemSummary;
+        return item.title ? normalizeItem(item, query) : null;
+      } catch {
+        return null;
+      }
+    };
+
+    // Browse search returns REST item IDs such as v1|307197731843|607037825827.
+    // Older verified mappings only retained the legacy listing ID from /itm/.
+    // The item endpoint may not resolve that legacy ID directly, so first try
+    // the supplied ID, then resolve its current REST ID through Browse search.
+    const direct = await fetchItem(rawId);
+    if (direct) return direct;
+    if (!/^\d+$/.test(rawId)) return null;
+
+    const searchUrl = new URL('/buy/browse/v1/item_summary/search', baseUrl);
+    searchUrl.searchParams.set('q', rawId);
+    searchUrl.searchParams.set('limit', '12');
     let response: Response;
     try {
-      response = await fetch(url, {
+      response = await fetch(searchUrl, {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -104,8 +140,12 @@ export class EbayCommerceProvider implements CommerceProvider {
     }
     if (!response.ok) return null;
     try {
-      const item = await response.json() as EbayItemSummary;
-      return item.title ? normalizeItem(item, query) : null;
+      const payload = await response.json() as { itemSummaries?: EbayItemSummary[] };
+      const match = (payload.itemSummaries ?? []).find((item) => {
+        const id = String(item.itemId ?? '');
+        return id === rawId || id.split('|').includes(rawId);
+      });
+      return match?.title ? normalizeItem(match, query) : null;
     } catch {
       return null;
     }
