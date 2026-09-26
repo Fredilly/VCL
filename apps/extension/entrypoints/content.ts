@@ -181,10 +181,9 @@ function productSourceLabel(product: ProductCandidate): string | null {
 
 async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, eventId: string, adminPayload?: { description: ObjectDescription; context: ReturnType<typeof surfaceContext>; timestamp_ms: number }) {
   const admin = adminPayload ? await browser.runtime.sendMessage({ type: 'VCL_ADMIN_STATUS' }).catch(() => ({ admin: false })) : { admin: false };
-  const heading = document.createElement('div');
-  heading.textContent = `Products · ${commerce.products.length} · ${formatLatency(commerce.latency_ms)}`;
-  Object.assign(heading.style, { fontWeight: '650', margin: '18px 0 8px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,.10)', letterSpacing: '-0.01em' });
-  panel.appendChild(heading);
+  const resultsDivider = document.createElement('div');
+  Object.assign(resultsDivider.style, { marginTop: '18px', paddingTop: '14px', borderTop: '1px solid rgba(255,255,255,.10)' });
+  panel.appendChild(resultsDivider);
 
   if (admin?.admin && commerce.verified_mapping?.reuse === 'same_video' && !commerce.verified_mapping.hit) {
     const debug = document.createElement('div');
@@ -221,7 +220,38 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
     return;
   }
 
-  for (const product of commerce.products.slice(0, 5)) {
+  const relationshipOf = (product: ProductCandidate): 'EXACT' | 'SIMILAR' | 'RELATED' =>
+    product.relationship ?? (product.result_class === 'EXACT' ? 'EXACT' : 'SIMILAR');
+  const exactProducts = commerce.products.filter((product) => relationshipOf(product) === 'EXACT');
+  const similarProducts = commerce.products.filter((product) => relationshipOf(product) === 'SIMILAR');
+  const visibleProducts = [...exactProducts, ...similarProducts].slice(0, 8);
+  let currentSection: 'EXACT' | 'SIMILAR' | null = null;
+
+  const appendSectionHeading = (relationship: 'EXACT' | 'SIMILAR') => {
+    const section = document.createElement('div');
+    const title = document.createElement('div');
+    const detail = document.createElement('div');
+    title.textContent = relationship === 'EXACT' ? 'Exact matches' : 'Similar options';
+    detail.textContent = relationship === 'EXACT'
+      ? `Same design · ${formatLatency(commerce.latency_ms)}`
+      : 'Same idea, different design';
+    Object.assign(section.style, {
+      margin: relationship === 'EXACT' ? '0 0 8px' : '20px 0 8px',
+      paddingTop: relationship === 'EXACT' ? '0' : '16px',
+      borderTop: relationship === 'EXACT' ? 'none' : '1px solid rgba(255,255,255,.10)',
+    });
+    Object.assign(title.style, { fontSize: '15px', fontWeight: '700', letterSpacing: '-0.015em', lineHeight: '1.25' });
+    Object.assign(detail.style, { marginTop: '3px', fontSize: '12px', opacity: '0.58', lineHeight: '1.35' });
+    section.append(title, detail);
+    panel.appendChild(section);
+  };
+
+  for (const product of visibleProducts) {
+    const relationship = relationshipOf(product);
+    if (relationship !== currentSection) {
+      currentSection = relationship;
+      appendSectionHeading(relationship);
+    }
     const card = document.createElement('div');
     Object.assign(card.style, {
       margin: '8px 0 0',
@@ -260,7 +290,6 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
     const meta = document.createElement('div');
     const isScoopVerified = ['admin_verified', 'creator_verified', 'brand_verified', 'test_fixture'].includes(product.provenance ?? '');
     const parts = [
-      product.relationship ?? (!isScoopVerified ? product.result_class : null),
       product.price && product.currency ? `${product.price} ${product.currency}` : null,
     ];
     if (__VCL_DEBUG_PROVENANCE__ && product.provider) parts.push(`source: ${product.provider}`);
