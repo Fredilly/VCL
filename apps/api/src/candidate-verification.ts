@@ -137,7 +137,7 @@ function groundedIdentity(description: ObjectDescription, observed: Evidence, co
   });
 }
 
-function canonicalRelationship(
+export function canonicalRelationship(
   description: ObjectDescription,
   candidate: ProductCandidate,
   comparison: ImageComparison | undefined,
