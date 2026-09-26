@@ -103,3 +103,47 @@ test('conflicting identity evidence fails closed', async () => {
   assert.equal((await send(original)).status, 200);
   assert.equal((await send(conflicting)).status, 409);
 });
+
+
+test('legacy admin verified mapping is backfilled with canonical link', async () => {
+  const values = new Map();
+  const object = new ledger.VerifiedProductLedger({
+    storage: {
+      async get(key) { return values.get(key); },
+      async put(key, value) { values.set(key, value); },
+    },
+  });
+
+  const namespace = {
+    idFromName(name) { return name; },
+    get() {
+      return {
+        fetch(input, init) {
+          return object.fetch(new Request(input, init));
+        },
+      };
+    },
+  };
+  const env = { VERIFIED_PRODUCT_LEDGER: namespace };
+
+  await ledger.persistAdminVerifiedMapping(env, mapping);
+  const legacy = await ledger.durableVerifiedMappings(env, mapping.platform, mapping.content_ref);
+  assert.equal(legacy[0].canonical_key, undefined);
+
+  const upgraded = await ledger.backfillLegacyAdminCanonicalMappings(env, legacy);
+  assert.match(upgraded[0].canonical_key, /^product:v1:/);
+
+  const stored = await ledger.durableVerifiedMappings(env, mapping.platform, mapping.content_ref);
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].canonical_key, upgraded[0].canonical_key);
+
+  const canonical = await ledger.durableCanonicalProductIdentity(env, upgraded[0].canonical_key);
+  assert.equal(canonical?.title, mapping.title);
+  assert.equal(canonical?.merchant_refs[0].item_id, mapping.product_id);
+});
+
+test('legacy non-admin mapping is not upgraded implicitly', async () => {
+  const fixture = { ...mapping, provenance: 'test_fixture' };
+  const result = await ledger.backfillLegacyAdminCanonicalMappings({}, [fixture]);
+  assert.equal(result[0].canonical_key, undefined);
+});

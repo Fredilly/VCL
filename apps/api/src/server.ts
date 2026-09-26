@@ -29,7 +29,7 @@ export { FeedbackLedger } from './feedback-ledger.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
-import { durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
+import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
 import { eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
@@ -1185,7 +1185,10 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       const context = normalizeContext(record.context);
       const contentRef = context?.content_ref ?? null;
       const verifiedResolutionStarted = Date.now();
-      const durableMappings = await durableVerifiedMappings(env, context?.platform ?? null, contentRef).catch(() => []);
+      let durableMappings = await durableVerifiedMappings(env, context?.platform ?? null, contentRef).catch(() => []);
+      if (durableMappings.some((mapping) => mapping.provenance === 'admin_verified' && !mapping.canonical_key)) {
+        durableMappings = await backfillLegacyAdminCanonicalMappings(env, durableMappings).catch(() => durableMappings);
+      }
       let verifiedMapping = lookupVerifiedProductMapping({
         rawRegistry: env.VERIFIED_PRODUCT_MAPPINGS_JSON,
         mappings: durableMappings,

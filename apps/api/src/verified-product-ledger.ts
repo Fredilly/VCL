@@ -1,5 +1,5 @@
 import type { VerifiedProductMapping } from './verified-product-mapping.js';
-import { mergeCanonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
+import { canonicalProductIdentity, mergeCanonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 
 type DurableObjectStubLike = { fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> };
 export type VerifiedProductLedgerNamespaceLike = {
@@ -75,6 +75,27 @@ export async function durableCanonicalProductIdentity(
   if (!canonicalKey) return null;
   const result = await postJson<{ identity?: CanonicalProductIdentity | null }>(env, '/canonical/get', { canonical_key: canonicalKey });
   return result?.identity ?? null;
+}
+
+export async function backfillLegacyAdminCanonicalMappings(
+  env: VerifiedProductLedgerEnv,
+  mappings: VerifiedProductMapping[],
+): Promise<VerifiedProductMapping[]> {
+  return await Promise.all(mappings.map(async (mapping) => {
+    if (mapping.canonical_key || mapping.provenance !== 'admin_verified') return mapping;
+    try {
+      const canonical = canonicalProductIdentity({
+        mapping,
+        model: null,
+        merchantItemId: mapping.product_id,
+        visibleText: [],
+      });
+      const savedIdentity = await persistCanonicalProductIdentity(env, canonical);
+      return await persistAdminVerifiedMapping(env, { ...mapping, canonical_key: savedIdentity.canonical_key });
+    } catch {
+      return mapping;
+    }
+  }));
 }
 
 function contentKey(platform: string, contentRef: string): string {
