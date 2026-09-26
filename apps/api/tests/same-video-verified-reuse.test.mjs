@@ -329,3 +329,57 @@ test('same-slogan offer with a critical visual contradiction does not inherit ex
   });
   assert.equal(exact.has('offer-a'), false);
 });
+
+
+test('unique promoted track reconnects from distinctive fragmented slogan without visual comparison', () => {
+  const promoted = { ...mapping, track_id: identity.canonical_key };
+  const result = mod.distinctiveTextSameVideoReuse({
+    description,
+    candidates: [{ mapping: promoted, identity }],
+  });
+  assert.equal(result.mapping?.product_id, 'merchant-item-1');
+  assert.equal(result.reason, 'distinctive_text_exact');
+  assert.equal(result.requires_visual, false);
+});
+
+test('distinctive text shortcut does not apply to legacy non-track mappings', () => {
+  const result = mod.distinctiveTextSameVideoReuse({
+    description,
+    candidates: [{ mapping, identity }],
+  });
+  assert.equal(result.mapping, null);
+});
+
+test('two promoted tracks matching the same distinctive text fail closed as ambiguous', () => {
+  const promoted = { ...mapping, track_id: identity.canonical_key };
+  const secondIdentity = { ...identity, canonical_key: 'product:v1:shirt-2' };
+  const secondMapping = {
+    ...mapping,
+    product_id: 'merchant-item-2',
+    canonical_key: secondIdentity.canonical_key,
+    track_id: secondIdentity.canonical_key,
+  };
+  const result = mod.distinctiveTextSameVideoReuse({
+    description,
+    candidates: [
+      { mapping: promoted, identity },
+      { mapping: secondMapping, identity: secondIdentity },
+    ],
+  });
+  assert.equal(result.mapping, null);
+  assert.equal(result.reason, 'ambiguous');
+});
+
+test('different distinctive slogan does not reconnect to promoted track', () => {
+  const promoted = { ...mapping, track_id: identity.canonical_key };
+  const result = mod.distinctiveTextSameVideoReuse({
+    description: {
+      ...description,
+      visible_text: ['EATING IS MY LOVE LANGUAGE'],
+      logos_markings: ['eating is my love language'],
+      search_terms: ['eating is my love language shirt'],
+    },
+    candidates: [{ mapping: promoted, identity }],
+  });
+  assert.equal(result.mapping, null);
+});
