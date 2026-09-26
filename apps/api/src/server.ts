@@ -402,7 +402,7 @@ export async function refreshVerifiedOffers(
   const makeExact = (product: ProductCandidate, reason = `${mapping.provenance} product identity; same verified SKU/model`): ProductCandidate => ({
     ...product,
     result_class: 'EXACT',
-    relationship: 'EXACT',
+    relationship: 'EXACT' as const,
     provenance: mapping.provenance,
     provider: product.provider || mapping.provider || undefined,
     identity_key: identityKey,
@@ -596,7 +596,7 @@ export async function refreshVerifiedOffers(
           currency: product.currency ?? null,
           availability: null,
           fetched_at: new Date().toISOString(),
-          relationship: 'EXACT',
+          relationship: 'EXACT' as const,
         })).filter((ref) => Boolean(ref.destination)),
       };
       await persistCanonicalProductIdentity(visual.env, learned).catch(() => null);
@@ -1175,7 +1175,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
               currency: typeof product.currency === 'string' ? product.currency : null,
               availability: null,
               fetched_at: new Date().toISOString(),
-              relationship: 'EXACT',
+              relationship: 'EXACT' as const,
             }],
           });
         } else {
