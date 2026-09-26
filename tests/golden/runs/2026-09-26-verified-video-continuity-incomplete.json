@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "suite": "golden",
+  "session_id": "2026-09-26-verified-video-continuity",
+  "run_date": "2026-09-26",
+  "notes": "Frozen URLs were opened three times in a dedicated test browser for playback preflight only. The branch API has no local live-provider credentials. No frozen selection was submitted to the changed backend; this is not Golden product-regression evidence. No frames or case definitions were changed.",
+  "cases": [
+    {
+      "case_id": "golden-001-billions-tie",
+      "url_at_time": "https://youtu.be/T-bpMn0VMYk?t=157",
+      "target_object": "tie on the left",
+      "click_point": "tie knot",
+      "runs": [],
+      "playback_preflight": [
+        {
+          "attempt": 1,
+          "playback_ready": false,
+          "observed_time": 0,
+          "visible_error": "",
+          "preflight_ms": 75979
+        },
+        {
+          "attempt": 2,
+          "playback_ready": false,
+          "observed_time": 0,
+          "visible_error": "",
+          "preflight_ms": 51823
+        },
+        {
+          "attempt": 3,
+          "playback_ready": true,
+          "observed_time": 158.034648,
+          "visible_error": "",
+          "preflight_ms": 39713
+        }
+      ]
+    },
+    {
+      "case_id": "golden-002-casio-f91w",
+      "url_at_time": "https://youtu.be/CT0mvnFbOYQ?t=2",
+      "target_object": "Casio watch",
+      "click_point": "center of watch face",
+      "runs": [],
+      "playback_preflight": [
+        {
+          "attempt": 1,
+          "playback_ready": false,
+          "observed_time": 0,
+          "visible_error": "",
+          "preflight_ms": 63482
+        },
+        {
+          "attempt": 2,
+          "playback_ready": false,
+          "observed_time": 0,
+          "visible_error": "",
+          "preflight_ms": 59904
+        },
+        {
+          "attempt": 3,
+          "playback_ready": true,
+          "observed_time": 3.375864,
+          "visible_error": "",
+          "preflight_ms": 40738
+        }
+      ]
+    },
+    {
+      "case_id": "golden-003-hugo-boss-bottled",
+      "url_at_time": "https://youtu.be/jndGRB5Il3k?t=7",
+      "target_object": "perfume bottle",
+      "click_point": "center/body of perfume bottle",
+      "runs": [],
+      "playback_preflight": [
+        {
+          "attempt": 1,
+          "playback_ready": false,
+          "observed_time": 0,
+          "visible_error": "",
+          "preflight_ms": 57581
+        },
+        {
+          "attempt": 2,
+          "playback_ready": false,
+          "observed_time": 0,
+          "visible_error": "",
+          "preflight_ms": 62579
+        },
+        {
+          "attempt": 3,
+          "playback_ready": true,
+          "observed_time": 3.116748,
+          "visible_error": "",
+          "preflight_ms": 24193
+        }
+      ]
+    },
+    {
+      "case_id": "golden-004-white-denim-jacket",
+      "url_at_time": "https://youtu.be/Fr8xhEDNhfU?t=121",
+      "target_object": "white denim jacket",
+      "click_point": "side of jacket",
+      "runs": [],
+      "playback_preflight": [
+        {
+          "attempt": 1,
+          "playback_ready": false,
+          "observed_time": 0,
+          "visible_error": "",
+          "preflight_ms": 56718
+        },
+        {
+          "attempt": 2,
+          "playback_ready": false,
+          "observed_time": 0,
+          "visible_error": "",
+          "preflight_ms": 52609
+        },
+        {
+          "attempt": 3,
+          "playback_ready": true,
+          "observed_time": 1.299879,
+          "visible_error": "",
+          "preflight_ms": 26578
+        }
+      ]
+    },
+    {
+      "case_id": "golden-005-dior-book-tote",
+      "url_at_time": "https://youtu.be/4Gmrv8KEuTo?t=504",
+      "target_object": "handbag",
+      "click_point": "bag surface",
+      "runs": [],
+      "playback_preflight": [
+        {
+          "attempt": 1,
+          "playback_ready": true,
+          "observed_time": 504,
+          "visible_error": "",
+          "preflight_ms": 37904
+        },
+        {
+          "attempt": 2,
+          "playback_ready": true,
+          "observed_time": 512.403719,
+          "visible_error": "",
+          "preflight_ms": 43012
+        },
+        {
+          "attempt": 3,
+          "playback_ready": true,
+          "observed_time": 504.536099,
+          "visible_error": "",
+          "preflight_ms": 28702
+        }
+      ]
+    }
+  ],
+  "validation_status": "INCOMPLETE",
+  "baseline_comparison": {
+    "baseline": "2026-09-16-groq-qwen3.6.json",
+    "pass_rate": null,
+    "failure_class": null,
+    "confidence": null,
+    "latency": null,
+    "conclusion": "Not comparable: end-to-end cases were not executed. Golden gate remains pending before merge."
+  }
+}

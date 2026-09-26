@@ -219,7 +219,7 @@ export function confirmSameVideoVisual(
       mapping: null,
       canonical_key: null,
       confidence: 0,
-      reason: 'visual_rejected',
+      reason: 'weak_evidence',
       visual_similarity: comparison.similarity,
       visual_confidence: comparison.confidence,
     };
@@ -250,18 +250,13 @@ export function eligibleSameVideoCanonicalCandidates(input: {
   for (const candidate of input.candidates) {
     const { mapping, identity } = candidate;
     if (!mapping.canonical_key || mapping.canonical_key !== identity.canonical_key) continue;
-    if (!objectCompatible(identity, input.description)) continue;
-
-    const expectedBrand = normalizeIdentityText(identity.brand);
-    const observedBrand = normalizeIdentityText(input.description.brand_candidate);
-    if (expectedBrand && observedBrand && expectedBrand !== observedBrand) continue;
-
-    const expectedModel = normalizeIdentityText(identity.model);
-    const observedModel = normalizeIdentityText(input.description.model_candidate);
-    if (expectedModel && observedModel && expectedModel !== observedModel) continue;
-
-    const color = sameColor(identity, input.description);
-    if (color === false) continue;
+    // Discovery hypotheses are not observations that can revoke saved identity.
+    // Use only the broad object family to bound comparison; pixels decide whether
+    // a different subtype, brand, model or color is a real contradiction.
+    const expectedCategory = canonical('category', identity.object_type);
+    const observedCategory = canonical('category', input.description.category);
+    if (!objectCompatible(identity, input.description)
+      && expectedCategory && observedCategory && expectedCategory !== observedCategory) continue;
 
     if (!unique.has(identity.canonical_key)) unique.set(identity.canonical_key, candidate);
   }
@@ -303,10 +298,11 @@ export function selectSameVideoVisualWinner(input: {
 }): SameVideoReuseDecision {
   const confirmed: SameVideoReuseDecision[] = [];
   let sawComparison = false;
+  let unresolved = false;
 
   for (const { mapping, identity } of input.candidates) {
     const comparison = input.comparisons.get(identity.canonical_key);
-    if (!comparison) continue;
+    if (!comparison) { unresolved = true; continue; }
     sawComparison = true;
     const decision: SameVideoReuseDecision = {
       mapping,
@@ -317,6 +313,7 @@ export function selectSameVideoVisualWinner(input: {
     };
     const result = confirmSameVideoVisual(decision, comparison);
     if (result.mapping && result.reason === 'visual_confirmed') confirmed.push(result);
+    if (result.reason === 'weak_evidence') unresolved = true;
   }
 
   if (confirmed.length === 1) return confirmed[0];
@@ -332,7 +329,7 @@ export function selectSameVideoVisualWinner(input: {
     mapping: null,
     canonical_key: null,
     confidence: 0,
-    reason: sawComparison ? 'visual_rejected' : 'visual_unavailable',
+    reason: !sawComparison ? 'visual_unavailable' : unresolved ? 'weak_evidence' : 'visual_rejected',
     ...(observed ? {
       visual_similarity: observed.similarity,
       visual_confidence: observed.confidence,
