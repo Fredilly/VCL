@@ -249,19 +249,14 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
   const appendSectionHeading = (relationship: 'EXACT' | 'SIMILAR') => {
     const section = document.createElement('div');
     const title = document.createElement('div');
-    const detail = document.createElement('div');
-    title.textContent = relationship === 'EXACT' ? 'Exact matches' : 'Similar options';
-    detail.textContent = relationship === 'EXACT'
-      ? 'Same design'
-      : 'Same idea, different design';
+    title.textContent = relationship === 'EXACT' ? 'Exact' : 'Similar';
     Object.assign(section.style, {
       margin: relationship === 'EXACT' ? '0 0 8px' : '20px 0 8px',
       paddingTop: relationship === 'EXACT' ? '0' : '16px',
       borderTop: relationship === 'EXACT' ? 'none' : '1px solid rgba(255,255,255,.10)',
     });
     Object.assign(title.style, { fontSize: '15px', fontWeight: '700', letterSpacing: '-0.015em', lineHeight: '1.25' });
-    Object.assign(detail.style, { marginTop: '3px', fontSize: '12px', opacity: '0.58', lineHeight: '1.35' });
-    section.append(title, detail);
+    section.appendChild(title);
     panel.appendChild(section);
   };
 
@@ -600,9 +595,8 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       attrs.textContent = verifiedProduct.brand ?? '';
       attrs.style.display = verifiedProduct.brand ? '' : 'none';
 
-      confidence.textContent = 'Matched from visible text and shirt details';
+      confidence.remove();
       identityConfidence.remove();
-      Object.assign(confidence.style, { opacity: '0.66', marginTop: '2px', fontSize: '12px', lineHeight: '1.4' });
 
       for (const control of improveControls) control.remove();
 
