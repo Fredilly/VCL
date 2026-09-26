@@ -610,6 +610,51 @@ export async function refreshVerifiedOffers(
 
   // Provider rows carry current price/currency. Put them ahead of remembered
   // canonical rows so dedupe keeps live commerce data for the same seller/item.
+  // Hydrate every remembered eBay Exact from Browse before rendering it.
+  // Canonical memory intentionally does not own volatile price data, so a
+  // remembered row must never be the final source of truth for price/currency.
+  if (mapping.canonical_key && visual?.env && rememberedExact.length) {
+    const ebay = providers.find(({ name, provider }) =>
+      name === 'ebay' && typeof (provider as CommerceProvider & { getItemById?: unknown }).getItemById === 'function',
+    );
+    if (ebay) {
+      const getItemById = (ebay.provider as CommerceProvider & {
+        getItemById(itemId: string, query: ProductQuery): Promise<ProductCandidate | null>;
+      }).getItemById.bind(ebay.provider);
+      const query: ProductQuery = {
+        query: mapping.title,
+        category: mapping.object_type,
+        subcategory: mapping.object_type,
+        brand: mapping.brand || null,
+        model: canonicalModel,
+        attributes: [],
+      };
+      rememberedExact = await Promise.all(rememberedExact.map(async (product) => {
+        const provider = verifiedSourceProviderName(product.provider || product.provenance, product.destination);
+        if (provider !== 'ebay') return product;
+        let itemId = product.id;
+        if (product.destination) {
+          try {
+            const url = new URL(product.destination);
+            const match = url.pathname.match(/\/itm\/(?:[^/]+\/)?([^/?#]+)/i);
+            if (match?.[1]) itemId = decodeURIComponent(match[1]);
+          } catch {}
+        }
+        if (!itemId) return product;
+        commerceCalls.ebay = (commerceCalls.ebay ?? 0) + 1;
+        if (!providersUsed.includes('ebay')) providersUsed.push('ebay');
+        const live = await getItemById(itemId, query).catch(() => null);
+        return live ? makeExact({
+          ...product,
+          ...live,
+          title: product.title || live.title,
+          brand: product.brand || live.brand,
+          image_reference: live.image_reference || product.image_reference,
+        }, 'live eBay offer for previously verified canonical product') : product;
+      }));
+    }
+  }
+
   const exactProducts = dedupeProducts([canonicalProduct, ...metadataExact, ...visualExact, ...visualAlternatives, ...rememberedExact]).slice(0, 8);
 
   // Teach canonical memory which merchant offers have now independently passed.
