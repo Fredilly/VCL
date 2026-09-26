@@ -1104,7 +1104,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             ...hintedIdentity,
             verified_at: new Date().toISOString(),
             merchant_refs: [{
-              source: mappingBase.provider,
+              source: mappingBase.provider ?? 'unknown',
               item_id: typeof product.id === 'string' ? product.id.trim().slice(0, 180) || null : null,
               destination: mappingBase.destination,
               image_reference: mappingBase.image_reference ?? null,
