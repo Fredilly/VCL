@@ -146,8 +146,7 @@ test('matching a guessed model to catalog metadata does not establish LIKELY', (
 test('canonical relationship never becomes EXACT from matching text alone', () => {
   const { description, candidate } = example(apparelCases[0]);
   description.visible_text = ['BUILDING IS MY LOVE LANGUAGE'];
-  candidate.title = 'Building is my Love Language t-shirt';
-  candidate.metadata = { category: 't-shirt' };
+  candidate.title = `${description.brand_candidate} Building is my Love Language ${description.subcategory}`;
   const product = verifyCandidate(description, candidate).product;
   assert.ok(product);
   assert.notEqual(product.relationship, 'EXACT');
