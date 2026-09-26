@@ -141,7 +141,26 @@ async function readAnalysisBody(request: Request): Promise<unknown> {
 
 function dedupeProducts(products: ProductCandidate[]) {
   const seen = new Set<string>(); const out: ProductCandidate[] = [];
-  for (const product of products) { const key = product.destination || `${product.provenance}:${product.id}`; if (seen.has(key)) continue; seen.add(key); out.push(product); if (out.length >= 8) break; }
+  for (const product of products) {
+    // Merchant item IDs are stable even when affiliate/canonical URLs differ.
+    // Prefer the freshest row with price data when duplicate offers are present.
+    const provider = (product.provider || product.provenance?.split(':')[0] || 'unknown').trim().toLowerCase();
+    const itemId = product.id?.trim();
+    let destinationKey = product.destination ?? '';
+    if (destinationKey) {
+      try {
+        const url = new URL(destinationKey);
+        url.search = '';
+        url.hash = '';
+        destinationKey = url.toString().replace(/\/$/, '');
+      } catch {}
+    }
+    const key = itemId ? `${provider}:${itemId}` : destinationKey || `${product.provenance}:unknown`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(product);
+    if (out.length >= 8) break;
+  }
   return out;
 }
 
@@ -388,7 +407,18 @@ export async function refreshVerifiedOffers(
     const exactLookup = (exactLookupSource.provider as CommerceProvider & {
       getItemById(itemId: string, query: ProductQuery): Promise<ProductCandidate | null>;
     }).getItemById.bind(exactLookupSource.provider);
-    exactSource = await exactLookup(mapping.product_id, query).catch(() => null);
+
+    // Older promoted mappings may store a canonical SKU in product_id rather than
+    // the merchant listing ID. Recover the eBay item ID from the saved URL first.
+    let lookupItemId = mapping.product_id;
+    if (exactLookupSource.name === 'ebay' && mapping.destination) {
+      try {
+        const url = new URL(mapping.destination);
+        const pathMatch = url.pathname.match(/\/itm\/(?:[^/]+\/)?([^/?#]+)/i);
+        if (pathMatch?.[1]) lookupItemId = decodeURIComponent(pathMatch[1]);
+      } catch {}
+    }
+    exactSource = await exactLookup(lookupItemId, query).catch(() => null);
     if (exactSource?.model) canonicalModel = exactSource.model;
   }
 
@@ -578,7 +608,9 @@ export async function refreshVerifiedOffers(
     }
   }
 
-  const exactProducts = dedupeProducts([canonicalProduct, ...rememberedExact, ...metadataExact, ...visualExact, ...visualAlternatives]).slice(0, 8);
+  // Provider rows carry current price/currency. Put them ahead of remembered
+  // canonical rows so dedupe keeps live commerce data for the same seller/item.
+  const exactProducts = dedupeProducts([canonicalProduct, ...metadataExact, ...visualExact, ...visualAlternatives, ...rememberedExact]).slice(0, 8);
 
   // Teach canonical memory which merchant offers have now independently passed.
   if (mapping.canonical_key && visual?.env && visualExact.length) {
