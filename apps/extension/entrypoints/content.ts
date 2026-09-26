@@ -32,6 +32,7 @@ type ProductCandidate = {
   price: string | null;
   currency: string | null;
   result_class: 'EXACT' | 'LIKELY' | 'SIMILAR';
+  relationship?: 'EXACT' | 'SIMILAR' | 'RELATED';
   brand?: string | null;
   model?: string | null;
   provenance?: string;
@@ -259,7 +260,7 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
     const meta = document.createElement('div');
     const isScoopVerified = ['admin_verified', 'creator_verified', 'brand_verified', 'test_fixture'].includes(product.provenance ?? '');
     const parts = [
-      !isScoopVerified ? product.result_class : null,
+      product.relationship ?? (!isScoopVerified ? product.result_class : null),
       product.price && product.currency ? `${product.price} ${product.currency}` : null,
     ];
     if (__VCL_DEBUG_PROVENANCE__ && product.provider) parts.push(`source: ${product.provider}`);
