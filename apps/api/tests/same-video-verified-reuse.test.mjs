@@ -293,3 +293,39 @@ test('same-video visual confirmation still rejects below 0.90 confidence', () =>
   assert.equal(result.mapping, null);
   assert.equal(result.reason, 'visual_rejected');
 });
+
+
+test('multiple merchant offers can independently inherit the same canonical exact identity', () => {
+  const offers = [{ id: 'offer-a' }, { id: 'offer-b' }, { id: 'lookalike' }];
+  const comparisons = new Map([
+    ['offer-a', { ...visualMatch, similarity: 0.94, confidence: 0.94 }],
+    ['offer-b', { ...visualMatch, similarity: 0.91, confidence: 0.93 }],
+    ['lookalike', { ...visualMatch, similarity: 0.79, confidence: 0.95 }],
+  ]);
+
+  const exact = mod.canonicalVisualExactOfferIds({ mapping, products: offers, comparisons });
+  assert.equal(exact.has('offer-a'), true);
+  assert.equal(exact.has('offer-b'), true);
+  assert.equal(exact.has('lookalike'), false);
+});
+
+test('same-slogan offer with a critical visual contradiction does not inherit exact', () => {
+  const comparisons = new Map([
+    ['offer-a', {
+      ...visualMatch,
+      similarity: 0.96,
+      confidence: 0.96,
+      candidate: {
+        ...visualMatch.candidate,
+        color: { value: 'white', confidence: 0.97, basis: 'image' },
+      },
+    }],
+  ]);
+
+  const exact = mod.canonicalVisualExactOfferIds({
+    mapping,
+    products: [{ id: 'offer-a' }],
+    comparisons,
+  });
+  assert.equal(exact.has('offer-a'), false);
+});

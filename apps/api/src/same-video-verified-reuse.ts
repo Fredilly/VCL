@@ -339,3 +339,24 @@ export function selectSameVideoVisualWinner(input: {
     } : {}),
   };
 }
+
+
+export function canonicalVisualExactOfferIds(input: {
+  mapping: VerifiedProductMapping;
+  products: Array<{ id: string }>;
+  comparisons: Map<string, ImageComparison | undefined>;
+}): Set<string> {
+  const exact = new Set<string>();
+  for (const product of input.products) {
+    const comparison = input.comparisons.get(product.id);
+    const confirmed = confirmSameVideoVisual({
+      mapping: input.mapping,
+      canonical_key: input.mapping.canonical_key ?? null,
+      confidence: 0.7,
+      reason: 'fingerprint_candidate',
+      requires_visual: true,
+    }, comparison);
+    if (confirmed.mapping && confirmed.reason === 'visual_confirmed') exact.add(product.id);
+  }
+  return exact;
+}
