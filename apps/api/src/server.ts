@@ -30,7 +30,7 @@ import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerc
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
-import { eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
+import { confirmSameVideoVisual, eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 export { AlphaAccessLedger } from './alpha-access.js';
@@ -337,7 +337,28 @@ async function sourceImageForVerifiedMapping(mapping: VerifiedProductMapping): P
 export async function refreshVerifiedOffers(
   providers: NamedCommerceProvider[],
   mapping: VerifiedProductMapping,
-): Promise<{ products: ProductCandidate[]; providers_used: string[]; commerce_calls: Record<string, number>; provider_retrieval_ms: number }> {
+  visual?: {
+    env: Env;
+    description: ReturnType<typeof normalizeObjectDescription>;
+    context?: ProductContext;
+    sourceImage?: ReturnType<typeof parseSourceImage>;
+  },
+): Promise<{
+  products: ProductCandidate[];
+  providers_used: string[];
+  commerce_calls: Record<string, number>;
+  provider_retrieval_ms: number;
+  verification_usage?: {
+    provider: string;
+    model: string;
+    requests: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    cost_usd?: number;
+  };
+  visual_compared?: number;
+}> {
   const started = Date.now();
   const sourceProviderName = verifiedSourceProviderName(mapping.provider, mapping.destination);
   const sourceProviders = sourceProviderName
@@ -348,11 +369,8 @@ export async function refreshVerifiedOffers(
   const commerceCalls: Record<string, number> = {};
 
   let exactSource: ProductCandidate | null = null;
-  let canonicalSku = mapping.product_id;
+  let canonicalModel: string | null = null;
 
-  // For eBay, fetch the verified listing directly first. This guarantees that
-  // the current listing image is preferred over a stale/missing saved image and
-  // lets us recover MPN/model metadata for finding other sellers of the same SKU.
   const exactLookupSource = sourceProviders.find(({ provider }) =>
     typeof (provider as CommerceProvider & { getItemById?: unknown }).getItemById === 'function',
   );
@@ -371,26 +389,25 @@ export async function refreshVerifiedOffers(
       getItemById(itemId: string, query: ProductQuery): Promise<ProductCandidate | null>;
     }).getItemById.bind(exactLookupSource.provider);
     exactSource = await exactLookup(mapping.product_id, query).catch(() => null);
-    if (exactSource?.model) canonicalSku = exactSource.model;
+    if (exactSource?.model) canonicalModel = exactSource.model;
   }
 
-  // The canonical row always gets a real source image when the source exposes
-  // one. Saved image -> exact provider item -> product-page metadata.
   const sourceImage = exactSource?.image_reference
     ?? mapping.image_reference
     ?? await sourceImageForVerifiedMapping(mapping);
   const hydratedMapping = sourceImage ? { ...mapping, image_reference: sourceImage } : mapping;
   const fallback = verifiedMappingProduct(hydratedMapping);
 
-  const makeExact = (product: ProductCandidate): ProductCandidate => ({
+  const identityKey = `verified:${verifiedIdentityKey(canonicalModel) || verifiedIdentityKey(mapping.product_id)}`;
+  const makeExact = (product: ProductCandidate, reason = `${mapping.provenance} product identity; same verified SKU/model`): ProductCandidate => ({
     ...product,
     result_class: 'EXACT',
     provenance: mapping.provenance,
     provider: product.provider || mapping.provider || undefined,
-    identity_key: `verified:${verifiedIdentityKey(canonicalSku) || verifiedIdentityKey(mapping.product_id)}`,
-    verification_status: 'metadata_only',
+    identity_key: identityKey,
+    verification_status: product.verification_status ?? 'metadata_only',
     verification_score: 100,
-    verification_reasons: [`${mapping.provenance} product identity; same verified SKU/model`],
+    verification_reasons: [...(product.verification_reasons ?? []), reason],
   });
 
   const canonicalProduct = exactSource
@@ -402,24 +419,22 @@ export async function refreshVerifiedOffers(
       })
     : fallback;
 
-  if (!sourceProviders.length) {
+  if (!providers.length) {
     return { products: [canonicalProduct], providers_used: providersUsed, commerce_calls: commerceCalls, provider_retrieval_ms: Date.now() - started };
   }
 
-  // Once exact identity is known, search only the original source for more
-  // offers of the SAME SKU/model. Never spend calls on broad/similar retrieval.
+  // A canonical product is the anchor. Search all configured commerce providers
+  // with product-level identity evidence, not the original merchant item id.
   const searchQuery: ProductQuery = {
-    query: canonicalSku || mapping.title,
+    query: canonicalModel || mapping.title,
     category: mapping.object_type,
     subcategory: mapping.object_type,
     brand: mapping.brand || null,
-    model: canonicalSku || null,
+    model: canonicalModel,
     attributes: [],
   };
 
-  const batches = await Promise.all(sourceProviders.map(async ({ name, provider }) => {
-    // eBay was already counted once for direct item hydration; this is a second,
-    // intentional call for other offers of the same SKU.
+  const batches = await Promise.all(providers.map(async ({ name, provider }) => {
     providersUsed.push(name);
     commerceCalls[name] = (commerceCalls[name] ?? 0) + 1;
     try {
@@ -430,21 +445,109 @@ export async function refreshVerifiedOffers(
     }
   }));
 
-  const expectedSku = verifiedIdentityKey(canonicalSku);
-  const exactOffers = batches.flat()
-    .filter((product) => {
-      if (product.model && expectedSku && verifiedIdentityKey(product.model) === expectedSku) return true;
-      if (exactSource?.id && product.id === exactSource.id) return true;
-      return verifiedOfferHasExactIdentity(mapping, product);
-    })
-    .map(makeExact);
+  const candidates = dedupeProducts(batches.flat());
+  const expectedSku = verifiedIdentityKey(canonicalModel);
+  const metadataExact: ProductCandidate[] = [];
+  const needsVisual: ProductCandidate[] = [];
 
-  // Exact source first, then every other distinct seller/listing for the same SKU.
+  for (const product of candidates) {
+    if (exactSource?.id && product.id === exactSource.id) {
+      metadataExact.push(makeExact(product));
+      continue;
+    }
+    if (product.model && expectedSku && verifiedIdentityKey(product.model) === expectedSku) {
+      metadataExact.push(makeExact(product));
+      continue;
+    }
+    if (verifiedOfferHasExactIdentity(mapping, product)) {
+      metadataExact.push(makeExact(product));
+      continue;
+    }
+    if (!product.image_reference) continue;
+    if (visual && !highConfidenceMetadataContradiction(visual.description, product)) needsVisual.push(product);
+  }
+
+  let visualExact: ProductCandidate[] = [];
+  let verificationUsage: {
+    provider: string;
+    model: string;
+    requests: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    cost_usd?: number;
+  } | undefined;
+  let visualCompared = 0;
+
+  if (visual?.sourceImage && needsVisual.length) {
+    const useOpenRouter = visual.env.VISION_PROVIDER === 'openrouter' && Boolean(visual.env.OPENROUTER_API_KEY);
+    const key = useOpenRouter ? visual.env.OPENROUTER_API_KEY : visual.env.GEMINI_API_KEY;
+    if (key) {
+      const model = useOpenRouter
+        ? (visual.env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL)
+        : (visual.env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
+      const images = await compareCandidateImages(
+        key,
+        model,
+        visual.sourceImage,
+        visual.description,
+        needsVisual.slice(0, 8),
+        visual.context,
+        imageRequestBudget(),
+        { provider: useOpenRouter ? 'openrouter' : 'gemini' },
+      ).catch(() => null);
+
+      if (images) {
+        verificationUsage = images.usage;
+        visualCompared = images.compared;
+        visualExact = needsVisual.slice(0, 8).flatMap((product) => {
+          const comparison = images.comparisons.get(candidateKey(product));
+          const confirmed = confirmSameVideoVisual({
+            mapping,
+            canonical_key: mapping.canonical_key ?? null,
+            confidence: 0.7,
+            reason: 'fingerprint_candidate',
+            requires_visual: true,
+          }, comparison);
+          if (!confirmed.mapping || confirmed.reason !== 'visual_confirmed') return [];
+          return [makeExact({
+            ...product,
+            verification_status: 'multimodal',
+            verification_image_similarity: comparison?.similarity,
+            verification_image_confidence: comparison?.confidence,
+          }, 'visual match to the verified canonical product')];
+        });
+      }
+    }
+  }
+
+  const exactProducts = dedupeProducts([canonicalProduct, ...metadataExact, ...visualExact]).slice(0, 8);
+
+  // Teach canonical memory which merchant offers have now independently passed.
+  if (mapping.canonical_key && visual?.env && visualExact.length) {
+    const existing = await durableCanonicalProductIdentity(visual.env, mapping.canonical_key).catch(() => null);
+    if (existing) {
+      const learned: CanonicalProductIdentity = {
+        ...existing,
+        verified_at: new Date().toISOString(),
+        merchant_refs: visualExact.map((product) => ({
+          source: product.provider || product.provenance || null,
+          item_id: product.id || null,
+          destination: product.destination ?? '',
+          image_reference: product.image_reference ?? null,
+        })).filter((ref) => Boolean(ref.destination)),
+      };
+      await persistCanonicalProductIdentity(visual.env, learned).catch(() => null);
+    }
+  }
+
   return {
-    products: dedupeProducts([canonicalProduct, ...exactOffers]).slice(0, 5),
+    products: exactProducts,
     providers_used: [...new Set(providersUsed)],
     commerce_calls: commerceCalls,
     provider_retrieval_ms: Date.now() - started,
+    ...(verificationUsage ? { verification_usage: verificationUsage } : {}),
+    visual_compared: visualCompared,
   };
 }
 
@@ -1258,7 +1361,12 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
       if (verifiedMapping) {
         const configuredProviders = commerceProviders(env);
-        const refreshed = await refreshVerifiedOffers(configuredProviders, verifiedMapping);
+        const refreshed = await refreshVerifiedOffers(configuredProviders, verifiedMapping, {
+          env,
+          description,
+          context,
+          sourceImage,
+        });
         const total_ms = Date.now() - verifiedResolutionStarted;
         recordAlphaScoop({
           telemetry: alphaTelemetry,
