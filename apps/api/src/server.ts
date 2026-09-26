@@ -545,7 +545,39 @@ export async function refreshVerifiedOffers(
     }];
   });
 
-  const exactProducts = dedupeProducts([canonicalProduct, ...metadataExact, ...visualExact, ...visualAlternatives]).slice(0, 8);
+  // Canonical memory is also a durable pool of merchant offers that already
+  // earned Exact. Read those refs back into results so a provider miss or a
+  // previously deleted timestamp mapping cannot strand a verified offer.
+  let rememberedExact: ProductCandidate[] = [];
+  if (mapping.canonical_key && visual?.env) {
+    const remembered = await durableCanonicalProductIdentity(visual.env, mapping.canonical_key).catch(() => null);
+    if (remembered) {
+      rememberedExact = remembered.merchant_refs
+        .filter((ref) => Boolean(ref.destination))
+        .map((ref) => makeExact({
+          id: ref.item_id || ref.destination,
+          title: remembered.title,
+          brand: remembered.brand,
+          model: remembered.model,
+          category: remembered.object_type,
+          image_reference: ref.image_reference,
+          provenance: remembered.provenance,
+          provider: ref.source || undefined,
+          destination: ref.destination,
+          price: null,
+          currency: null,
+          metadata: {
+            ...(remembered.brand ? { brand: remembered.brand } : {}),
+            ...(remembered.model ? { model: remembered.model } : {}),
+            category: remembered.object_type,
+            ...(remembered.color ? { color: remembered.color } : {}),
+            ...(remembered.material ? { material: remembered.material } : {}),
+          },
+        }, 'previously verified merchant offer from canonical memory'));
+    }
+  }
+
+  const exactProducts = dedupeProducts([canonicalProduct, ...rememberedExact, ...metadataExact, ...visualExact, ...visualAlternatives]).slice(0, 8);
 
   // Teach canonical memory which merchant offers have now independently passed.
   if (mapping.canonical_key && visual?.env && visualExact.length) {
