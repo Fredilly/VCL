@@ -119,6 +119,9 @@ export function chooseSameVideoVerifiedReuse(input: {
   for (const candidate of input.candidates) {
     const { mapping, identity } = candidate;
     if (!mapping.canonical_key || mapping.canonical_key !== identity.canonical_key) continue;
+    // Only durable promoted tracks may persist beyond their original observation window.
+    // Legacy rows keep their old time-scoped behavior until they are promoted again.
+    if (mapping.provenance === 'admin_verified' && mapping.track_id !== identity.canonical_key) continue;
     if (!objectCompatible(identity, input.description)) {
       if (strongestMiss.reason === 'no_candidate') strongestMiss = { mapping: null, canonical_key: null, confidence: 0, reason: 'object_mismatch' };
       continue;
