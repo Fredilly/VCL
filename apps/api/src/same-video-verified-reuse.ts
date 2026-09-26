@@ -242,6 +242,17 @@ export type SameVideoCanonicalCandidate = {
   identity: CanonicalProductIdentity;
 };
 
+export function verifiedProductMemoryCandidates(input: {
+  description: ObjectDescription;
+  candidates: SameVideoCanonicalCandidate[];
+}): SameVideoCanonicalCandidate[] {
+  // Once explicit VPM tracks exist for a video, recognition should compare against
+  // those verified memories rather than every historical canonical mapping. This
+  // reduces ambiguity and model work without relaxing any Exact threshold.
+  return eligibleSameVideoCanonicalCandidates(input).filter(({ mapping, identity }) =>
+    Boolean(mapping.track_id) && mapping.track_id === identity.canonical_key);
+}
+
 export function eligibleSameVideoCanonicalCandidates(input: {
   description: ObjectDescription;
   candidates: SameVideoCanonicalCandidate[];
