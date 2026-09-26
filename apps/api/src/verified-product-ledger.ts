@@ -42,13 +42,21 @@ export async function durableVerifiedMappings(
   return Array.isArray(result?.mappings) ? result!.mappings! : [];
 }
 
-export async function persistAdminVerifiedMapping(
+export async function persistVerifiedMapping(
   env: VerifiedProductLedgerEnv,
   mapping: VerifiedProductMapping,
 ): Promise<VerifiedProductMapping> {
   const result = await postJson<{ mapping?: VerifiedProductMapping }>(env, '/verify', mapping);
   if (!result?.mapping) throw new Error('verified product ledger unavailable');
   return result.mapping;
+}
+
+export async function persistAdminVerifiedMapping(
+  env: VerifiedProductLedgerEnv,
+  mapping: VerifiedProductMapping,
+): Promise<VerifiedProductMapping> {
+  if (mapping.provenance !== 'admin_verified') throw new Error('admin verified mapping requires admin provenance');
+  return await persistVerifiedMapping(env, mapping);
 }
 
 export async function revokeAdminVerifiedMapping(
@@ -157,7 +165,8 @@ export class VerifiedProductLedger {
       const mapping = await request.json() as VerifiedProductMapping;
       const platform = bounded(mapping.platform, 40);
       const contentRef = bounded(mapping.content_ref, 180);
-      if (!platform || !contentRef || mapping.provenance !== 'admin_verified') {
+      const durableProvenance = mapping.provenance === 'admin_verified' || mapping.provenance === 'automatic_verified';
+      if (!platform || !contentRef || !durableProvenance) {
         return Response.json({ error: 'Invalid verified mapping' }, { status: 400 });
       }
       const key = contentKey(platform, contentRef);
