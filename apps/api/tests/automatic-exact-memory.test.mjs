@@ -126,3 +126,40 @@ test('ledger accepts automatic verified mapping and keeps it addressable by vide
   assert.equal(body.mappings[0].canonical_key, result.identity.canonical_key);
   assert.equal(body.mappings[0].provenance, 'automatic_verified');
 });
+
+
+test('re-observing the same canonical product at a later timestamp replaces its video mapping', async () => {
+  const first = memory.automaticExactMemory(exact, description, context);
+  const later = memory.automaticExactMemory(exact, description, { ...context, timestamp_ms: 300000 });
+  assert.ok(first);
+  assert.ok(later);
+  assert.equal(first.mapping.canonical_key, later.mapping.canonical_key);
+
+  const values = new Map();
+  const object = new ledger.VerifiedProductLedger({
+    storage: {
+      async get(key) { return values.get(key); },
+      async put(key, value) { values.set(key, value); },
+    },
+  });
+
+  for (const mapping of [first.mapping, later.mapping]) {
+    const save = await object.fetch(new Request('https://verified-product-ledger/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(mapping),
+    }));
+    assert.equal(save.status, 200);
+  }
+
+  const lookup = await object.fetch(new Request('https://verified-product-ledger/lookup', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ platform: context.platform, content_ref: context.content_ref }),
+  }));
+  const body = await lookup.json();
+  assert.equal(body.mappings.length, 1);
+  assert.equal(body.mappings[0].canonical_key, first.mapping.canonical_key);
+  assert.equal(body.mappings[0].timestamp_start_ms, 295000);
+  assert.equal(body.mappings[0].timestamp_end_ms, 305000);
+});
