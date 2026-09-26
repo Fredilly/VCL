@@ -194,6 +194,108 @@ Recommended indexes when implemented:
 - `verified_product_assertion(content_id, timestamp_start_ms, timestamp_end_ms)`
 - `verified_product_assertion(canonical_product_id)`
 
+## Future ContentProductGraph entities
+
+These are reserved architectural entities, not an instruction to build the automated ingestion system during alpha.
+
+### content_asset
+- id
+- platform
+- external_id_hash
+- partner_id when applicable
+- published_at when known
+- ingestion_status
+- created_at
+
+Do not require a raw-video copy. Prefer stable platform/content references and derived evidence.
+
+### canonical_product
+- id
+- canonical_key
+- brand
+- model
+- category
+- sku_or_mpn when supported
+- gtin_upc_ean when supported
+- normalized_attributes_json
+- created_at
+- updated_at
+
+Merchant-specific offers and prices do not belong in canonical identity.
+
+### content_product_mapping
+- id
+- content_asset_id
+- canonical_product_id
+- timestamp_start_ms
+- timestamp_end_ms
+- object_track_or_region_reference
+- result_class
+- provenance
+- verification_status
+- created_at
+- updated_at
+
+Use appearance windows/object tracks rather than mapping only one timestamp. A product may remain visible for many seconds and should not be resolved repeatedly.
+
+### mapping_evidence
+- mapping_id
+- evidence_type
+- evidence_reference
+- source
+- confidence
+- created_at
+
+Possible evidence includes:
+- selected/derived visual attributes,
+- logos/text/marks,
+- neighboring-frame consistency,
+- partner/creator metadata,
+- catalog identifiers,
+- candidate-image verification,
+- user correction/confirmation,
+- historical canonical mappings.
+
+Raw video or persistent frame archives are not required for the graph.
+
+### partner_catalog_item
+Future optional normalization layer:
+- partner_id
+- partner_product_id
+- canonical_product_id when resolved
+- brand
+- model
+- sku_or_mpn
+- identifiers_json
+- attributes_json
+- product_image_references
+- availability_reference
+- updated_at
+
+Partner catalogs narrow retrieval but do not automatically establish EXACT identity.
+
+## Future graph and ingestion metrics
+
+Instrument during alpha where practical even before automated ingestion is built:
+- repeated content/product resolution opportunities
+- mapping reuse opportunities
+- estimated graph-hit rate
+- confirmed/corrected identities
+- partner requests for automatic ingestion
+
+When automated ingestion is implemented, add:
+- time from partner upload/detection to Scoop-ready
+- percent product appearances mapped automatically
+- graph hit rate
+- graph-hit latency
+- fresh-resolution latency
+- inference cost avoided through mapping reuse
+- mapping reuse across videos
+- false EXACT rate on graph-derived results
+- partner confirmation/correction rate
+
+Identity mappings and merchant offers have different lifecycles. Product identity in a video may remain stable while price, availability, affiliate routing, and merchant destinations must refresh independently.
+
 ## Ranking guardrail
 
 Issue #20 does not change matching or ranking.
