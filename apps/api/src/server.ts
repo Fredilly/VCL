@@ -141,7 +141,17 @@ async function readAnalysisBody(request: Request): Promise<unknown> {
 
 function dedupeProducts(products: ProductCandidate[]) {
   const seen = new Set<string>(); const out: ProductCandidate[] = [];
-  for (const product of products) { const key = product.destination || `${product.provenance}:${product.id}`; if (seen.has(key)) continue; seen.add(key); out.push(product); if (out.length >= 8) break; }
+  for (const product of products) {
+    // Merchant item IDs are the stable offer identity. URLs can vary by affiliate
+    // parameters or canonical/live refresh paths while still pointing to one offer.
+    const provider = product.provider?.trim().toLowerCase() || product.provenance?.split(':')[0]?.trim().toLowerCase() || 'unknown';
+    const id = product.id?.trim();
+    const key = id ? `${provider}:${id}` : (product.destination || `${product.provenance}:unknown`);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(product);
+    if (out.length >= 8) break;
+  }
   return out;
 }
 
