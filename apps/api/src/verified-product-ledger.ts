@@ -180,6 +180,7 @@ export class VerifiedProductLedger {
   private readonly storage: {
     get<T = unknown>(key: string): Promise<T | undefined>;
     put<T = unknown>(key: string, value: T): Promise<void>;
+    list?<T = unknown>(options?: { prefix?: string; limit?: number }): Promise<Map<string, T>>;
   };
 
   constructor(ctx: { storage: VerifiedProductLedger['storage'] }) {
@@ -206,7 +207,16 @@ export class VerifiedProductLedger {
     }
 
     if (path === '/canonical/list') {
-      const keys = await this.storage.get<string[]>(CANONICAL_INDEX_KEY) ?? [];
+      let keys = await this.storage.get<string[]>(CANONICAL_INDEX_KEY) ?? [];
+      if (this.storage.list) {
+        const legacyRows = await this.storage.list<CanonicalProductIdentity>({ prefix: 'canonical:product:', limit: 500 });
+        const legacyKeys = [...legacyRows.keys()].map((storageKey) => storageKey.replace(/^canonical:/, ''));
+        const merged = [...new Set([...keys, ...legacyKeys])].slice(0, 500);
+        if (merged.length !== keys.length) {
+          keys = merged;
+          await this.storage.put(CANONICAL_INDEX_KEY, keys);
+        }
+      }
       const identities = (await Promise.all(keys.slice(0, 500).map((key) =>
         this.storage.get<CanonicalProductIdentity>(canonicalKey(key)))))
         .filter((identity): identity is CanonicalProductIdentity => Boolean(identity));
