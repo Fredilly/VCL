@@ -86,6 +86,15 @@ export function canonicalMerchantOfferKey(ref: Pick<CanonicalMerchantRef, 'sourc
   return `${source}:${destination.toLowerCase()}`;
 }
 
+export function canonicalIdentityHasMerchantOffer(
+  identity: Pick<CanonicalProductIdentity, 'merchant_refs'>,
+  ref: Pick<CanonicalMerchantRef, 'source' | 'item_id' | 'destination'>,
+): boolean {
+  const target = canonicalMerchantOfferKey(ref);
+  return identity.merchant_refs.some((current) =>
+    (current.offer_key || canonicalMerchantOfferKey(current)) === target);
+}
+
 function sourceFromMapping(mapping: VerifiedProductMapping): string | null {
   const provider = bounded(mapping.provider, 80);
   if (provider) return provider.toLowerCase();
