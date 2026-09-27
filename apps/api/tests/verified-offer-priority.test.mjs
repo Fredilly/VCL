@@ -16,3 +16,10 @@ test('verified offer priority does not change VPM identity selection', () => {
   assert.match(server, /durableCanonicalProductIdentity\(visual\.env, mapping\.canonical_key\)/);
   assert.match(server, /identity_key: identityKey/);
 });
+
+
+test('re-promoting a known merchant offer reuses its canonical identity instead of forking a new VPM track', () => {
+  assert.match(server, /canonicalIdentityHasMerchantOffer\(identity, incomingOfferRef\)/);
+  assert.match(server, /const existingIdentity = hintedIdentity \?\? rememberedOfferIdentity/);
+  assert.match(server, /merchant_refs: \[incomingOfferRef\]/);
+});
