@@ -12,7 +12,7 @@ import { canonical } from './verification-evidence.js';
 import { candidateKey, compareCandidateImages, parseSourceImage, imageRequestBudget } from './candidate-images.js';
 import type { ImageComparison } from './verification-evidence.js';
 import { EbayAuth } from './ebay-auth.js';
-import { EbayCommerceProvider } from './ebay-commerce.js';
+import { EbayCommerceProvider, ebayItemIdForLiveLookup } from './ebay-commerce.js';
 import { resolveEbayCredentials, type EbayCredentials } from './ebay-credentials.js';
 import { EtsyCommerceProvider } from './etsy-commerce.js';
 import { resolveEtsyCredentials, type EtsyCredentials } from './etsy-credentials.js';
@@ -411,12 +411,8 @@ export async function refreshVerifiedOffers(
     // Older promoted mappings may store a canonical SKU in product_id rather than
     // the merchant listing ID. Recover the eBay item ID from the saved URL first.
     let lookupItemId = mapping.product_id;
-    if (exactLookupSource.name === 'ebay' && mapping.destination) {
-      try {
-        const url = new URL(mapping.destination);
-        const pathMatch = url.pathname.match(/\/itm\/(?:[^/]+\/)?([^/?#]+)/i);
-        if (pathMatch?.[1]) lookupItemId = decodeURIComponent(pathMatch[1]);
-      } catch {}
+    if (exactLookupSource.name === 'ebay') {
+      lookupItemId = ebayItemIdForLiveLookup(mapping.product_id, mapping.destination);
     }
     exactSource = await exactLookup(lookupItemId, query).catch(() => null);
     if (exactSource?.model) canonicalModel = exactSource.model;
@@ -632,14 +628,7 @@ export async function refreshVerifiedOffers(
       rememberedExact = await Promise.all(rememberedExact.map(async (product) => {
         const provider = verifiedSourceProviderName(product.provider || product.provenance, product.destination);
         if (provider !== 'ebay') return product;
-        let itemId = product.id;
-        if (product.destination) {
-          try {
-            const url = new URL(product.destination);
-            const match = url.pathname.match(/\/itm\/(?:[^/]+\/)?([^/?#]+)/i);
-            if (match?.[1]) itemId = decodeURIComponent(match[1]);
-          } catch {}
-        }
+        const itemId = ebayItemIdForLiveLookup(product.id, product.destination);
         if (!itemId) return product;
         commerceCalls.ebay = (commerceCalls.ebay ?? 0) + 1;
         if (!providersUsed.includes('ebay')) providersUsed.push('ebay');
