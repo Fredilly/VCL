@@ -22,7 +22,7 @@ export type JevFabricTelemetry = JevRouterTelemetry & {
 };
 
 const REQUEST_SCHEMA_VERSION = 'jev-fabric-v1';
-const FALLBACK: JevRoutingDecision = { commerce_action: 'SEARCH_NORMAL', verification_action: 'FULL', multiframe_action: 'NO' };
+const FALLBACK: JevRoutingDecision = { commerce_action: 'SEARCH_NORMAL', verification_action: 'FULL', multiframe_action: 'NO', canonical_retrieval_action: 'HYBRID' };
 const THRESHOLDS = {
   skip_commerce: 0.90,
   broad_search: 0.70,
@@ -163,6 +163,13 @@ export async function routeWithJevFabric(
           && s.multiframe_needed.confidence >= THRESHOLDS.multiframe
         ? 'ESCALATE'
         : 'NO',
+      canonical_retrieval_action: input.retrieval_context.has_model_candidate
+        ? 'MODEL'
+        : input.retrieval_context.has_distinctive_text
+          ? 'TEXT'
+          : input.retrieval_context.has_category
+            ? 'STRUCTURED'
+            : 'SKIP',
     };
 
     telemetry.signals = s;
