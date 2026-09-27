@@ -39,6 +39,24 @@ function ebayModel(item: EbayItemSummary): string | null {
   return null;
 }
 
+export function ebayItemIdForLiveLookup(savedItemId: string | null | undefined, destination?: string | null): string {
+  const saved = (savedItemId ?? '').trim();
+
+  // Browse REST IDs identify the exact purchasable variation. Never collapse
+  // v1|listing|variation to the legacy parent /itm/ listing ID.
+  if (saved.includes('|')) return saved;
+
+  if (destination) {
+    try {
+      const url = new URL(destination);
+      const match = url.pathname.match(/\/itm\/(?:[^/]+\/)?([^/?#]+)/i);
+      if (match?.[1]) return decodeURIComponent(match[1]);
+    } catch {}
+  }
+
+  return saved;
+}
+
 function normalizeItem(item: EbayItemSummary, query: ProductQuery): ProductCandidate {
   const title = item.title ?? '';
   const model = ebayModel(item);
