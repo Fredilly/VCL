@@ -1,5 +1,5 @@
 import type { VerifiedProductMapping, VpmTrustedObservation } from './verified-product-mapping.js';
-import { canonicalProductIdentity, mergeCanonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
+import { canonicalMerchantOfferKey, canonicalProductIdentity, mergeCanonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 
 type DurableObjectStubLike = { fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> };
 export type VerifiedProductLedgerNamespaceLike = {
@@ -128,6 +128,36 @@ function canonicalKey(value: string): string {
 
 const CANONICAL_INDEX_KEY = 'canonical:index:v1';
 
+function offerOwnerKey(offerKey: string): string {
+  return `offer-owner:${bounded(offerKey, 420).toLowerCase()}`;
+}
+
+function canonicalRedirectKey(canonical: string): string {
+  return `canonical-redirect:${bounded(canonical, 220).toLowerCase()}`;
+}
+
+function mergeSameOfferIdentity(existing: CanonicalProductIdentity, incoming: CanonicalProductIdentity): CanonicalProductIdentity {
+  const merchantRefs = [...existing.merchant_refs];
+  for (const ref of incoming.merchant_refs) {
+    const offerKey = ref.offer_key || canonicalMerchantOfferKey(ref);
+    if (!merchantRefs.some((current) => (current.offer_key || canonicalMerchantOfferKey(current)) === offerKey)) {
+      merchantRefs.push({ ...ref, offer_key: offerKey });
+    }
+  }
+  return {
+    ...existing,
+    visible_text: [...new Set([...existing.visible_text, ...incoming.visible_text])].slice(0, 12),
+    style_attributes: [...new Set([...(existing.style_attributes ?? []), ...(incoming.style_attributes ?? [])])].slice(0, 12),
+    logos_markings: [...new Set([...(existing.logos_markings ?? []), ...(incoming.logos_markings ?? [])])].slice(0, 8),
+    distinctive_features: [...new Set([...(existing.distinctive_features ?? []), ...(incoming.distinctive_features ?? [])])].slice(0, 12),
+    shape_silhouette: [...new Set([...(existing.shape_silhouette ?? []), ...(incoming.shape_silhouette ?? [])])].slice(0, 8),
+    color: existing.color ?? incoming.color ?? null,
+    material: existing.material ?? incoming.material ?? null,
+    verified_at: incoming.verified_at,
+    merchant_refs: merchantRefs.slice(0, 25),
+  };
+}
+
 function boundedList(value: unknown, maxItems = 12): string[] {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.map((item) => bounded(item, 160)).filter(Boolean))].slice(0, maxItems);
@@ -182,6 +212,16 @@ export class VerifiedProductLedger {
     put<T = unknown>(key: string, value: T): Promise<void>;
     list?<T = unknown>(options?: { prefix?: string; limit?: number }): Promise<Map<string, T>>;
   };
+  private canonicalWriteTail: Promise<void> = Promise.resolve();
+
+  private async serializeCanonicalWrite<T>(operation: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const previous = this.canonicalWriteTail;
+    this.canonicalWriteTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try { return await operation(); }
+    finally { release(); }
+  }
 
   constructor(ctx: { storage: VerifiedProductLedger['storage'] }) {
     this.storage = ctx.storage;
@@ -203,7 +243,23 @@ export class VerifiedProductLedger {
       const body = await request.json() as Record<string, unknown>;
       const key = bounded(body.canonical_key, 220);
       if (!key) return Response.json({ identity: null });
-      return Response.json({ identity: await this.storage.get<CanonicalProductIdentity>(canonicalKey(key)) ?? null });
+      const redirect = await this.storage.get<string>(canonicalRedirectKey(key));
+      const resolvedKey = redirect || key;
+      return Response.json({ identity: await this.storage.get<CanonicalProductIdentity>(canonicalKey(resolvedKey)) ?? null });
+    }
+
+    if (path === '/canonical/by-offer') {
+      const body = await request.json() as Record<string, unknown>;
+      const offerKey = bounded(body.offer_key, 420).toLowerCase();
+      if (!offerKey) return Response.json({ canonical_key: null, identity: null });
+      const owner = await this.storage.get<string>(offerOwnerKey(offerKey));
+      if (!owner) return Response.json({ canonical_key: null, identity: null });
+      const redirect = await this.storage.get<string>(canonicalRedirectKey(owner));
+      const canonical = redirect || owner;
+      return Response.json({
+        canonical_key: canonical,
+        identity: await this.storage.get<CanonicalProductIdentity>(canonicalKey(canonical)) ?? null,
+      });
     }
 
     if (path === '/canonical/list') {
@@ -225,25 +281,65 @@ export class VerifiedProductLedger {
 
     if (path === '/canonical/upsert') {
       const incoming = await request.json() as CanonicalProductIdentity;
-      const key = bounded(incoming.canonical_key, 220);
-      if (!key || !bounded(incoming.title, 300) || !bounded(incoming.object_type, 100)) {
+      const requestedKey = bounded(incoming.canonical_key, 220);
+      if (!requestedKey || !bounded(incoming.title, 300) || !bounded(incoming.object_type, 100)) {
         return Response.json({ error: 'Invalid canonical product identity' }, { status: 400 });
       }
-      const storageKey = canonicalKey(key);
-      const existing = await this.storage.get<CanonicalProductIdentity>(storageKey);
-      let identity: CanonicalProductIdentity;
-      try {
-        identity = existing ? mergeCanonicalProductIdentity(existing, incoming) : incoming;
-      } catch {
-        return Response.json({ error: 'Conflicting canonical product identity' }, { status: 409 });
-      }
-      await this.storage.put(storageKey, identity);
-      const index = await this.storage.get<string[]>(CANONICAL_INDEX_KEY) ?? [];
-      if (!index.includes(key)) {
-        index.unshift(key);
-        await this.storage.put(CANONICAL_INDEX_KEY, index.slice(0, 500));
-      }
-      return Response.json({ accepted: true, identity });
+
+      return await this.serializeCanonicalWrite(async () => {
+        const refs = incoming.merchant_refs.map((ref) => ({
+          ...ref,
+          offer_key: ref.offer_key || canonicalMerchantOfferKey(ref),
+        }));
+        const owners = (await Promise.all(refs.map((ref) =>
+          this.storage.get<string>(offerOwnerKey(ref.offer_key!)))))
+          .filter((owner): owner is string => Boolean(owner));
+        const resolvedOwners = await Promise.all(owners.map(async (owner) =>
+          await this.storage.get<string>(canonicalRedirectKey(owner)) || owner));
+        const survivorKey = [...new Set(resolvedOwners)].sort()[0] || requestedKey;
+        const normalizedIncoming: CanonicalProductIdentity = {
+          ...incoming,
+          canonical_key: survivorKey,
+          merchant_refs: refs,
+        };
+
+        const storageKey = canonicalKey(survivorKey);
+        const existing = await this.storage.get<CanonicalProductIdentity>(storageKey);
+        let identity: CanonicalProductIdentity;
+        try {
+          identity = existing
+            ? mergeCanonicalProductIdentity(existing, normalizedIncoming)
+            : normalizedIncoming;
+        } catch {
+          // Only reconcile conflicting legacy identities when an already-owned
+          // merchant offer redirects this write to a different canonical node.
+          // Conflicting evidence on the same canonical key must still fail closed.
+          if (!existing || survivorKey === requestedKey) {
+            return Response.json({ error: 'Conflicting canonical product identity' }, { status: 409 });
+          }
+          identity = mergeSameOfferIdentity(existing, normalizedIncoming);
+        }
+
+        await this.storage.put(storageKey, identity);
+        for (const ref of refs) await this.storage.put(offerOwnerKey(ref.offer_key!), survivorKey);
+
+        if (requestedKey !== survivorKey) {
+          await this.storage.put(canonicalRedirectKey(requestedKey), survivorKey);
+        }
+        for (const owner of resolvedOwners) {
+          if (owner !== survivorKey) await this.storage.put(canonicalRedirectKey(owner), survivorKey);
+        }
+
+        const index = await this.storage.get<string[]>(CANONICAL_INDEX_KEY) ?? [];
+        const nextIndex = [survivorKey, ...index.filter((entry) => entry !== survivorKey && !resolvedOwners.includes(entry) && entry !== requestedKey)];
+        await this.storage.put(CANONICAL_INDEX_KEY, nextIndex.slice(0, 500));
+
+        return Response.json({
+          accepted: true,
+          identity,
+          reused_existing_canonical: survivorKey !== requestedKey,
+        });
+      });
     }
 
     if (path === '/verify') {
