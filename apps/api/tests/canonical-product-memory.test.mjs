@@ -229,3 +229,29 @@ test('merchant offer key ignores tracking parameters but not merchant item ident
     memory.canonicalMerchantOfferKey({ source: 'ebay', item_id: '444', destination: 'https://www.ebay.com/itm/444' }),
   );
 });
+
+
+test('canonical identity recognizes a merchant offer after tracking parameters change', () => {
+  const identity = memory.canonicalProductIdentity({
+    mapping: {
+      ...mapping,
+      product_id: 'v1|307197731843|607037825827',
+      destination: 'https://www.ebay.com/itm/307197731843?mkcid=1&var=607037825827',
+    },
+    merchantItemId: 'v1|307197731843|607037825827',
+    visibleText: ['BUILDING IS MY LOVE LANGUAGE'],
+    verifiedAt: '2026-09-27T00:00:00.000Z',
+  });
+
+  assert.equal(memory.canonicalIdentityHasMerchantOffer(identity, {
+    source: 'ebay',
+    item_id: 'v1|307197731843|607037825827',
+    destination: 'https://www.ebay.com/itm/307197731843?campaign=new&var=607037825827',
+  }), true);
+
+  assert.equal(memory.canonicalIdentityHasMerchantOffer(identity, {
+    source: 'ebay',
+    item_id: 'v1|307197731843|DIFFERENT-VARIATION',
+    destination: 'https://www.ebay.com/itm/307197731843',
+  }), false, 'a sibling variation must not inherit Exact');
+});
