@@ -475,6 +475,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     { duration: 3400, iterations: Infinity, easing: 'ease-in-out' },
   ) : null;
   addClose(panel);
+  let stopSearchingQuips = () => {};
 
   try {
     // Alpha baseline: analyze the user-approved 50% crop directly.
@@ -482,7 +483,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     // redirect attention away from the pixels the user actually selected.
     stageTiming.localization_ms = null;
     const panelTitle = panel.firstElementChild as HTMLElement;
-    const stopSearchingQuips = startSearchingQuips(panelTitle);
+    stopSearchingQuips = startSearchingQuips(panelTitle);
     const requestId = crypto.randomUUID();
     const visionStarted = Date.now();
     const response: unknown = supplied ?? await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', requestId, dataUrl: result.dataUrl, timestamp: result.currentTime,
@@ -599,14 +600,14 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
           const debug = { attempts: captured.attempts, limitation: captured.limitation, mode: captured.mode, restored: captured.restored };
           if (merged.multi_frame?.changed_hypothesis) await showAnalysis(result, merged, debug);
           else {
-            note.textContent = 'Nearby evidence did not change the selected-object hypothesis.';
+            note.textContent = 'No clearer match found. Keeping this result.';
             if (__VCL_DEBUG_PROVENANCE__) {
               const text = document.createElement('pre'); text.style.whiteSpace = 'pre-wrap';
               text.textContent = JSON.stringify({ evidence: merged.multi_frame, capture: debug }, null, 2); panel.appendChild(text);
             }
           }
         } catch {
-          if (!controller.signal.aborted) note.textContent = 'Nearby analysis is unavailable. Keeping the selected-frame result.';
+          if (!controller.signal.aborted) note.textContent = 'Can’t check nearby moments right now. Keeping this result.';
         } finally { if (captured) captured.frames.length = 0; }
       }, { once: true });
     }
@@ -755,11 +756,12 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       timestamp_ms: Math.round(result.currentTime * 1000),
     });
   } catch (error) {
+    stopSearchingQuips();
     if (controller.signal.aborted) return;
     scanAnimation?.cancel();
     scanLine.remove();
     const message = document.createElement('div');
-    message.textContent = error instanceof Error ? error.message : 'VCL request failed.';
+    message.textContent = 'Scoop hit a snag. Try again.';
     Object.assign(message.style, { lineHeight: '1.4', opacity: '0.9', marginTop: '10px' });
     panel.appendChild(message);
   }
@@ -777,7 +779,7 @@ function showSelectionPreview(clientX: number, clientY: number) {
 
   const panel = basePanel('Scoop this');
   const image = document.createElement('img');
-  image.alt = 'Selected object crop preview';
+  image.alt = 'Selected item preview';
   Object.assign(image.style, { display: 'block', width: '100%', height: '100%', borderRadius: '10px', background: '#000' });
   const preview = document.createElement('div');
   Object.assign(preview.style, { position: 'relative', width: '220px', height: '220px', margin: '0 auto 10px' });
@@ -796,7 +798,7 @@ function showSelectionPreview(clientX: number, clientY: number) {
   Object.assign(controls.style, { display: 'flex', gap: '8px', flexWrap: 'wrap' });
   const tighter = button('− Tighter');
   const wider = button('+ Wider');
-  const analyze = button('Analyze');
+  const analyze = button('Search');
   Object.assign(analyze.style, { fontWeight: '700' });
   controls.append(tighter, wider, analyze);
   panel.appendChild(controls);
