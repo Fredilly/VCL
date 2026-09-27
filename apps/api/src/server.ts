@@ -1477,7 +1477,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
       const parsed: unknown = await request.json();
       const wrapped = Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'description' in parsed);
-      const record = wrapped ? parsed as { description: unknown; context?: unknown; source_image?: unknown; multi_frame_available?: unknown; telemetry?: unknown; benchmark_visible_text_query_v2?: unknown; benchmark_marking_verify_v1?: unknown } : { description: parsed, context: undefined, source_image: undefined, multi_frame_available: undefined, telemetry: undefined, benchmark_visible_text_query_v2: undefined, benchmark_marking_verify_v1: undefined };
+      const record = wrapped ? parsed as { description: unknown; context?: unknown; source_image?: unknown; multi_frame_available?: unknown; telemetry?: unknown; benchmark_visible_text_query_v2?: unknown; benchmark_marking_verify_v1?: unknown; vpm_observation_mode?: unknown } : { description: parsed, context: undefined, source_image: undefined, multi_frame_available: undefined, telemetry: undefined, benchmark_visible_text_query_v2: undefined, benchmark_marking_verify_v1: undefined, vpm_observation_mode: undefined };
       let alphaTelemetry = null;
       try { alphaTelemetry = normalizeAlphaTelemetry(record.telemetry); }
       catch { return jsonResponse({ error: 'Invalid telemetry envelope' }, 400); }
