@@ -2011,13 +2011,23 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         feedback_learning: feedbackLearning,
         verified_mapping: {
           hit: false,
-          reuse: 'same_video',
-          confidence: sameVideoReuse.confidence,
-          reason: sameVideoReuse.reason,
-          ...(typeof sameVideoReuse.visual_similarity === 'number' ? { visual_similarity: sameVideoReuse.visual_similarity } : {}),
-          ...(typeof sameVideoReuse.visual_confidence === 'number' ? { visual_confidence: sameVideoReuse.visual_confidence } : {}),
-          candidates_compared: sameVideoVisualCheck.compared,
-          visual_failures: sameVideoVisualCheck.failures,
+          reuse: crossVideoReuse.reason !== 'no_candidate' ? 'cross_video' : 'same_video',
+          confidence: crossVideoReuse.reason !== 'no_candidate' ? crossVideoReuse.confidence : sameVideoReuse.confidence,
+          reason: crossVideoReuse.reason !== 'no_candidate' ? crossVideoReuse.reason : sameVideoReuse.reason,
+          same_video_reason: sameVideoReuse.reason,
+          cross_video_reason: crossVideoReuse.reason,
+          ...(typeof crossVideoReuse.visual_similarity === 'number'
+            ? { visual_similarity: crossVideoReuse.visual_similarity }
+            : typeof sameVideoReuse.visual_similarity === 'number'
+              ? { visual_similarity: sameVideoReuse.visual_similarity }
+              : {}),
+          ...(typeof crossVideoReuse.visual_confidence === 'number'
+            ? { visual_confidence: crossVideoReuse.visual_confidence }
+            : typeof sameVideoReuse.visual_confidence === 'number'
+              ? { visual_confidence: sameVideoReuse.visual_confidence }
+              : {}),
+          candidates_compared: sameVideoVisualCheck.compared + crossVideoVisualCheck.compared,
+          visual_failures: sameVideoVisualCheck.failures + crossVideoVisualCheck.failures,
         },
         latency_ms: total_ms,
         timing: { ...resolved.timing, total_ms },
