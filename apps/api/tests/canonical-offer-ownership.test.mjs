@@ -6,6 +6,7 @@ import { loadModule } from './helpers/load-ts.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ledgerMod = loadModule(resolve(here, '../src/verified-product-ledger.ts'));
+const canonicalMod = loadModule(resolve(here, '../src/canonical-product-memory.ts'));
 
 function storage() {
   const map = new Map();
@@ -73,7 +74,7 @@ test('concurrent writes cannot create two owners for the same offer', async () =
 
   const lookup = await ledger.fetch(new Request('https://ledger/canonical/by-offer', {
     method: 'POST',
-    body: JSON.stringify({ offer_key: `ebay:${offer.toLowerCase()}` }),
+    body: JSON.stringify({ offer_key: canonicalMod.canonicalMerchantOfferKey({ source: 'ebay', item_id: offer, destination }) }),
   }));
   const result = await lookup.json();
   assert.equal(result.canonical_key, a.identity.canonical_key);
