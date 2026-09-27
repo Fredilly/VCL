@@ -15,15 +15,122 @@ const SEARCHING_QUIPS = [
   'Chasing that look…',
   'Oops, wrong aisle…',
   'Hippo found the sale…',
+  'Dario applied at McDonald’s…',
+  'Ferret checked clearance…',
+  'Goose wants store credit…',
+  'Llama found a coupon…',
+  'Pigeon joined the waitlist…',
+  'Otter needs express shipping…',
+  'Raccoon found the receipt…',
+  'Penguin wants free returns…',
+  'Capybara checked the cart…',
+  'Possum wants next-day delivery…',
+  'Duck found your size…',
+  'Moth entered luxury retail…',
+  'Hamster knows a guy…',
+  'Badger found aisle seven…',
+  'Walrus checked the markdown…',
+  'Alpaca joined Prime somehow…',
+  'Crab found better pricing…',
+  'Moose entered the outlet…',
+  'Frog found deadstock…',
+  'Goat knows the seller…',
+  'Snail chose express checkout…',
+  'Koala found one left…',
+  'Panda checked resale…',
+  'Fox found a dupe…',
+  'Crow found the SKU…',
+  'Seal found the listing…',
+  'Bear entered checkout…',
+  'Sloth found inventory…',
+  'Owl checked the tags…',
+  'Bee found the drop…',
+  'Gecko found the colorway…',
+  'Yak found free shipping…',
+  'Mole found the listing…',
+  'Pelican checked availability…',
+  'Turtle found your size…',
+  'Octopus checked eight stores…',
+  'Eel found the barcode…',
+  'Shark wants loyalty points…',
+  'Giraffe checked top shelf…',
+  'Bison found the outlet…',
+  'Squirrel saved the coupon…',
+  'Cobra checked the cart…',
+  'Dolphin found a restock…',
+  'Pony found the markdown…',
+  'Wombat found the deal…',
+  'Camel checked warehouse stock…',
+  'Parrot found the link…',
+  'Marmot wants store pickup…',
+  'Bunny found the sale…',
+  'Hedgehog checked the label…',
+  'Toucan found the merchant…',
+  'Tiger found a restock…',
+  'Monkey checked the backroom…',
+  'Donkey found one left…',
+  'Swan wants same-day delivery…',
+  'Iguana checked the outlet…',
+  'Peacock found the premium aisle…',
+  'Rhino found a coupon…',
+  'Meerkat checked the shelf…',
+  'Armadillo found the tag…',
+  'Puffin checked the listing…',
+  'Bumblebee found the drop…',
+  'Mongoose checked stock…',
+  'Pangolin found the receipt…',
+  'Flamingo wants gift wrap…',
+  'Orca found the retailer…',
+  'Chinchilla checked clearance…',
+  'Bobcat found the colorway…',
+  'Lobster wants curbside pickup…',
+  'Falcon checked the SKU…',
+  'Muppet found the markdown…',
+  'Robot wants a coupon…',
+  'Intern found the SKU…',
+  'CEO checked clearance…',
+  'Someone hid the receipt…',
+  'Cart escaped again…',
+  'Aisle seven is cursed…',
+  'Checkout needs supervision…',
+  'Retail goblin activated…',
+  'Coupon physics engaged…',
+  'Inventory gremlin detected…',
+  'Fashion detective deployed…',
+  'Tiny cart, big dreams…',
+  'One sec, bargain wizard…',
+  'Plot twist: cheaper elsewhere…',
+  'The racks are talking…',
+  'This tag looks suspicious…',
+  'Merchant maze entered…',
+  'Price goblin says wait…',
+  'SKU goblin is thinking…',
+  'Cart intelligence online…',
+  'Deal radar warming up…',
+  'Retail archaeology underway…',
 ] as const;
 
+function shuffledSearchingQuips() {
+  const quips = [...SEARCHING_QUIPS];
+  for (let index = quips.length - 1; index > 0; index--) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [quips[index], quips[swapIndex]] = [quips[swapIndex] ?? quips[index]!, quips[index] ?? quips[swapIndex]!];
+  }
+  return quips;
+}
+
 function startSearchingQuips(title: HTMLElement) {
-  let index = Math.floor(Math.random() * SEARCHING_QUIPS.length);
-  title.textContent = SEARCHING_QUIPS[index] ?? 'Searching…';
+  let quips = shuffledSearchingQuips();
+  let index = 0;
+  title.textContent = quips[index] ?? 'Searching…';
   if (typeof window === 'undefined' || typeof window.setInterval !== 'function') return () => {};
   const interval = window.setInterval(() => {
-    index = (index + 1) % SEARCHING_QUIPS.length;
-    title.textContent = SEARCHING_QUIPS[index] ?? 'Searching…';
+    index += 1;
+    if (index >= quips.length) {
+      quips = shuffledSearchingQuips();
+      index = 0;
+    }
+    title.textContent = quips[index] ?? 'Searching…';
   }, 1800);
   return () => window.clearInterval(interval);
 }
@@ -300,6 +407,19 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
       borderRadius: '14px',
       background: 'rgba(255,255,255,.045)',
       overflow: 'hidden',
+      transition: 'background 160ms ease, border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease',
+    });
+    card.addEventListener('mouseenter', () => {
+      card.style.background = 'rgba(255,255,255,.07)';
+      card.style.borderColor = 'rgba(255,255,255,.18)';
+      card.style.transform = 'translateY(-1px)';
+      card.style.boxShadow = '0 8px 20px rgba(0,0,0,.12)';
+    });
+    card.addEventListener('mouseleave', () => {
+      card.style.background = 'rgba(255,255,255,.045)';
+      card.style.borderColor = 'rgba(255,255,255,.10)';
+      card.style.transform = 'translateY(0)';
+      card.style.boxShadow = 'none';
     });
 
     const row = document.createElement(product.destination ? 'a' : 'div');
