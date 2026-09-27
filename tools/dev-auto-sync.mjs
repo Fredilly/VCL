@@ -1,13 +1,19 @@
 import { execFileSync, spawn } from 'node:child_process';
 import process from 'node:process';
+import { dirname, join } from 'node:path';
 
 const POLL_MS = 20_000;
 const root = process.cwd();
+const pnpm = process.env.npm_execpath || join(dirname(process.execPath), 'pnpm');
 let dev = null;
 let stopping = false;
 
 function run(cmd, args, stdio = 'pipe') {
   return execFileSync(cmd, args, { cwd: root, stdio, encoding: 'utf8' }).trim();
+}
+
+function log(message) {
+  console.log(`[scoop-auto] ${message}`);
 }
 
 function currentBranch() {
@@ -20,7 +26,7 @@ function cleanWorktree() {
 
 function startDev() {
   if (dev || stopping) return;
-  dev = spawn('pnpm', ['--filter', '@vcl/extension', 'dev'], {
+  dev = spawn(pnpm, ['--filter', '@vcl/extension', 'dev'], {
     cwd: root,
     stdio: 'inherit',
     env: process.env,
@@ -33,11 +39,11 @@ function startDev() {
 
 function syncMain() {
   if (currentBranch() !== 'main') {
-    console.log('[scoop-auto] Waiting: local repo is not on main.');
+    log('Waiting: local repo is not on main.');
     return;
   }
   if (!cleanWorktree()) {
-    console.log('[scoop-auto] Waiting: local changes detected; leaving them untouched.');
+    log('Waiting: local changes detected; leaving them untouched.');
     return;
   }
 
@@ -46,9 +52,9 @@ function syncMain() {
   const remote = run('git', ['rev-parse', 'origin/main']);
   if (local === remote) return;
 
-  console.log('[scoop-auto] New main detected. Fast-forwarding…');
+  log('New main detected. Fast-forwarding…');
   run('git', ['pull', '--ff-only', 'origin', 'main'], 'inherit');
-  console.log('[scoop-auto] Synced. WXT will reload Scoop automatically.');
+  log('Synced. WXT dev mode will rebuild and reload Scoop automatically.');
 }
 
 function stop() {
@@ -65,6 +71,7 @@ catch (error) {
   console.error('[scoop-auto] Initial sync failed:', error instanceof Error ? error.message : String(error));
 }
 
+log(`Watching ${root} for merges to origin/main every ${POLL_MS / 1000}s.`);
 startDev();
 
 setInterval(() => {
