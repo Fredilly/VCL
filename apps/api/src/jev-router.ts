@@ -94,14 +94,8 @@ function parseDecision(value: unknown): JevRoutingDecision | null {
   const raw = value as Record<string, unknown>;
 
   // Backward-compatible with the early adapter/tests.
-  if (validDecision(raw.decision)) {
-    const decision = raw.decision as JevRoutingDecision;
-    return { ...decision, canonical_retrieval_action: decision.canonical_retrieval_action ?? 'HYBRID' };
-  }
-  if (validDecision(raw)) {
-    const decision = raw as unknown as JevRoutingDecision;
-    return { ...decision, canonical_retrieval_action: decision.canonical_retrieval_action ?? 'HYBRID' };
-  }
+  if (validDecision(raw.decision)) return raw.decision as JevRoutingDecision;
+  if (validDecision(raw)) return raw as unknown as JevRoutingDecision;
 
   // Cloudflare Jev returns typed answers under response.answers.<question>.choice.
   const answers = raw.answers;
