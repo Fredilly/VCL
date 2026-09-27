@@ -407,6 +407,19 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
       borderRadius: '14px',
       background: 'rgba(255,255,255,.045)',
       overflow: 'hidden',
+      transition: 'background 160ms ease, border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease',
+    });
+    card.addEventListener('mouseenter', () => {
+      card.style.background = 'rgba(255,255,255,.07)';
+      card.style.borderColor = 'rgba(255,255,255,.18)';
+      card.style.transform = 'translateY(-1px)';
+      card.style.boxShadow = '0 8px 20px rgba(0,0,0,.12)';
+    });
+    card.addEventListener('mouseleave', () => {
+      card.style.background = 'rgba(255,255,255,.045)';
+      card.style.borderColor = 'rgba(255,255,255,.10)';
+      card.style.transform = 'translateY(0)';
+      card.style.boxShadow = 'none';
     });
 
     const row = document.createElement(product.destination ? 'a' : 'div');
