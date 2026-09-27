@@ -86,6 +86,33 @@ export function canonicalMerchantOfferKey(ref: Pick<CanonicalMerchantRef, 'sourc
   return `${source}:${destination.toLowerCase()}`;
 }
 
+
+export function canonicalEquivalenceEvidenceKey(identity: Pick<CanonicalProductIdentity,
+  'brand' | 'model' | 'object_type' | 'visible_text' | 'logos_markings' | 'color'
+>): string | null {
+  const objectType = normalizeIdentityText(identity.object_type);
+  if (!objectType) return null;
+
+  const brand = normalizeIdentityText(identity.brand);
+  const model = normalizeIdentityText(identity.model);
+  if (model) return `model|${objectType}|${brand || '_'}|${model}`;
+
+  const color = normalizeIdentityText(identity.color);
+  if (!color) return null;
+
+  const phrases = [
+    ...(identity.visible_text ?? []),
+    ...(identity.logos_markings ?? []),
+  ]
+    .map((value) => normalizeIdentityText(value))
+    .filter((value) => value.split(' ').filter(Boolean).length >= 4 && value.length >= 18)
+    .sort((a, b) => b.length - a.length || a.localeCompare(b));
+  const phrase = phrases[0];
+  if (!phrase) return null;
+
+  return `marking|${objectType}|${color}|${phrase}`;
+}
+
 export function canonicalIdentityHasMerchantOffer(
   identity: Pick<CanonicalProductIdentity, 'merchant_refs'>,
   ref: Pick<CanonicalMerchantRef, 'source' | 'item_id' | 'destination'>,

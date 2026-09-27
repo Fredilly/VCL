@@ -111,10 +111,56 @@ test('visually similar but different product does not inherit Exact', () => {
   assert.equal(result.identity, null);
 });
 
-test('ambiguous cross-video matches fail closed', () => {
-  const other = { ...identity, canonical_key: 'product:v1:other' };
+test('multiple seller canonicals for the same visually confirmed product collapse to one product', () => {
+  const other = {
+    ...identity,
+    canonical_key: 'product:v1:other-seller',
+    title: 'Black Building Love Language Graphic Tee',
+    merchant_refs: [{
+      source: 'ebay',
+      item_id: 'v1|999|111',
+      destination: 'https://www.ebay.com/itm/999?var=111',
+      image_reference: 'https://i.ebayimg.com/other.jpg',
+    }],
+  };
   const candidates = mod.crossVideoCanonicalCandidates({ description, identities: [identity, other] });
   const result = mod.confirmCrossVideoVisual(candidates, new Map([
+    [identity.canonical_key, strongVisual],
+    [other.canonical_key, { ...strongVisual, similarity: 0.95 }],
+  ]));
+  assert.ok(result.identity);
+  assert.equal(result.reason, 'visual_confirmed');
+  assert.deepEqual(
+    new Set(result.equivalent_canonical_keys),
+    new Set([identity.canonical_key, other.canonical_key]),
+  );
+  assert.equal(result.identity.merchant_refs.length, 2);
+});
+
+test('ambiguous cross-video matches with different identity evidence still fail closed', () => {
+  const other = {
+    ...identity,
+    canonical_key: 'product:v1:other',
+    visible_text: ['BUILDING SOMETHING ELSE ENTIRELY'],
+    logos_markings: ['BUILDING SOMETHING ELSE ENTIRELY'],
+    title: 'Building Something Else Entirely Black Tee',
+  };
+  const candidates = mod.crossVideoCanonicalCandidates({
+    description: {
+      ...description,
+      visible_text: [],
+      logos_markings: [],
+      search_terms: ['black graphic shirt'],
+    },
+    identities: [identity, other],
+  });
+  const forcedCandidates = [identity, other].map((candidateIdentity) => ({
+    identity: candidateIdentity,
+    canonical_key: candidateIdentity.canonical_key,
+    confidence: 0.9,
+    reason: 'distinctive_text_candidate',
+  }));
+  const result = mod.confirmCrossVideoVisual(forcedCandidates, new Map([
     [identity.canonical_key, strongVisual],
     [other.canonical_key, { ...strongVisual, similarity: 0.95 }],
   ]));
