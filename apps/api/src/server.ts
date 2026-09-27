@@ -31,7 +31,7 @@ import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, create
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
 import { distinctiveTextSameVideoReuse, eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, verifiedProductMemoryCandidates, identityWithTrustedVpmObservations, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
-import { canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
+import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 export { AlphaAccessLedger } from './alpha-access.js';
 export { VerifiedProductLedger } from './verified-product-ledger.js';
@@ -1218,25 +1218,35 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           provenance: 'admin_verified',
         };
         const canonicalKeyHint = typeof body.canonical_key_hint === 'string' ? body.canonical_key_hint.slice(0, 220) : '';
-        const sameVideoMappings = canonicalKeyHint
-          ? await durableVerifiedMappings(env, platform, contentRef)
-          : [];
+        const sameVideoMappings = await durableVerifiedMappings(env, platform, contentRef);
         const hintedMapping = sameVideoMappings.find((entry) => entry.canonical_key === canonicalKeyHint);
-        const hintedIdentity = hintedMapping
+        const hintedIdentity = hintedMapping && canonicalKeyHint
           ? await durableCanonicalProductIdentity(env, canonicalKeyHint)
           : null;
 
+        const incomingOfferRef = {
+          source: mappingBase.provider ?? 'unknown',
+          item_id: typeof product.id === 'string' ? product.id.trim().slice(0, 180) || null : null,
+          destination: mappingBase.destination,
+          image_reference: mappingBase.image_reference ?? null,
+        };
+        const canonicalKeys = [...new Set(sameVideoMappings
+          .map((entry) => entry.canonical_key)
+          .filter((key): key is string => Boolean(key)))];
+        const sameVideoIdentities = (await Promise.all(canonicalKeys.map((key) =>
+          durableCanonicalProductIdentity(env, key).catch(() => null))))
+          .filter((identity): identity is CanonicalProductIdentity => Boolean(identity));
+        const offerMatchedIdentities = hintedIdentity ? [] : sameVideoIdentities.filter((identity) =>
+          canonicalIdentityHasMerchantOffer(identity, incomingOfferRef));
+        const rememberedOfferIdentity = offerMatchedIdentities.length === 1 ? offerMatchedIdentities[0] : null;
+
         let canonical: CanonicalProductIdentity;
-        if (hintedIdentity) {
+        const existingIdentity = hintedIdentity ?? rememberedOfferIdentity;
+        if (existingIdentity) {
           canonical = await persistCanonicalProductIdentity(env, {
-            ...hintedIdentity,
+            ...existingIdentity,
             verified_at: new Date().toISOString(),
-            merchant_refs: [{
-              source: mappingBase.provider ?? 'unknown',
-              item_id: typeof product.id === 'string' ? product.id.trim().slice(0, 180) || null : null,
-              destination: mappingBase.destination,
-              image_reference: mappingBase.image_reference ?? null,
-            }],
+            merchant_refs: [incomingOfferRef],
           });
         } else {
           const identity = canonicalProductIdentity({
