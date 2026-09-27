@@ -1931,6 +1931,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       )) {
         const globalCanonicalIdentities = await durableCanonicalProductIdentities(env).catch(() => []);
         const promotedProducts = promoteKnownCrossVideoOffers({
+          description,
           products: resolved.products,
           identities: globalCanonicalIdentities,
         });
