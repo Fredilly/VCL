@@ -1,5 +1,6 @@
 import { captureSelectionAtClientPoint, cropFrozenSelection, focusBox, selectionPoint, validatedAutoFocusBox, type FrameCaptureResult } from '../lib/frame-capture';
 import { captureNearbyFrames, nearbyCaptureLimitation } from '../lib/nearby-frame-capture';
+import { shouldAttemptVpmNearbyRecovery } from '../lib/vpm-quality-recovery';
 
 const OVERLAY_ID = 'vcl-overlay-root';
 const RESULT_ID = 'vcl-capture-result';
@@ -596,7 +597,66 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     });
     if (controller.signal.aborted) return;
     if (commerceRaw && typeof commerceRaw === 'object' && typeof commerceRaw.error === 'string') throw new Error(commerceRaw.error);
-    const commerce = parseCommerceResponse(commerceRaw);
+    let commerce = parseCommerceResponse(commerceRaw);
+
+    // Quality-aware VPM recovery: if exactly one known product survived all hard
+    // compatibility gates but the current pixels were too weak for Exact, inspect
+    // nearby views. Each nearby frame must independently clear the existing Exact
+    // visual threshold; no threshold is lowered.
+    if (!supplied && shouldAttemptVpmNearbyRecovery(commerce) && !nearbyCaptureLimitation(result)) {
+      let captured;
+      try {
+        captured = await captureNearbyFrames(result, controller.signal);
+        if (!controller.signal.aborted && captured.frames.length) {
+          const { multi_frame: _debug, ...primaryDescription } = analysis;
+          const nearbyRaw = await browser.runtime.sendMessage({
+            type: 'VCL_ANALYZE_SELECTION',
+            requestId: crypto.randomUUID(),
+            dataUrl: result.dataUrl,
+            timestamp: result.currentTime,
+            primary_description: primaryDescription,
+            nearby_frames: captured.frames,
+            point: selectionPoint(result),
+          });
+          if (!controller.signal.aborted && !nearbyRaw?.error) {
+            const merged = parseObjectDescription(nearbyRaw);
+            if ((merged.multi_frame?.frames_used ?? 1) > 1) {
+              for (const frame of captured.frames) {
+                const recoveryRaw = await browser.runtime.sendMessage({
+                  type: 'VCL_RESOLVE_PRODUCTS',
+                  requestId: crypto.randomUUID(),
+                  description: merged,
+                  context: surfaceContext(result.currentTime),
+                  source_image: frame.dataUrl,
+                  vpm_observation_mode: 'nearby_frame_recovery',
+                  telemetry: { event_id: crypto.randomUUID(), session_id: alphaSessionId, interaction_started_at: interactionStarted },
+                });
+                if (controller.signal.aborted) break;
+                if (recoveryRaw && typeof recoveryRaw === 'object' && typeof recoveryRaw.error !== 'string') {
+                  const recovered = parseCommerceResponse(recoveryRaw);
+                  if (recovered.verified_mapping?.hit && recovered.products.some((product) => product.result_class === 'EXACT')) {
+                    commerce = {
+                      ...recovered,
+                      verified_mapping: {
+                        ...recovered.verified_mapping,
+                        reuse: 'same_video',
+                        reason: 'nearby_frame_visual_confirmed',
+                      },
+                    };
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        // Recovery is opportunistic. Preserve the original fail-closed result.
+      } finally {
+        if (captured) captured.frames.length = 0;
+      }
+    }
+
     const verifiedProduct = commerce.verified_mapping?.hit
       ? commerce.products.find((product) => product.result_class === 'EXACT') ?? commerce.products[0]
       : null;
