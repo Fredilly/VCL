@@ -1,6 +1,7 @@
 import type { ObjectDescription } from './types.js';
 import { canonicalIdentityHasMerchantOffer, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import type { ProductCandidate } from './commerce.js';
+import { highConfidenceMetadataContradiction } from './candidate-verification.js';
 import type { ImageComparison } from './verification-evidence.js';
 import { canonical, compatible } from './verification-evidence.js';
 import { normalizeIdentityText } from './canonical-product-memory.js';
@@ -143,6 +144,7 @@ export function confirmCrossVideoVisual(
 
 
 export function promoteKnownCrossVideoOffers(input: {
+  description: ObjectDescription;
   products: ProductCandidate[];
   identities: CanonicalProductIdentity[];
 }): ProductCandidate[] {
@@ -151,6 +153,7 @@ export function promoteKnownCrossVideoOffers(input: {
     const similarity = product.verification_image_similarity ?? 0;
     const confidence = product.verification_image_confidence ?? 0;
     if (similarity < 0.94 || confidence < 0.94) return product;
+    if (highConfidenceMetadataContradiction(input.description, product)) return product;
     if (!product.destination) return product;
 
     const source = product.provider || product.provenance || null;
