@@ -32,7 +32,7 @@ import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProd
 import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentities, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
 import { distinctiveTextSameVideoReuse, eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, verifiedProductMemoryCandidates, identityWithTrustedVpmObservations, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
-import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, promoteKnownCrossVideoOffers, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
+import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 export { AlphaAccessLedger } from './alpha-access.js';
 export { VerifiedProductLedger } from './verified-product-ledger.js';
@@ -1918,26 +1918,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           : queries;
       const started = Date.now();
       const markingVerifyV1 = record.benchmark_marking_verify_v1 === true;
-      let resolved = await resolveProducts(routedProviders, routedQueries, description, env, context, sourceImage, compareCandidateImages, routing, markingVerifyV1);
-
-      // If cross-video canonical lookup was ambiguous, a provider may still return
-      // the exact same merchant offer that was previously admin-verified elsewhere.
-      // Strong current-frame visual confirmation + exact stable offer identity is
-      // sufficient to restore Exact without guessing between fragmented legacy canonicals.
-      if (resolved.products.some((product) =>
-        product.result_class !== 'EXACT'
-        && (product.verification_image_similarity ?? 0) >= 0.94
-        && (product.verification_image_confidence ?? 0) >= 0.94
-      )) {
-        const globalCanonicalIdentities = await durableCanonicalProductIdentities(env).catch(() => []);
-        const promotedProducts = promoteKnownCrossVideoOffers({
-          description,
-          products: resolved.products,
-          identities: globalCanonicalIdentities,
-        });
-        resolved = { ...resolved, products: promotedProducts };
-      }
-
+      const resolved = await resolveProducts(routedProviders, routedQueries, description, env, context, sourceImage, compareCandidateImages, routing, markingVerifyV1);
       if (sameVideoVisualCheck.usage) {
         const usage = resolved.cost_usage.verification_usage;
         usage.requests += sameVideoVisualCheck.usage.requests ?? 0;
