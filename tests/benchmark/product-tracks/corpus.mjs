@@ -236,7 +236,23 @@ export const cases = [
       search_terms: ['WNBA black jersey'],
     },
     candidates: [shirt, jersey],
-    comparisons: {},
+    comparisons: {
+      [jersey.identity.canonical_key]: {
+        source: {
+          subtype: { value: 'jersey', confidence: 0.98, basis: 'image' },
+          color: { value: 'black', confidence: 0.96, basis: 'image' },
+          sleeve: { value: 'sleeveless', confidence: 0.95, basis: 'image' },
+        },
+        candidate: {
+          subtype: { value: 'jersey', confidence: 0.99, basis: 'image' },
+          color: { value: 'black', confidence: 0.96, basis: 'image' },
+          sleeve: { value: 'sleeveless', confidence: 0.95, basis: 'image' },
+        },
+        similarity: 0.96,
+        confidence: 0.95,
+        matching_details: ['same WNBA wordmark and sleeveless basketball jersey construction'],
+      },
+    },
   },
   {
     id: 'multi-track-generic-negative',
