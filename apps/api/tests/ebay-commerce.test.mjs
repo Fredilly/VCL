@@ -611,3 +611,53 @@ test('eBay adapter: getItemById returns live listing price and currency', async 
   assert.equal(result?.price, '17.95');
   assert.equal(result?.currency, 'USD');
 });
+
+
+test('eBay live lookup preserves exact REST variation id instead of parent listing id', () => {
+  const ctx = makeEbayContext(makeMockAuth());
+  loadModule(ebaySource, ctx);
+  const { ebayItemIdForLiveLookup } = ctx.exports;
+
+  assert.equal(
+    ebayItemIdForLiveLookup(
+      'v1|307197731843|607037825830',
+      'https://www.ebay.com/itm/307197731843',
+    ),
+    'v1|307197731843|607037825830',
+  );
+  assert.equal(
+    ebayItemIdForLiveLookup(
+      '307197731843',
+      'https://www.ebay.com/itm/Building-Is-My-Love-Language-Shirt/307197731843?mkcid=1',
+    ),
+    '307197731843',
+  );
+});
+
+test('eBay getItemById hydrates the exact variation price', async () => {
+  let capturedUrl = '';
+  const ctx = makeEbayContext(makeMockAuth(), {
+    fetch: async (url) => {
+      capturedUrl = String(url);
+      return Response.json({
+        itemId: 'v1|307197731843|607037825830',
+        title: 'Building Is My Love Language Shirt',
+        itemWebUrl: 'https://www.ebay.com/itm/307197731843?var=607037825830',
+        price: { value: '8.00', currency: 'USD' },
+      });
+    },
+  });
+  loadModule(ebaySource, ctx);
+  const { EbayCommerceProvider } = ctx.exports;
+
+  const provider = new EbayCommerceProvider(makeMockAuth());
+  const result = await provider.getItemById('v1|307197731843|607037825830', query);
+
+  assert.ok(
+    capturedUrl.includes('/buy/browse/v1/item/v1%7C307197731843%7C607037825830'),
+    'must request the exact variation REST id',
+  );
+  assert.equal(result?.id, 'v1|307197731843|607037825830');
+  assert.equal(result?.price, '8.00');
+  assert.equal(result?.currency, 'USD');
+});
