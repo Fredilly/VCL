@@ -115,7 +115,9 @@ test('multiple seller canonicals for the same visually confirmed product collaps
   const other = {
     ...identity,
     canonical_key: 'product:v1:other-seller',
-    title: 'Black Building Love Language Graphic Tee',
+    title: 'Funny Quote Building is My Love Language Mark Saying Tee T-Shirt',
+    visible_text: ['BUILDING IS MY LOVE'],
+    logos_markings: [],
     merchant_refs: [{
       source: 'ebay',
       item_id: 'v1|999|111',
