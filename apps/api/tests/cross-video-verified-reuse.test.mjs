@@ -132,3 +132,19 @@ test('exact model match is still only a candidate until cross-video visual confi
   assert.equal(candidates[0].reason, 'model_candidate');
   assert.equal(mod.confirmCrossVideoVisual(candidates, new Map()).identity, null);
 });
+
+
+test('partial stored OCR can still nominate a canonical product from its verified title', () => {
+  const partial = {
+    ...identity,
+    visible_text: ['BUILDING IS MY LOVE'],
+    logos_markings: [],
+  };
+  const candidates = mod.crossVideoCanonicalCandidates({
+    description,
+    identities: [partial],
+  });
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].canonical_key, identity.canonical_key);
+  assert.equal(candidates[0].reason, 'distinctive_text_candidate');
+});
