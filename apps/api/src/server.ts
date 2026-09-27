@@ -1556,7 +1556,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
               observation: {
                 observed_at: new Date().toISOString(),
                 timestamp_ms: context.timestamp_ms ?? null,
-                reason: sameVideoReuse.reason,
+                reason: sameVideoReuse.reason as 'model_exact' | 'distinctive_text_exact' | 'visual_confirmed',
                 confidence: sameVideoReuse.confidence,
                 visible_text: description.visible_text,
                 logos_markings: description.logos_markings,
