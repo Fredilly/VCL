@@ -1,7 +1,5 @@
 import type { ObjectDescription } from './types.js';
-import { canonicalIdentityHasMerchantOffer, type CanonicalProductIdentity } from './canonical-product-memory.js';
-import type { ProductCandidate } from './commerce.js';
-import { highConfidenceMetadataContradiction } from './candidate-verification.js';
+import type { CanonicalProductIdentity } from './canonical-product-memory.js';
 import type { ImageComparison } from './verification-evidence.js';
 import { canonical, compatible } from './verification-evidence.js';
 import { normalizeIdentityText } from './canonical-product-memory.js';
@@ -140,44 +138,4 @@ export function confirmCrossVideoVisual(
     return { identity: null, canonical_key: null, confidence: 0, reason: 'ambiguous' };
   }
   return { identity: null, canonical_key: null, confidence: 0, reason: candidates.length ? 'visual_rejected' : 'no_candidate' };
-}
-
-
-export function promoteKnownCrossVideoOffers(input: {
-  description: ObjectDescription;
-  products: ProductCandidate[];
-  identities: CanonicalProductIdentity[];
-}): ProductCandidate[] {
-  return input.products.map((product) => {
-    if (product.result_class === 'EXACT') return product;
-    const similarity = product.verification_image_similarity ?? 0;
-    const confidence = product.verification_image_confidence ?? 0;
-    if (similarity < 0.94 || confidence < 0.94) return product;
-    if (highConfidenceMetadataContradiction(input.description, product)) return product;
-    if (!product.destination) return product;
-
-    const source = product.provider || product.provenance || null;
-    const matches = input.identities.filter((identity) =>
-      canonicalIdentityHasMerchantOffer(identity, {
-        source,
-        item_id: product.id,
-        destination: product.destination,
-      }));
-    if (!matches.length) return product;
-
-    const canonical = [...matches].sort((a, b) => a.canonical_key.localeCompare(b.canonical_key))[0]!;
-    return {
-      ...product,
-      result_class: 'EXACT',
-      relationship: 'EXACT',
-      provenance: canonical.provenance,
-      identity_key: `verified:${canonical.canonical_key}`,
-      verification_status: 'multimodal',
-      verification_score: 100,
-      verification_reasons: [
-        ...(product.verification_reasons ?? []),
-        'same previously verified merchant offer with strong current-frame visual confirmation',
-      ],
-    };
-  });
 }
