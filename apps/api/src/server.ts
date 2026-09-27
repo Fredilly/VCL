@@ -19,7 +19,7 @@ import { resolveEtsyCredentials, type EtsyCredentials } from './etsy-credentials
 import { SerpApiCommerceProvider } from './serpapi-commerce.js';
 import { BraveCommerceProvider } from './brave-commerce.js';
 import { resolveBraveCredentials } from './brave-credentials.js';
-import { routeWithJev, routerInput, type JevRouterTelemetry } from './jev-router.js';
+import { routeWithJev, routerInput, type CanonicalRetrievalAction, type JevRouterTelemetry } from './jev-router.js';
 import { routeWithJevFabric } from './jev-fabric.js';
 import type { WorkersAiBinding } from './jev.js';
 import { resolveJevBinding } from './jev-binding.js';
@@ -29,7 +29,7 @@ export { FeedbackLedger } from './feedback-ledger.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
-import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentities, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
+import { backfillLegacyAdminCanonicalMappings, durableCanonicalCandidates, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
 import { distinctiveTextSameVideoReuse, eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, verifiedProductMemoryCandidates, identityWithTrustedVpmObservations, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
@@ -874,6 +874,7 @@ async function confirmCrossVideoReuseWithImage(
   context: ProductContext | undefined,
   sourceImage: ReturnType<typeof parseSourceImage>,
   excludeCanonicalKeys: Set<string> = new Set(),
+  retrievalAction: CanonicalRetrievalAction = 'HYBRID',
 ): Promise<CrossVideoVisualCheck> {
   const noDecision: CrossVideoReuseDecision = {
     identity: null,
@@ -884,7 +885,23 @@ async function confirmCrossVideoReuseWithImage(
   const empty = { decision: noDecision, compared: 0, failures: 0, failure_reasons: {} };
   if (!sourceImage) return empty;
 
-  const identities = (await durableCanonicalProductIdentities(env).catch(() => []))
+  const paths = retrievalAction === 'SKIP'
+    ? []
+    : retrievalAction === 'HYBRID'
+      ? ['MODEL', 'TEXT', 'STRUCTURED'] as const
+      : [retrievalAction] as const;
+  if (!paths.length) return empty;
+
+  const identities = (await durableCanonicalCandidates(env, {
+    paths: [...paths],
+    brand: description.brand_candidate,
+    model: description.model_candidate,
+    object_type: description.subcategory || description.category,
+    color: description.color,
+    visible_text: description.visible_text,
+    logos_markings: description.logos_markings,
+    limit: 24,
+  }).catch(() => []))
     .filter((identity) => !excludeCanonicalKeys.has(identity.canonical_key));
   const candidates = crossVideoCanonicalCandidates({ description, identities });
   if (!candidates.length) return empty;
@@ -1663,6 +1680,36 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       const description = normalizeObjectDescription(record.description);
       const context = normalizeContext(record.context);
       const contentRef = context?.content_ref ?? null;
+
+      // Route once, before canonical-memory lookup, then reuse the same Jev
+      // decision for commerce and verification. Jev chooses retrieval paths;
+      // indexed storage and the verifier remain authoritative.
+      let routing: (Parameters<typeof resolveProducts>[7] & { canonical_retrieval_action?: CanonicalRetrievalAction }) | undefined;
+      const jevMode = env.JEV_MODE === 'off' || env.JEV_MODE === 'router' || env.JEV_MODE === 'fabric'
+        ? env.JEV_MODE
+        : env.JEV_DECISION_ROUTER === 'true' ? 'router' : 'off';
+      if (jevMode !== 'off') {
+        const jevBinding = resolveJevBinding(env);
+        if (jevBinding) {
+          const input = routerInput(description, Boolean(record.multi_frame_available), commerceProviders(env).length);
+          const routed = jevMode === 'fabric'
+            ? await routeWithJevFabric(input, jevBinding)
+            : await routeWithJev(input, jevBinding);
+          const broadSearchOnMiss = jevMode === 'fabric'
+            && 'broad_search_on_miss' in routed.telemetry
+            && routed.telemetry.broad_search_on_miss === true;
+          routing = {
+            ...routed.decision,
+            telemetry: routed.telemetry,
+            ...(broadSearchOnMiss ? { broad_search_on_miss: true } : {}),
+          };
+        }
+      }
+      const canonicalRetrievalAction: CanonicalRetrievalAction =
+        routing && !routing.telemetry.failed
+          ? routing.canonical_retrieval_action ?? 'HYBRID'
+          : 'HYBRID';
+
       const verifiedResolutionStarted = Date.now();
       let durableMappings = await durableVerifiedMappings(env, context?.platform ?? null, contentRef).catch(() => []);
       if (durableMappings.some((mapping) => mapping.provenance === 'admin_verified' && !mapping.canonical_key)) {
@@ -1756,6 +1803,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           context,
           sourceImage,
           sameVideoCanonicalKeys,
+          canonicalRetrievalAction,
         );
         crossVideoReuse = crossVideoVisualCheck.decision;
         if (crossVideoReuse.identity) {
@@ -1888,27 +1936,6 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       const queries = buildProductQueryVariants(description, context, visibleTextQueryV2).map((query) => affiliateClickRef
         ? { ...query, affiliate_reference_id: affiliateClickRef }
         : query);
-      let routing: Parameters<typeof resolveProducts>[7];
-      const jevMode = env.JEV_MODE === 'off' || env.JEV_MODE === 'router' || env.JEV_MODE === 'fabric'
-        ? env.JEV_MODE
-        : env.JEV_DECISION_ROUTER === 'true' ? 'router' : 'off';
-      if (jevMode !== 'off') {
-        const jevBinding = resolveJevBinding(env);
-        if (jevBinding) {
-          const input = routerInput(description, Boolean(record.multi_frame_available), providers.length);
-          const routed = jevMode === 'fabric'
-            ? await routeWithJevFabric(input, jevBinding)
-            : await routeWithJev(input, jevBinding);
-          const broadSearchOnMiss = jevMode === 'fabric'
-            && 'broad_search_on_miss' in routed.telemetry
-            && routed.telemetry.broad_search_on_miss === true;
-          routing = {
-            ...routed.decision,
-            telemetry: routed.telemetry,
-            ...(broadSearchOnMiss ? { broad_search_on_miss: true } : {}),
-          };
-        }
-      }
       const routingActive = Boolean(routing && !routing.telemetry.failed);
       const routedProviders = routingActive && routing?.commerce_action === 'SKIP' ? [] : providers;
       const routedQueries = !routingActive
