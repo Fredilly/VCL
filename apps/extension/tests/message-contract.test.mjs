@@ -34,6 +34,11 @@ async function run({ visionStatus = 200, visionPayload = description, commerceSt
   const context = vm.createContext({ exports: {}, browser, defineBackground: fn => fn(), console, AbortController,
     nearbyCaptureLimitation: () => undefined,
     captureNearbyFrames: async () => ({ frames: [{ id: 'previous', timestamp: 9.5, offset: -0.5, dataUrl: 'neighbor-pixels' }], attempts: [{ id: 'previous', status: 'captured' }], mode: 'player', restored: true }),
+    shouldAttemptVpmNearbyRecovery: commerce => Boolean(commerce?.verified_mapping
+      && commerce.verified_mapping.hit === false
+      && commerce.verified_mapping.reuse === 'same_video'
+      && commerce.verified_mapping.reason === 'visual_rejected'
+      && commerce.verified_mapping.candidates_compared === 1),
     selectionPoint: () => ({ x: 0.75, y: 0.25 }), focusBox: () => 'focus', validatedTargetBox: () => 'target',
     cropFrozenSelection: async (selection, box) => ({ ...selection, dataUrl: box === 'focus' ? 'focus-pixels' : 'target-pixels' }),
     crypto: { randomUUID: () => 'regression-request' },

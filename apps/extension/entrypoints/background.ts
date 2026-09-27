@@ -156,7 +156,8 @@ export default defineBackground(() => {
         ? { attribution_token: message.attribution_token }
         : isFeedback
           ? { event_id: message.event_id, result_id: message.result_id, feedback_type: message.feedback_type }
-          : { description: message.description, context: message.context ?? null, source_image: message.source_image, telemetry: message.telemetry ?? null };
+          : { description: message.description, context: message.context ?? null, source_image: message.source_image, telemetry: message.telemetry ?? null,
+            vpm_observation_mode: message.vpm_observation_mode ?? null };
 
     void Promise.all([getInstallId(), browser.storage.local.get(ALPHA_TOKEN_KEY)]).then(([installId, stored]) => {
       const token = typeof stored?.[ALPHA_TOKEN_KEY] === 'string' ? stored[ALPHA_TOKEN_KEY] : '';
