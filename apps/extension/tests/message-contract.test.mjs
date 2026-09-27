@@ -176,6 +176,13 @@ test('admin Exact promotion carries the active same-video canonical identity', (
   assert.match(content, /canonical_key_hint: commerce\.verified_mapping\?\.canonical_key/);
 });
 
+
+test('admin UI does not describe adding a seller offer as re-promoting a remembered VPM identity', () => {
+  assert.match(content, /const rememberedIdentity = Boolean\(commerce\.verified_mapping\?\.hit && commerce\.verified_mapping\?\.canonical_key\)/);
+  assert.match(content, /rememberedIdentity \? 'Add verified offer' : 'Promote to Exact'/);
+  assert.match(content, /rememberedIdentity \? '✓ Offer added' : '✓ Verified'/);
+});
+
 test('admin Exact promotion is additive and never revokes earlier verified history', () => {
   assert.doesNotMatch(content, /VCL_ADMIN_REVOKE/);
 });
