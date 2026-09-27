@@ -29,7 +29,7 @@ export { FeedbackLedger } from './feedback-ledger.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
-import { backfillLegacyAdminCanonicalMappings, durableCanonicalCandidates, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
+import { backfillLegacyAdminCanonicalMappings, consolidateCanonicalProducts, durableCanonicalCandidates, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
 import { distinctiveTextSameVideoReuse, eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, verifiedProductMemoryCandidates, identityWithTrustedVpmObservations, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
@@ -1806,6 +1806,19 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           canonicalRetrievalAction,
         );
         crossVideoReuse = crossVideoVisualCheck.decision;
+        if (crossVideoReuse.identity && (crossVideoReuse.equivalent_canonical_keys?.length ?? 0) > 1) {
+          const consolidated = await consolidateCanonicalProducts(
+            env,
+            crossVideoReuse.equivalent_canonical_keys!,
+          ).catch(() => null);
+          if (consolidated) {
+            crossVideoReuse = {
+              ...crossVideoReuse,
+              identity: consolidated,
+              canonical_key: consolidated.canonical_key,
+            };
+          }
+        }
         if (crossVideoReuse.identity) {
           const reused = crossVideoMapping(crossVideoReuse.identity, context);
           if (reused) {
