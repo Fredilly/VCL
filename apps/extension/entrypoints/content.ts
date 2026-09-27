@@ -20,6 +20,7 @@ const SEARCHING_QUIPS = [
 function startSearchingQuips(title: HTMLElement) {
   let index = Math.floor(Math.random() * SEARCHING_QUIPS.length);
   title.textContent = SEARCHING_QUIPS[index] ?? 'Searching…';
+  if (typeof window === 'undefined' || typeof window.setInterval !== 'function') return () => {};
   const interval = window.setInterval(() => {
     index = (index + 1) % SEARCHING_QUIPS.length;
     title.textContent = SEARCHING_QUIPS[index] ?? 'Searching…';
@@ -762,7 +763,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     scanAnimation?.cancel();
     scanLine.remove();
     const message = document.createElement('div');
-    message.textContent = 'Scoop hit a snag. Try again.';
+    message.textContent = 'Scoop is temporarily unavailable. Try again in a moment.';
     Object.assign(message.style, { lineHeight: '1.4', opacity: '0.9', marginTop: '10px' });
     panel.appendChild(message);
   }
