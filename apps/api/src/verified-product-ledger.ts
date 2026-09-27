@@ -66,7 +66,7 @@ export async function persistTrustedVpmObservation(
 
 export async function revokeAdminVerifiedMapping(
   env: VerifiedProductLedgerEnv,
-  input: { platform: string; content_ref: string; product_id: string },
+  input: { platform: string; content_ref: string; product_id?: string; canonical_key?: string },
 ): Promise<boolean> {
   const result = await postJson<{ revoked?: boolean }>(env, '/revoke', input);
   return Boolean(result?.revoked);
@@ -286,10 +286,15 @@ export class VerifiedProductLedger {
       const platform = bounded(body.platform, 40);
       const contentRef = bounded(body.content_ref, 180);
       const productId = bounded(body.product_id, 160);
-      if (!platform || !contentRef || !productId) return Response.json({ error: 'Invalid revoke request' }, { status: 400 });
+      const canonical = bounded(body.canonical_key, 220);
+      if (!platform || !contentRef || (!productId && !canonical)) return Response.json({ error: 'Invalid revoke request' }, { status: 400 });
       const key = contentKey(platform, contentRef);
       const current = await this.storage.get<VerifiedProductMapping[]>(key) ?? [];
-      const next = current.filter((entry) => entry.product_id !== productId);
+      const next = current.filter((entry) => {
+        if (canonical && bounded(entry.canonical_key ?? entry.track_id, 220) === canonical) return false;
+        if (productId && entry.product_id === productId) return false;
+        return true;
+      });
       if (next.length === current.length) return Response.json({ revoked: false });
       await this.storage.put(key, next);
       return Response.json({ revoked: true });

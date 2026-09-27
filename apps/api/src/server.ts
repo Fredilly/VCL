@@ -1163,15 +1163,31 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       if (!authorized.admin || !authorized.admin_id) return jsonResponse({ error: 'Unauthorized' }, 401);
       try {
         const body = await request.json() as Record<string, unknown>;
-        const action = body.action === 'revoke' ? 'revoke' : 'verify';
+        const action = body.action === 'revoke' || body.action === 'demote' ? 'revoke' : 'verify';
         const platform = typeof body.platform === 'string' ? body.platform.slice(0, 40) : '';
         const contentRef = typeof body.content_ref === 'string' ? body.content_ref.slice(0, 180) : '';
         if (!platform || !contentRef) return jsonResponse({ error: 'Missing content identity' }, 400);
         if (action === 'revoke') {
-          const productId = typeof body.product_id === 'string' ? body.product_id.slice(0, 160) : '';
-          if (!productId) return jsonResponse({ error: 'Missing product id' }, 400);
-          const revoked = await revokeAdminVerifiedMapping(env, { platform, content_ref: contentRef, product_id: productId });
-          if (revoked) await auditAdminAction(env, authorized.admin_id!, 'verified_product_revoked', { platform, content_ref: contentRef, product_id: productId });
+          const product = body.product && typeof body.product === 'object' && !Array.isArray(body.product) ? body.product as Record<string, unknown> : {};
+          const canonicalKey = typeof body.canonical_key === 'string' ? body.canonical_key.slice(0, 220) : '';
+          const productId = typeof body.product_id === 'string' && body.product_id.trim()
+            ? body.product_id.trim().slice(0, 160)
+            : typeof product.model === 'string' && product.model.trim()
+              ? product.model.trim().slice(0, 160)
+              : typeof product.id === 'string' ? product.id.trim().slice(0, 160) : '';
+          if (!productId && !canonicalKey) return jsonResponse({ error: 'Missing product identity' }, 400);
+          const revoked = await revokeAdminVerifiedMapping(env, {
+            platform,
+            content_ref: contentRef,
+            ...(productId ? { product_id: productId } : {}),
+            ...(canonicalKey ? { canonical_key: canonicalKey } : {}),
+          });
+          if (revoked) await auditAdminAction(env, authorized.admin_id!, 'verified_product_revoked', {
+            platform,
+            content_ref: contentRef,
+            ...(productId ? { product_id: productId } : {}),
+            ...(canonicalKey ? { canonical_key: canonicalKey } : {}),
+          });
           return jsonResponse({ revoked });
         }
         const product = body.product && typeof body.product === 'object' && !Array.isArray(body.product) ? body.product as Record<string, unknown> : {};
