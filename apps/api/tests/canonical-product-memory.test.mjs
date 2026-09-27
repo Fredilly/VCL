@@ -169,3 +169,63 @@ test('canonical merge enriches an existing merchant ref with a newly recovered i
   assert.equal(merged.merchant_refs.length, 1);
   assert.equal(merged.merchant_refs[0].image_reference, 'https://i.ebayimg.com/recovered.jpg');
 });
+
+
+test('same visual identity retains distinct seller offers and dedupes only the same merchant listing', () => {
+  const first = memory.canonicalProductIdentity({
+    mapping: {
+      ...mapping,
+      product_id: 'shared-design',
+      destination: 'https://www.ebay.com/itm/111',
+    },
+    merchantItemId: '111',
+    visibleText: ['BUILDING IS MY LOVE LANGUAGE'],
+    verifiedAt: '2026-09-27T00:00:00.000Z',
+  });
+
+  const second = {
+    ...first,
+    verified_at: '2026-09-27T00:10:00.000Z',
+    merchant_refs: [{
+      source: 'ebay',
+      item_id: '222',
+      destination: 'https://www.ebay.com/itm/222',
+      image_reference: 'https://i.ebayimg.com/222.jpg',
+    }],
+  };
+
+  const withTwoSellers = memory.mergeCanonicalProductIdentity(first, second);
+  assert.equal(withTwoSellers.canonical_key, first.canonical_key, 'VPM/canonical identity stays unchanged');
+  assert.equal(withTwoSellers.merchant_refs.length, 2);
+  assert.deepEqual(
+    new Set(withTwoSellers.merchant_refs.map((ref) => ref.item_id)),
+    new Set(['111', '222']),
+  );
+
+  const repeatedSecond = memory.mergeCanonicalProductIdentity(withTwoSellers, second);
+  assert.equal(repeatedSecond.merchant_refs.length, 2, 're-promoting the same listing dedupes only that offer');
+  assert.notEqual(
+    repeatedSecond.merchant_refs[0].offer_key,
+    repeatedSecond.merchant_refs[1].offer_key,
+    'different merchant listings keep different offer identities',
+  );
+});
+
+test('merchant offer key ignores tracking parameters but not merchant item identity', () => {
+  assert.equal(
+    memory.canonicalMerchantOfferKey({
+      source: 'ebay',
+      item_id: null,
+      destination: 'https://www.ebay.com/itm/333?mkcid=1#x',
+    }),
+    memory.canonicalMerchantOfferKey({
+      source: 'ebay',
+      item_id: null,
+      destination: 'https://www.ebay.com/itm/333',
+    }),
+  );
+  assert.notEqual(
+    memory.canonicalMerchantOfferKey({ source: 'ebay', item_id: '333', destination: 'https://www.ebay.com/itm/333' }),
+    memory.canonicalMerchantOfferKey({ source: 'ebay', item_id: '444', destination: 'https://www.ebay.com/itm/444' }),
+  );
+});
