@@ -15,9 +15,26 @@ for (const [commerce_action, verification_action, multiframe_action] of [
   ['SKIP', 'FULL', 'NO'], ['SEARCH_NORMAL', 'LIGHT', 'NO'], ['SEARCH_BROAD', 'FULL', 'ESCALATE'],
 ]) test(`valid Jev response routes ${commerce_action}/${verification_action}/${multiframe_action}`, async () => {
   const result = await routeWithJev(routerInput(evidence, true, 2), ai({ commerce_action, verification_action, multiframe_action }));
-  assert.deepEqual(result.decision, { commerce_action, verification_action, multiframe_action });
+  assert.deepEqual(result.decision, { commerce_action, verification_action, multiframe_action, canonical_retrieval_action: 'HYBRID' });
   assert.equal(result.telemetry.failed, false);
   assert.equal(result.telemetry.request_schema_version, 'jev-state-questions-v1');
+});
+
+test('Jev can choose a bounded canonical retrieval path without deciding identity', async () => {
+  const result = await routeWithJev(routerInput({
+    ...evidence,
+    brand_candidate: 'CASIO',
+    model_candidate: 'F-91W',
+  }, true, 2), ai({
+    answers: {
+      commerce_action: { type: 'choice', choice: 'SEARCH_NORMAL' },
+      verification_action: { type: 'choice', choice: 'FULL' },
+      multiframe_action: { type: 'choice', choice: 'NO' },
+      canonical_retrieval_action: { type: 'choice', choice: 'MODEL' },
+    },
+  }));
+  assert.equal(result.decision.canonical_retrieval_action, 'MODEL');
+  assert.equal(result.telemetry.canonical_retrieval_action, 'MODEL');
 });
 
 test('parses Cloudflare Jev answers.<question>.choice response shape', async () => {
