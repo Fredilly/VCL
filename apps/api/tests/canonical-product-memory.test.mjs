@@ -255,3 +255,33 @@ test('canonical identity recognizes a merchant offer after tracking parameters c
     destination: 'https://www.ebay.com/itm/307197731843',
   }), false, 'a sibling variation must not inherit Exact');
 });
+
+
+test('canonical ledger exposes indexed identities for cross-video lookup and backfills legacy rows', async () => {
+  const values = new Map();
+  const store = {
+    async get(key) { return values.get(key); },
+    async put(key, value) { values.set(key, structuredClone(value)); },
+    async list({ prefix } = {}) {
+      return new Map([...values.entries()].filter(([key]) => !prefix || key.startsWith(prefix)));
+    },
+  };
+  const object = new ledger.VerifiedProductLedger({ storage: store });
+  const identity = memory.canonicalProductIdentity({
+    mapping,
+    merchantItemId: 'merchant-item-1',
+    visibleText: ['BUILDING IS MY LOVE LANGUAGE'],
+    verifiedAt: '2026-09-27T00:00:00.000Z',
+  });
+
+  values.set(`canonical:${identity.canonical_key}`, identity);
+  const response = await object.fetch(new Request('https://verified-product-ledger/canonical/list', {
+    method: 'POST',
+    body: '{}',
+  }));
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.identities.length, 1);
+  assert.equal(body.identities[0].canonical_key, identity.canonical_key);
+  assert.deepEqual(values.get('canonical:index:v1'), [identity.canonical_key]);
+});

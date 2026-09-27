@@ -29,9 +29,10 @@ export { FeedbackLedger } from './feedback-ledger.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
-import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
+import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentities, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
 import { distinctiveTextSameVideoReuse, eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, verifiedProductMemoryCandidates, identityWithTrustedVpmObservations, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
+import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 export { AlphaAccessLedger } from './alpha-access.js';
 export { VerifiedProductLedger } from './verified-product-ledger.js';
@@ -836,6 +837,149 @@ async function confirmSameVideoReuseWithImage(
   };
 }
 
+
+type CrossVideoVisualCheck = {
+  decision: CrossVideoReuseDecision;
+  compared: number;
+  failures: number;
+  failure_reasons: Record<string, number>;
+  usage?: {
+    provider: string;
+    model: string;
+    requests: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    cost_usd?: number;
+  };
+  timing?: {
+    image_fetch_ms: number;
+    model_ms: number;
+    total_ms: number;
+    batches: Array<{
+      batch_index: number;
+      candidates: number;
+      images_loaded: number;
+      comparisons: number;
+      image_fetch_ms: number;
+      model_ms: number;
+      total_ms: number;
+    }>;
+  };
+};
+
+async function confirmCrossVideoReuseWithImage(
+  env: Env,
+  description: ReturnType<typeof normalizeObjectDescription>,
+  context: ProductContext | undefined,
+  sourceImage: ReturnType<typeof parseSourceImage>,
+  excludeCanonicalKeys: Set<string> = new Set(),
+): Promise<CrossVideoVisualCheck> {
+  const noDecision: CrossVideoReuseDecision = {
+    identity: null,
+    canonical_key: null,
+    confidence: 0,
+    reason: 'no_candidate',
+  };
+  const empty = { decision: noDecision, compared: 0, failures: 0, failure_reasons: {} };
+  if (!sourceImage) return empty;
+
+  const identities = (await durableCanonicalProductIdentities(env).catch(() => []))
+    .filter((identity) => !excludeCanonicalKeys.has(identity.canonical_key));
+  const candidates = crossVideoCanonicalCandidates({ description, identities });
+  if (!candidates.length) return empty;
+
+  const rows = candidates.slice(0, 8).flatMap((candidate) => {
+    const identity = candidate.identity;
+    if (!identity) return [];
+    const merchant = identity.merchant_refs.find((ref) => Boolean(ref.image_reference && ref.destination));
+    if (!merchant?.image_reference) return [];
+    return [{
+      candidate,
+      product: {
+        id: identity.canonical_key,
+        title: identity.title,
+        brand: identity.brand,
+        model: identity.model,
+        category: identity.object_type,
+        image_reference: merchant.image_reference,
+        provenance: 'canonical_verified',
+        destination: merchant.destination,
+        price: null,
+        currency: null,
+        result_class: 'SIMILAR',
+      } as ProductCandidate,
+    }];
+  });
+  if (!rows.length) return { ...empty, decision: { ...noDecision, reason: 'visual_rejected' } };
+
+  const useOpenRouter = env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
+  const key = useOpenRouter ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY;
+  if (!key) return empty;
+  const model = useOpenRouter
+    ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL)
+    : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
+  const images = await compareCandidateImages(
+    key,
+    model,
+    sourceImage,
+    description,
+    rows.map((row) => row.product),
+    context,
+    imageRequestBudget(),
+    { provider: useOpenRouter ? 'openrouter' : 'gemini' },
+  ).catch(() => null);
+  if (!images) {
+    return {
+      ...empty,
+      decision: { ...noDecision, reason: 'visual_rejected' },
+      failures: 1,
+      failure_reasons: { visual_check_failed: 1 },
+    };
+  }
+
+  const comparisons = new Map<string, ImageComparison>();
+  for (const row of rows) {
+    const comparison = images.comparisons.get(candidateKey(row.product));
+    if (comparison) comparisons.set(row.candidate.canonical_key!, comparison);
+  }
+  return {
+    decision: confirmCrossVideoVisual(rows.map((row) => row.candidate), comparisons),
+    compared: images.compared,
+    failures: images.failures,
+    failure_reasons: images.failure_reasons ?? {},
+    usage: images.usage,
+    timing: images.timing,
+  };
+}
+
+function crossVideoMapping(
+  identity: CanonicalProductIdentity,
+  context: ProductContext | undefined,
+): VerifiedProductMapping | null {
+  if (!context?.platform || !context.content_ref) return null;
+  const merchant = identity.merchant_refs.find((ref) => Boolean(ref.destination));
+  if (!merchant) return null;
+  const timestamp = context.timestamp_ms ?? 0;
+  return {
+    platform: context.platform,
+    content_ref: context.content_ref,
+    scope: 'time_window',
+    timestamp_start_ms: Math.max(0, timestamp - 5000),
+    timestamp_end_ms: timestamp + 5000,
+    object_type: identity.object_type,
+    brand: identity.brand ?? '',
+    product_id: merchant.item_id || identity.model || identity.canonical_key,
+    title: identity.title,
+    destination: merchant.destination,
+    image_reference: merchant.image_reference,
+    provider: merchant.source,
+    canonical_key: identity.canonical_key,
+    track_id: identity.canonical_key,
+    provenance: identity.provenance,
+  };
+}
+
 export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages, routing?: { commerce_action: 'SKIP' | 'SEARCH_NORMAL' | 'SEARCH_BROAD'; verification_action: 'LIGHT' | 'FULL'; telemetry: JevRouterTelemetry; broad_search_on_miss?: boolean }, useMarkingEvidence = false) {
   const routingActive = Boolean(routing && !routing.telemetry.failed);
   let attempts = 0;
@@ -1545,6 +1689,18 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         failures: 0,
         failure_reasons: {},
       };
+      let crossVideoReuse: CrossVideoReuseDecision = {
+        identity: null,
+        canonical_key: null,
+        confidence: 0,
+        reason: 'no_candidate',
+      };
+      let crossVideoVisualCheck: CrossVideoVisualCheck = {
+        decision: crossVideoReuse,
+        compared: 0,
+        failures: 0,
+        failure_reasons: {},
+      };
       if (!verifiedMapping && durableMappings.length) {
         const canonicalMappings = durableMappings.filter((mapping) => Boolean(mapping.canonical_key));
         const canonicalRows = (await Promise.all(canonicalMappings.map(async (mapping) => {
@@ -1590,6 +1746,29 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           }
         }
       }
+      if (!verifiedMapping) {
+        const sameVideoCanonicalKeys = new Set(
+          durableMappings.map((mapping) => mapping.canonical_key).filter((key): key is string => Boolean(key)),
+        );
+        crossVideoVisualCheck = await confirmCrossVideoReuseWithImage(
+          env,
+          description,
+          context,
+          sourceImage,
+          sameVideoCanonicalKeys,
+        );
+        crossVideoReuse = crossVideoVisualCheck.decision;
+        if (crossVideoReuse.identity) {
+          const reused = crossVideoMapping(crossVideoReuse.identity, context);
+          if (reused) {
+            verifiedMapping = reused;
+            if (reused.provenance === 'admin_verified') {
+              verifiedMapping = await persistAdminVerifiedMapping(env, reused).catch(() => reused);
+            }
+          }
+        }
+      }
+
       if (verifiedMapping) {
         const configuredProviders = commerceProviders(env);
         const refreshed = await refreshVerifiedOffers(configuredProviders, verifiedMapping, {
@@ -1605,7 +1784,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           totalMs: total_ms,
           providersUsed: refreshed.providers_used,
           resultRows: refreshed.products.map((product) => ({ id: product.id, result_class: product.result_class })),
-          verificationUsage: sameVideoVisualCheck.usage,
+          verificationUsage: sameVideoVisualCheck.usage ?? crossVideoVisualCheck.usage,
           commerceCalls: refreshed.commerce_calls,
           visionUsage: rawDescription?.provider_usage,
         });
@@ -1627,15 +1806,15 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             retrieved: refreshed.products.length,
             metadata_prefiltered: 0,
             light_escalations: 0,
-            compared: sameVideoVisualCheck.compared,
-            image_failures: sameVideoVisualCheck.failures,
-            image_failure_reasons: sameVideoVisualCheck.failure_reasons,
+            compared: sameVideoVisualCheck.compared + crossVideoVisualCheck.compared,
+            image_failures: sameVideoVisualCheck.failures + crossVideoVisualCheck.failures,
+            image_failure_reasons: { ...sameVideoVisualCheck.failure_reasons, ...crossVideoVisualCheck.failure_reasons },
             rejected: 0,
             contradictions: {},
           },
           cost_usage: {
             commerce_calls: refreshed.commerce_calls,
-            verification_usage: sameVideoVisualCheck.usage ?? {
+            verification_usage: sameVideoVisualCheck.usage ?? crossVideoVisualCheck.usage ?? {
               provider: 'none',
               model: 'none',
               requests: 0,
@@ -1652,20 +1831,28 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             ...(verifiedMapping.canonical_key ? { canonical_key: verifiedMapping.canonical_key } : {}),
             ...(verifiedMapping.track_id ? { track_id: verifiedMapping.track_id } : {}),
             track_diagnostics: {
-              outcome: sameVideoReuse.mapping ? 'TRACK_REUSED' : 'TIME_WINDOW_HIT',
+              outcome: crossVideoReuse.identity ? 'CROSS_VIDEO_REUSED' : sameVideoReuse.mapping ? 'TRACK_REUSED' : 'TIME_WINDOW_HIT',
               candidate_count: durableMappings.filter((mapping) => Boolean(mapping.track_id)).length,
-              decision_reason: sameVideoReuse.reason,
-              confidence: sameVideoReuse.confidence,
-              visual_compared: sameVideoVisualCheck.compared,
-              visual_failures: sameVideoVisualCheck.failures,
+              decision_reason: crossVideoReuse.identity ? crossVideoReuse.reason : sameVideoReuse.reason,
+              confidence: crossVideoReuse.identity ? crossVideoReuse.confidence : sameVideoReuse.confidence,
+              visual_compared: sameVideoVisualCheck.compared + crossVideoVisualCheck.compared,
+              visual_failures: sameVideoVisualCheck.failures + crossVideoVisualCheck.failures,
               ...(sameVideoReuse.mapping?.track_id ? { selected_track_id: sameVideoReuse.mapping.track_id } : {}),
+              ...(crossVideoReuse.canonical_key ? { selected_cross_video_canonical_key: crossVideoReuse.canonical_key } : {}),
               ...(context?.timestamp_ms != null ? { observation_timestamp_ms: context.timestamp_ms } : {}),
               promotion_window_start_ms: verifiedMapping.timestamp_start_ms,
               promotion_window_end_ms: verifiedMapping.timestamp_end_ms,
               ...(record.vpm_observation_mode === 'nearby_frame_recovery' ? { observation_mode: 'nearby_frame_recovery' } : {}),
               trusted_observation_count: verifiedMapping.trusted_observations?.length ?? 0,
             },
-            ...(sameVideoReuse.mapping ? {
+            ...(crossVideoReuse.identity ? {
+              reuse: 'cross_video',
+              canonical_key: crossVideoReuse.canonical_key,
+              confidence: crossVideoReuse.confidence,
+              reason: crossVideoReuse.reason,
+              visual_similarity: crossVideoReuse.visual_similarity,
+              visual_confidence: crossVideoReuse.visual_confidence,
+            } : sameVideoReuse.mapping ? {
               reuse: 'same_video',
               canonical_key: sameVideoReuse.canonical_key,
               confidence: sameVideoReuse.confidence,
@@ -1675,10 +1862,10 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           latency_ms: total_ms,
           timing: {
             provider_retrieval_ms: refreshed.provider_retrieval_ms,
-            candidate_verification_ms: sameVideoVisualCheck.timing?.total_ms ?? 0,
-            candidate_image_fetch_ms: sameVideoVisualCheck.timing?.image_fetch_ms ?? 0,
-            candidate_model_verification_ms: sameVideoVisualCheck.timing?.model_ms ?? 0,
-            verification_batches: sameVideoVisualCheck.timing?.batches ?? [],
+            candidate_verification_ms: (sameVideoVisualCheck.timing?.total_ms ?? 0) + (crossVideoVisualCheck.timing?.total_ms ?? 0),
+            candidate_image_fetch_ms: (sameVideoVisualCheck.timing?.image_fetch_ms ?? 0) + (crossVideoVisualCheck.timing?.image_fetch_ms ?? 0),
+            candidate_model_verification_ms: (sameVideoVisualCheck.timing?.model_ms ?? 0) + (crossVideoVisualCheck.timing?.model_ms ?? 0),
+            verification_batches: [...(sameVideoVisualCheck.timing?.batches ?? []), ...(crossVideoVisualCheck.timing?.batches ?? [])],
             total_ms,
           },
         });
