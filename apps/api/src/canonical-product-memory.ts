@@ -2,6 +2,8 @@ import type { CanonicalRelationship } from './commerce.js';
 import type { VerifiedProductMapping, VerifiedProductProvenance } from './verified-product-mapping.js';
 
 export type CanonicalMerchantRef = {
+  /** Stable merchant-offer identity. This is deliberately separate from canonical product identity. */
+  offer_key?: string;
   source: string | null;
   item_id: string | null;
   destination: string;
@@ -68,6 +70,20 @@ function stableHash(value: string): string {
     h2 = Math.imul(h2 ^ code, 0x85ebca6b);
   }
   return `${(h1 >>> 0).toString(36)}${(h2 >>> 0).toString(36)}`;
+}
+
+export function canonicalMerchantOfferKey(ref: Pick<CanonicalMerchantRef, 'source' | 'item_id' | 'destination'>): string {
+  const source = normalizeIdentityText(ref.source) || 'unknown';
+  const item = normalizeIdentityText(ref.item_id);
+  if (item) return `${source}:${item}`;
+  let destination = ref.destination.trim();
+  try {
+    const url = new URL(destination);
+    url.search = '';
+    url.hash = '';
+    destination = url.toString().replace(/\/$/, '');
+  } catch {}
+  return `${source}:${destination.toLowerCase()}`;
 }
 
 function sourceFromMapping(mapping: VerifiedProductMapping): string | null {
@@ -157,6 +173,7 @@ export function canonicalProductIdentity(input: CanonicalIdentityInput): Canonic
     provenance: mapping.provenance,
     verified_at: input.verifiedAt ?? new Date().toISOString(),
     merchant_refs: [{
+      offer_key: canonicalMerchantOfferKey({ source, item_id: merchantItemId, destination: mapping.destination }),
       source,
       item_id: merchantItemId,
       destination: mapping.destination,
@@ -180,12 +197,11 @@ export function mergeCanonicalProductIdentity(
 
   const merchantRefs = [...existing.merchant_refs];
   for (const ref of incoming.merchant_refs) {
+    const incomingKey = ref.offer_key || canonicalMerchantOfferKey(ref);
     const duplicateIndex = merchantRefs.findIndex((current) =>
-      normalizeIdentityText(current.source) === normalizeIdentityText(ref.source)
-      && normalizeIdentityText(current.item_id) === normalizeIdentityText(ref.item_id)
-      && current.destination === ref.destination);
+      (current.offer_key || canonicalMerchantOfferKey(current)) === incomingKey);
     if (duplicateIndex < 0) {
-      merchantRefs.push(ref);
+      merchantRefs.push({ ...ref, offer_key: incomingKey });
       continue;
     }
     const current = merchantRefs[duplicateIndex];
