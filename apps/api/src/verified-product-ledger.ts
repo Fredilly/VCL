@@ -1,5 +1,5 @@
 import type { VerifiedProductMapping, VpmTrustedObservation } from './verified-product-mapping.js';
-import { canonicalMerchantOfferKey, canonicalProductIdentity, mergeCanonicalProductIdentity, normalizeIdentityText, type CanonicalProductIdentity } from './canonical-product-memory.js';
+import { canonicalEquivalenceEvidenceKey, canonicalMerchantOfferKey, canonicalProductIdentity, mergeCanonicalProductIdentity, normalizeIdentityText, type CanonicalProductIdentity } from './canonical-product-memory.js';
 
 type DurableObjectStubLike = { fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> };
 export type VerifiedProductLedgerNamespaceLike = {
@@ -79,6 +79,16 @@ export async function persistCanonicalProductIdentity(
   const result = await postJson<{ identity?: CanonicalProductIdentity }>(env, '/canonical/upsert', identity);
   if (!result?.identity) throw new Error('canonical product ledger unavailable');
   return result.identity;
+}
+
+export async function consolidateCanonicalProducts(
+  env: VerifiedProductLedgerEnv,
+  canonicalKeys: string[],
+): Promise<CanonicalProductIdentity | null> {
+  const result = await postJson<{ identity?: CanonicalProductIdentity | null }>(env, '/canonical/consolidate', {
+    canonical_keys: canonicalKeys,
+  });
+  return result?.identity ?? null;
 }
 
 export async function durableCanonicalProductIdentity(
@@ -315,7 +325,23 @@ export class VerifiedProductLedger {
       const platform = bounded(body.platform, 40);
       const contentRef = bounded(body.content_ref, 180);
       if (!platform || !contentRef) return Response.json({ mappings: [] });
-      return Response.json({ mappings: await this.storage.get<VerifiedProductMapping[]>(contentKey(platform, contentRef)) ?? [] });
+      const key = contentKey(platform, contentRef);
+      const mappings = await this.storage.get<VerifiedProductMapping[]>(key) ?? [];
+      let changed = false;
+      const resolved = await Promise.all(mappings.map(async (mapping) => {
+        const canonical = bounded(mapping.canonical_key, 220);
+        if (!canonical) return mapping;
+        const redirect = await this.storage.get<string>(canonicalRedirectKey(canonical));
+        if (!redirect || redirect === canonical) return mapping;
+        changed = true;
+        return {
+          ...mapping,
+          canonical_key: redirect,
+          ...(bounded(mapping.track_id, 220) === canonical ? { track_id: redirect } : {}),
+        };
+      }));
+      if (changed) await this.storage.put(key, resolved);
+      return Response.json({ mappings: resolved });
     }
 
     if (path === '/canonical/get') {
@@ -338,6 +364,72 @@ export class VerifiedProductLedger {
       return Response.json({
         canonical_key: canonical,
         identity: await this.storage.get<CanonicalProductIdentity>(canonicalKey(canonical)) ?? null,
+      });
+    }
+
+    if (path === '/canonical/consolidate') {
+      const body = await request.json() as Record<string, unknown>;
+      const rawKeys = Array.isArray(body.canonical_keys) ? body.canonical_keys : [];
+      const requested = [...new Set(rawKeys.map((value) => bounded(value, 220)).filter(Boolean))];
+      if (requested.length < 2 || requested.length > 12) {
+        return Response.json({ error: 'Need 2-12 canonical keys' }, { status: 400 });
+      }
+
+      return await this.serializeCanonicalWrite(async () => {
+        const resolvedKeys = [...new Set(await Promise.all(requested.map(async (key) =>
+          await this.storage.get<string>(canonicalRedirectKey(key)) || key)))];
+        const identities = (await Promise.all(resolvedKeys.map((key) =>
+          this.storage.get<CanonicalProductIdentity>(canonicalKey(key)))))
+          .filter((identity): identity is CanonicalProductIdentity => Boolean(identity));
+        if (identities.length < 2) {
+          return Response.json({ identity: identities[0] ?? null, consolidated: false });
+        }
+
+        const evidenceKeys = identities.map(canonicalEquivalenceEvidenceKey);
+        const sharedEvidence = evidenceKeys[0];
+        if (!sharedEvidence || !evidenceKeys.every((key) => key === sharedEvidence)) {
+          return Response.json({ error: 'Canonical identities are not equivalent' }, { status: 409 });
+        }
+
+        const survivorKey = identities.map((identity) => identity.canonical_key).sort()[0]!;
+        let survivor = identities.find((identity) => identity.canonical_key === survivorKey)!;
+        for (const duplicate of identities) {
+          if (duplicate.canonical_key === survivorKey) continue;
+          try {
+            survivor = mergeCanonicalProductIdentity(survivor, {
+              ...duplicate,
+              canonical_key: survivorKey,
+            });
+          } catch {
+            return Response.json({ error: 'Conflicting canonical product identity' }, { status: 409 });
+          }
+        }
+
+        await this.storage.put(canonicalKey(survivorKey), survivor);
+        await this.indexCanonicalIdentity(survivor);
+        for (const ref of survivor.merchant_refs) {
+          const offerKey = ref.offer_key || canonicalMerchantOfferKey(ref);
+          await this.storage.put(offerOwnerKey(offerKey), survivorKey);
+        }
+        for (const duplicate of identities) {
+          if (duplicate.canonical_key !== survivorKey) {
+            await this.storage.put(canonicalRedirectKey(duplicate.canonical_key), survivorKey);
+          }
+        }
+
+        const index = await this.storage.get<string[]>(CANONICAL_INDEX_KEY) ?? [];
+        const loserKeys = new Set(identities
+          .map((identity) => identity.canonical_key)
+          .filter((key) => key !== survivorKey));
+        const nextIndex = [survivorKey, ...index.filter((key) => key !== survivorKey && !loserKeys.has(key))];
+        await this.storage.put(CANONICAL_INDEX_KEY, nextIndex.slice(0, 500));
+
+        return Response.json({
+          identity: survivor,
+          consolidated: true,
+          canonical_key: survivorKey,
+          merged_keys: [...loserKeys],
+        });
       });
     }
 
