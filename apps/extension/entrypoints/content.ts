@@ -19,10 +19,10 @@ const SEARCHING_QUIPS = [
 
 function startSearchingQuips(title: HTMLElement) {
   let index = Math.floor(Math.random() * SEARCHING_QUIPS.length);
-  title.textContent = SEARCHING_QUIPS[index];
+  title.textContent = SEARCHING_QUIPS[index] ?? 'Searching…';
   const interval = window.setInterval(() => {
     index = (index + 1) % SEARCHING_QUIPS.length;
-    title.textContent = SEARCHING_QUIPS[index];
+    title.textContent = SEARCHING_QUIPS[index] ?? 'Searching…';
   }, 1800);
   return () => window.clearInterval(interval);
 }
