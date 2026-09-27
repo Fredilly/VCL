@@ -148,3 +148,75 @@ test('partial stored OCR can still nominate a canonical product from its verifie
   assert.equal(candidates[0].canonical_key, identity.canonical_key);
   assert.equal(candidates[0].reason, 'distinctive_text_candidate');
 });
+
+
+test('previously verified merchant offer becomes Exact after strong current-frame visual confirmation', () => {
+  const product = {
+    id: 'v1|307197731843|607037825827',
+    title: 'Building Is My Love Language Shirt',
+    destination: 'https://www.ebay.com/itm/307197731843?var=607037825827',
+    provider: 'ebay',
+    provenance: 'ebay:browse',
+    image_reference: 'https://i.ebayimg.com/item-live.jpg',
+    price: 19.99,
+    currency: 'USD',
+    result_class: 'SIMILAR',
+    verification_image_similarity: 0.95,
+    verification_image_confidence: 0.95,
+    metadata: { color: 'black', category: 't-shirt' },
+  };
+  const result = mod.promoteKnownCrossVideoOffers({
+    description,
+    products: [product],
+    identities: [identity],
+  });
+  assert.equal(result[0].result_class, 'EXACT');
+  assert.equal(result[0].relationship, 'EXACT');
+  assert.match(result[0].verification_reasons.at(-1), /previously verified merchant offer/i);
+});
+
+test('sibling merchant variation does not inherit cross-video Exact', () => {
+  const sibling = {
+    id: 'v1|307197731843|607037825830',
+    title: 'Building Is My Love Language Shirt',
+    destination: 'https://www.ebay.com/itm/307197731843?var=607037825830',
+    provider: 'ebay',
+    provenance: 'ebay:browse',
+    image_reference: 'https://i.ebayimg.com/item-live.jpg',
+    price: 19.99,
+    currency: 'USD',
+    result_class: 'SIMILAR',
+    verification_image_similarity: 0.96,
+    verification_image_confidence: 0.96,
+    metadata: { color: 'black', category: 't-shirt' },
+  };
+  const result = mod.promoteKnownCrossVideoOffers({
+    description,
+    products: [sibling],
+    identities: [identity],
+  });
+  assert.equal(result[0].result_class, 'SIMILAR');
+});
+
+test('known merchant offer still needs strong visual confirmation', () => {
+  const weak = {
+    id: 'v1|307197731843|607037825827',
+    title: 'Building Is My Love Language Shirt',
+    destination: 'https://www.ebay.com/itm/307197731843?var=607037825827',
+    provider: 'ebay',
+    provenance: 'ebay:browse',
+    image_reference: 'https://i.ebayimg.com/item-live.jpg',
+    price: 19.99,
+    currency: 'USD',
+    result_class: 'SIMILAR',
+    verification_image_similarity: 0.91,
+    verification_image_confidence: 0.95,
+    metadata: { color: 'black', category: 't-shirt' },
+  };
+  const result = mod.promoteKnownCrossVideoOffers({
+    description,
+    products: [weak],
+    identities: [identity],
+  });
+  assert.equal(result[0].result_class, 'SIMILAR');
+});
