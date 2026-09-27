@@ -398,7 +398,8 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
         feedback.appendChild(demote);
       }
       if (admin?.admin && adminPayload && relationship === 'SIMILAR') {
-        const verify = button('Promote to Exact');
+        const rememberedIdentity = Boolean(commerce.verified_mapping?.hit && commerce.verified_mapping?.canonical_key);
+        const verify = button(rememberedIdentity ? 'Add verified offer' : 'Promote to Exact');
         Object.assign(verify.style, { height: '32px', padding: '0 9px', fontSize: '11px', opacity: '0.9' });
         verify.disabled = false;
         verify.addEventListener('click', (event) => {
@@ -416,7 +417,9 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
               product,
             },
           }).then((response) => {
-            verify.textContent = response?.accepted ? '✓ Verified' : (typeof response?.error === 'string' ? response.error : 'Try again');
+            verify.textContent = response?.accepted
+              ? (rememberedIdentity ? '✓ Offer added' : '✓ Verified')
+              : (typeof response?.error === 'string' ? response.error : 'Try again');
             verify.disabled = Boolean(response?.accepted);
           }).catch(() => { verify.textContent = 'Try again'; verify.disabled = false; });
         });
