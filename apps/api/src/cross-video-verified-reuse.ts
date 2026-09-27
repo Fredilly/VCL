@@ -72,17 +72,20 @@ export function crossVideoCanonicalCandidates(input: {
       }];
     }
 
-    const strongIdentityText = [
+    const strongIdentityText = words([
       ...identity.visible_text,
       ...(identity.logos_markings ?? []),
-    ];
-    const identityText = words(strongIdentityText.length ? strongIdentityText : [identity.title]);
-    const text = overlap(identityText, observedText);
-    if (text.shared >= 3 && text.ratio >= 0.8) {
+    ]);
+    const titleText = words([identity.title]);
+    const strongText = overlap(strongIdentityText, observedText);
+    const title = overlap(titleText, observedText);
+    const strongEnough = strongText.shared >= 3 && strongText.ratio >= 0.8;
+    const titleEnough = title.shared >= 3 && title.ratio >= 0.75;
+    if (strongEnough || titleEnough) {
       return [{
         identity,
         canonical_key: identity.canonical_key,
-        confidence: 0.9,
+        confidence: strongEnough ? 0.9 : 0.86,
         reason: 'distinctive_text_candidate',
       }];
     }
