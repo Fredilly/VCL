@@ -1604,6 +1604,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
               ...(context?.timestamp_ms != null ? { observation_timestamp_ms: context.timestamp_ms } : {}),
               promotion_window_start_ms: verifiedMapping.timestamp_start_ms,
               promotion_window_end_ms: verifiedMapping.timestamp_end_ms,
+              ...(record.vpm_observation_mode === 'nearby_frame_recovery' ? { observation_mode: 'nearby_frame_recovery' } : {}),
             },
             ...(sameVideoReuse.mapping ? {
               reuse: 'same_video',
