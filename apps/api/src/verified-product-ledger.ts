@@ -311,8 +311,13 @@ export class VerifiedProductLedger {
             ? mergeCanonicalProductIdentity(existing, normalizedIncoming)
             : normalizedIncoming;
         } catch {
-          // Stable offer ownership outranks conflicting legacy identity guesses.
-          identity = existing ? mergeSameOfferIdentity(existing, normalizedIncoming) : normalizedIncoming;
+          // Only reconcile conflicting legacy identities when an already-owned
+          // merchant offer redirects this write to a different canonical node.
+          // Conflicting evidence on the same canonical key must still fail closed.
+          if (!existing || survivorKey === requestedKey) {
+            return Response.json({ error: 'Conflicting canonical product identity' }, { status: 409 });
+          }
+          identity = mergeSameOfferIdentity(existing, normalizedIncoming);
         }
 
         await this.storage.put(storageKey, identity);
