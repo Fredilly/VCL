@@ -4,11 +4,13 @@ import { JevJudgmentProvider, type WorkersAiBinding } from './jev.js';
 export type CommerceAction = 'SKIP' | 'SEARCH_NORMAL' | 'SEARCH_BROAD';
 export type VerificationAction = 'LIGHT' | 'FULL';
 export type MultiframeAction = 'NO' | 'ESCALATE';
+export type CanonicalRetrievalAction = 'TEXT' | 'MODEL' | 'STRUCTURED' | 'HYBRID' | 'SKIP';
 
 export type JevRoutingDecision = {
   commerce_action: CommerceAction;
   verification_action: VerificationAction;
   multiframe_action: MultiframeAction;
+  canonical_retrieval_action: CanonicalRetrievalAction;
 };
 
 export type JevRouterTelemetry = {
@@ -20,6 +22,7 @@ export type JevRouterTelemetry = {
   commerce_action: CommerceAction;
   verification_action: VerificationAction;
   multiframe_action: MultiframeAction;
+  canonical_retrieval_action: CanonicalRetrievalAction;
   input_tokens: number;
   output_tokens: number;
   request_schema_version: string;
@@ -34,14 +37,21 @@ export type JevRouterInput = {
   description: Pick<ObjectDescription, 'category' | 'subcategory' | 'confidence' | 'identity_confidence' | 'visible_text' | 'logos_markings' | 'distinctive_features'>;
   multi_frame_available: boolean;
   provider_context: { commerce_providers_available: number; vision_provider_available: boolean };
+  retrieval_context: {
+    has_brand_candidate: boolean;
+    has_model_candidate: boolean;
+    has_distinctive_text: boolean;
+    has_category: boolean;
+  };
 };
 
-const FALLBACK: JevRoutingDecision = { commerce_action: 'SEARCH_NORMAL', verification_action: 'FULL', multiframe_action: 'NO' };
+const FALLBACK: JevRoutingDecision = { commerce_action: 'SEARCH_NORMAL', verification_action: 'FULL', multiframe_action: 'NO', canonical_retrieval_action: 'HYBRID' };
 const REQUEST_SCHEMA_VERSION = 'jev-state-questions-v1';
 const actions = {
   commerce_action: new Set<CommerceAction>(['SKIP', 'SEARCH_NORMAL', 'SEARCH_BROAD']),
   verification_action: new Set<VerificationAction>(['LIGHT', 'FULL']),
   multiframe_action: new Set<MultiframeAction>(['NO', 'ESCALATE']),
+  canonical_retrieval_action: new Set<CanonicalRetrievalAction>(['TEXT', 'MODEL', 'STRUCTURED', 'HYBRID', 'SKIP']),
 };
 
 function validDecision(value: unknown): value is JevRoutingDecision {
@@ -49,7 +59,10 @@ function validDecision(value: unknown): value is JevRoutingDecision {
   const v = value as Record<string, unknown>;
   return typeof v.commerce_action === 'string' && actions.commerce_action.has(v.commerce_action as CommerceAction)
     && typeof v.verification_action === 'string' && actions.verification_action.has(v.verification_action as VerificationAction)
-    && typeof v.multiframe_action === 'string' && actions.multiframe_action.has(v.multiframe_action as MultiframeAction);
+    && typeof v.multiframe_action === 'string' && actions.multiframe_action.has(v.multiframe_action as MultiframeAction)
+    && (v.canonical_retrieval_action == null
+      || (typeof v.canonical_retrieval_action === 'string'
+        && actions.canonical_retrieval_action.has(v.canonical_retrieval_action as CanonicalRetrievalAction)));
 }
 
 function strongEnoughForLight(input: JevRouterInput): boolean {
@@ -81,8 +94,14 @@ function parseDecision(value: unknown): JevRoutingDecision | null {
   const raw = value as Record<string, unknown>;
 
   // Backward-compatible with the early adapter/tests.
-  if (validDecision(raw.decision)) return raw.decision;
-  if (validDecision(raw)) return raw;
+  if (validDecision(raw.decision)) {
+    const decision = raw.decision as JevRoutingDecision;
+    return { ...decision, canonical_retrieval_action: decision.canonical_retrieval_action ?? 'HYBRID' };
+  }
+  if (validDecision(raw)) {
+    const decision = raw as unknown as JevRoutingDecision;
+    return { ...decision, canonical_retrieval_action: decision.canonical_retrieval_action ?? 'HYBRID' };
+  }
 
   // Cloudflare Jev returns typed answers under response.answers.<question>.choice.
   const answers = raw.answers;
@@ -92,6 +111,7 @@ function parseDecision(value: unknown): JevRoutingDecision | null {
     commerce_action: choiceAnswer(answerRecord, 'commerce_action'),
     verification_action: choiceAnswer(answerRecord, 'verification_action'),
     multiframe_action: choiceAnswer(answerRecord, 'multiframe_action'),
+    canonical_retrieval_action: choiceAnswer(answerRecord, 'canonical_retrieval_action') ?? 'HYBRID',
   };
   return validDecision(decision) ? decision : null;
 }
@@ -161,6 +181,17 @@ export async function routeWithJev(input: JevRouterInput, ai: WorkersAiBinding, 
           commerce_action: { type: 'choice', instructions: 'Choose commerce routing conservatively. SKIP only when no useful purchasable object is strongly indicated; SEARCH_BROAD only when normal evidence is insufficient.', criteria: { SKIP: 'No useful purchasable object.', SEARCH_NORMAL: 'Evidence supports a normal commerce search.', SEARCH_BROAD: 'Normal evidence is insufficient and broader search may help.' } },
           verification_action: { type: 'choice', instructions: 'Choose LIGHT only when the evidence is strong enough that full verification is clearly unnecessary.', criteria: { LIGHT: 'Strong evidence; light verification is sufficient.', FULL: 'Full verification is needed.' } },
           multiframe_action: { type: 'choice', instructions: 'Choose ESCALATE only when another frame could materially improve insufficient evidence.', criteria: { NO: 'Another frame is not materially needed.', ESCALATE: 'Another frame could materially help.' } },
+          canonical_retrieval_action: {
+            type: 'choice',
+            instructions: 'Choose the smallest canonical-product retrieval path supported by the evidence. This chooses an index only; it never decides product identity.',
+            criteria: {
+              TEXT: 'Distinctive visible text or markings are the strongest retrieval signal.',
+              MODEL: 'A model/product-family candidate is the strongest retrieval signal.',
+              STRUCTURED: 'Category plus structured attributes are the strongest available retrieval signal.',
+              HYBRID: 'Multiple evidence paths should be queried because no single path is sufficient.',
+              SKIP: 'There is not enough product evidence to query canonical memory usefully.'
+            }
+          },
         },
       }),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Jev router timeout')), timeoutMs)),
@@ -208,5 +239,23 @@ export async function routeWithJev(input: JevRouterInput, ai: WorkersAiBinding, 
 }
 
 export function routerInput(description: ObjectDescription, multiFrameAvailable: boolean, commerceProvidersAvailable: number): JevRouterInput {
-  return { description: { category: description.category, subcategory: description.subcategory, confidence: description.confidence, identity_confidence: description.identity_confidence, visible_text: description.visible_text, logos_markings: description.logos_markings, distinctive_features: description.distinctive_features }, multi_frame_available: multiFrameAvailable, provider_context: { commerce_providers_available: commerceProvidersAvailable, vision_provider_available: true } };
+  return {
+    description: {
+      category: description.category,
+      subcategory: description.subcategory,
+      confidence: description.confidence,
+      identity_confidence: description.identity_confidence,
+      visible_text: description.visible_text,
+      logos_markings: description.logos_markings,
+      distinctive_features: description.distinctive_features,
+    },
+    multi_frame_available: multiFrameAvailable,
+    provider_context: { commerce_providers_available: commerceProvidersAvailable, vision_provider_available: true },
+    retrieval_context: {
+      has_brand_candidate: Boolean(description.brand_candidate?.trim()),
+      has_model_candidate: Boolean(description.model_candidate?.trim()),
+      has_distinctive_text: Boolean(description.visible_text.length || description.logos_markings.length),
+      has_category: Boolean(description.category?.trim() || description.subcategory?.trim()),
+    },
+  };
 }
