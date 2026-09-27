@@ -15,7 +15,7 @@ for (const [commerce_action, verification_action, multiframe_action] of [
   ['SKIP', 'FULL', 'NO'], ['SEARCH_NORMAL', 'LIGHT', 'NO'], ['SEARCH_BROAD', 'FULL', 'ESCALATE'],
 ]) test(`valid Jev response routes ${commerce_action}/${verification_action}/${multiframe_action}`, async () => {
   const result = await routeWithJev(routerInput(evidence, true, 2), ai({ commerce_action, verification_action, multiframe_action }));
-  assert.deepEqual(result.decision, { commerce_action, verification_action, multiframe_action, canonical_retrieval_action: 'HYBRID' });
+  assert.deepEqual(result.decision, { commerce_action, verification_action, multiframe_action });
   assert.equal(result.telemetry.failed, false);
   assert.equal(result.telemetry.request_schema_version, 'jev-state-questions-v1');
 });
