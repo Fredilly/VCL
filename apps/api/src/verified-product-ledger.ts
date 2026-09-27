@@ -90,6 +90,13 @@ export async function durableCanonicalProductIdentity(
   return result?.identity ?? null;
 }
 
+export async function durableCanonicalProductIdentities(
+  env: VerifiedProductLedgerEnv,
+): Promise<CanonicalProductIdentity[]> {
+  const result = await postJson<{ identities?: CanonicalProductIdentity[] }>(env, '/canonical/list', {});
+  return Array.isArray(result?.identities) ? result!.identities! : [];
+}
+
 export async function backfillLegacyAdminCanonicalMappings(
   env: VerifiedProductLedgerEnv,
   mappings: VerifiedProductMapping[],
@@ -118,6 +125,8 @@ function contentKey(platform: string, contentRef: string): string {
 function canonicalKey(value: string): string {
   return `canonical:${bounded(value, 220).toLowerCase()}`;
 }
+
+const CANONICAL_INDEX_KEY = 'canonical:index:v1';
 
 function boundedList(value: unknown, maxItems = 12): string[] {
   if (!Array.isArray(value)) return [];
@@ -196,6 +205,14 @@ export class VerifiedProductLedger {
       return Response.json({ identity: await this.storage.get<CanonicalProductIdentity>(canonicalKey(key)) ?? null });
     }
 
+    if (path === '/canonical/list') {
+      const keys = await this.storage.get<string[]>(CANONICAL_INDEX_KEY) ?? [];
+      const identities = (await Promise.all(keys.slice(0, 500).map((key) =>
+        this.storage.get<CanonicalProductIdentity>(canonicalKey(key)))))
+        .filter((identity): identity is CanonicalProductIdentity => Boolean(identity));
+      return Response.json({ identities });
+    }
+
     if (path === '/canonical/upsert') {
       const incoming = await request.json() as CanonicalProductIdentity;
       const key = bounded(incoming.canonical_key, 220);
@@ -211,6 +228,11 @@ export class VerifiedProductLedger {
         return Response.json({ error: 'Conflicting canonical product identity' }, { status: 409 });
       }
       await this.storage.put(storageKey, identity);
+      const index = await this.storage.get<string[]>(CANONICAL_INDEX_KEY) ?? [];
+      if (!index.includes(key)) {
+        index.unshift(key);
+        await this.storage.put(CANONICAL_INDEX_KEY, index.slice(0, 500));
+      }
       return Response.json({ accepted: true, identity });
     }
 
