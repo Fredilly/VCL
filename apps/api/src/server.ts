@@ -29,7 +29,7 @@ export { FeedbackLedger } from './feedback-ledger.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
-import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
+import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentities, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
 import { distinctiveTextSameVideoReuse, eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, verifiedProductMemoryCandidates, identityWithTrustedVpmObservations, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
@@ -833,6 +833,147 @@ async function confirmSameVideoReuseWithImage(
     failure_reasons: images.failure_reasons ?? {},
     usage: images.usage,
     timing: images.timing,
+  };
+}
+
+
+type CrossVideoVisualCheck = {
+  decision: CrossVideoReuseDecision;
+  compared: number;
+  failures: number;
+  failure_reasons: Record<string, number>;
+  usage?: {
+    provider: string;
+    model: string;
+    requests: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    cost_usd?: number;
+  };
+  timing?: {
+    image_fetch_ms: number;
+    model_ms: number;
+    total_ms: number;
+    batches: Array<{
+      batch_index: number;
+      candidates: number;
+      images_loaded: number;
+      comparisons: number;
+      image_fetch_ms: number;
+      model_ms: number;
+      total_ms: number;
+    }>;
+  };
+};
+
+async function confirmCrossVideoReuseWithImage(
+  env: Env,
+  description: ReturnType<typeof normalizeObjectDescription>,
+  context: ProductContext | undefined,
+  sourceImage: ReturnType<typeof parseSourceImage>,
+): Promise<CrossVideoVisualCheck> {
+  const noDecision: CrossVideoReuseDecision = {
+    identity: null,
+    canonical_key: null,
+    confidence: 0,
+    reason: 'no_candidate',
+  };
+  const empty = { decision: noDecision, compared: 0, failures: 0, failure_reasons: {} };
+  if (!sourceImage) return empty;
+
+  const identities = await durableCanonicalProductIdentities(env).catch(() => []);
+  const candidates = crossVideoCanonicalCandidates({ description, identities });
+  if (!candidates.length) return empty;
+
+  const rows = candidates.slice(0, 8).flatMap((candidate) => {
+    const identity = candidate.identity;
+    if (!identity) return [];
+    const merchant = identity.merchant_refs.find((ref) => Boolean(ref.image_reference && ref.destination));
+    if (!merchant?.image_reference) return [];
+    return [{
+      candidate,
+      product: {
+        id: identity.canonical_key,
+        title: identity.title,
+        brand: identity.brand,
+        model: identity.model,
+        category: identity.object_type,
+        image_reference: merchant.image_reference,
+        provenance: 'canonical_verified',
+        destination: merchant.destination,
+        price: null,
+        currency: null,
+        result_class: 'SIMILAR',
+      } as ProductCandidate,
+    }];
+  });
+  if (!rows.length) return { ...empty, decision: { ...noDecision, reason: 'visual_rejected' } };
+
+  const useOpenRouter = env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
+  const key = useOpenRouter ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY;
+  if (!key) return empty;
+  const model = useOpenRouter
+    ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL)
+    : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
+  const images = await compareCandidateImages(
+    key,
+    model,
+    sourceImage,
+    description,
+    rows.map((row) => row.product),
+    context,
+    imageRequestBudget(),
+    { provider: useOpenRouter ? 'openrouter' : 'gemini' },
+  ).catch(() => null);
+  if (!images) {
+    return {
+      ...empty,
+      decision: { ...noDecision, reason: 'visual_rejected' },
+      failures: 1,
+      failure_reasons: { visual_check_failed: 1 },
+    };
+  }
+
+  const comparisons = new Map<string, ImageComparison>();
+  for (const row of rows) {
+    const comparison = images.comparisons.get(candidateKey(row.product));
+    if (comparison) comparisons.set(row.candidate.canonical_key!, comparison);
+  }
+  return {
+    decision: confirmCrossVideoVisual(rows.map((row) => row.candidate), comparisons),
+    compared: images.compared,
+    failures: images.failures,
+    failure_reasons: images.failure_reasons ?? {},
+    usage: images.usage,
+    timing: images.timing,
+  };
+}
+
+function crossVideoMapping(
+  identity: CanonicalProductIdentity,
+  context: ProductContext | undefined,
+): VerifiedProductMapping | null {
+  if (!context?.platform || !context.content_ref) return null;
+  const merchant = identity.merchant_refs.find((ref) => Boolean(ref.destination));
+  if (!merchant) return null;
+  const timestamp = context.timestamp_ms ?? 0;
+  return {
+    platform: context.platform,
+    content_ref: context.content_ref,
+    scope: 'time_window',
+    timestamp_start_ms: Math.max(0, timestamp - 5000),
+    timestamp_end_ms: timestamp + 5000,
+    object_type: identity.object_type,
+    brand: identity.brand ?? '',
+    product_id: merchant.item_id || identity.model || identity.canonical_key,
+    title: identity.title,
+    destination: merchant.destination,
+    image_reference: merchant.image_reference,
+    provider: merchant.source,
+    canonical_key: identity.canonical_key,
+    track_id: identity.canonical_key,
+    provenance: identity.provenance,
   };
 }
 
