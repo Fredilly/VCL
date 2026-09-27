@@ -131,7 +131,7 @@ test('a complete high-confidence identity can send nearby evidence without chang
   assert.equal(nearby.nearby_frames[0].dataUrl, 'neighbor-pixels');
   assert.equal(nearby.primary_description.identity_confidence, 0.99);
   assert.equal(nearby.primary_description.subcategory, 'mug');
-  assert.ok(panel.children.some(child => child.textContent === 'Identity confidence: 99%'));
+  assert.ok(panel.children.some(child => child.textContent === 'Exact item confidence: 99%'));
   assert.ok(panel.children.some(child => child.textContent === 'Nearby evidence did not change the selected-object hypothesis.'));
 });
 
