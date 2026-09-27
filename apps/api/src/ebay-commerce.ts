@@ -57,6 +57,25 @@ export function ebayItemIdForLiveLookup(savedItemId: string | null | undefined, 
   return saved;
 }
 
+
+export function ebayDestinationForOffer(itemId: string | null | undefined, destination: string | null | undefined): string | null {
+  if (!destination) return null;
+  const id = (itemId ?? '').trim();
+  const parts = id.split('|');
+  const variationId = parts.length >= 3 && parts[2] && parts[2] !== '0' ? parts[2] : null;
+  if (!variationId) return destination;
+
+  try {
+    const url = new URL(destination);
+    // Bind the click target to the same purchasable variation whose Browse
+    // itemId/price we expose. Preserve all affiliate/tracking parameters.
+    url.searchParams.set('var', variationId);
+    return url.toString();
+  } catch {
+    return destination;
+  }
+}
+
 function normalizeItem(item: EbayItemSummary, query: ProductQuery): ProductCandidate {
   const title = item.title ?? '';
   const model = ebayModel(item);
@@ -73,7 +92,7 @@ function normalizeItem(item: EbayItemSummary, query: ProductQuery): ProductCandi
     metadata: { brand: item.brand?.brandName, model: model ?? undefined, category: item.categories?.[0]?.categoryName },
     image_reference: item.image?.imageUrl ?? item.additionalImages?.[0]?.imageUrl ?? null,
     provenance: 'ebay:browse',
-    destination: item.itemAffiliateWebUrl ?? item.itemWebUrl ?? null,
+    destination: ebayDestinationForOffer(item.itemId, item.itemAffiliateWebUrl ?? item.itemWebUrl ?? null),
     price: item.price?.value ?? null,
     currency: item.price?.currency ?? null,
     result_class: isLikely ? 'LIKELY' : 'SIMILAR',
