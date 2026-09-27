@@ -58,7 +58,7 @@ async function run({ visionStatus = 200, visionPayload = description, commerceSt
   vm.runInContext(compile(content.slice(content.indexOf('const OVERLAY_ID'), content.indexOf('function showOverlay'))), context);
   await vm.runInContext(`showAnalysis({ok:true,dataUrl:"data:image/png;base64,test"${targeted ? ',crop:{}' : ''}})`, context);
   if (improve) {
-    const action = nodes.get('vcl-capture-result').children.find(child => child.textContent === 'Improve with nearby frames');
+    const action = nodes.get('vcl-capture-result').children.find(child => child.textContent === 'Check nearby moments');
     assert.ok(action, 'a complete primary identity must not block the explicit nearby-frame request');
     await action.listeners.get('click')();
   }
@@ -69,7 +69,7 @@ async function run({ visionStatus = 200, visionPayload = description, commerceSt
 test('valid vision response continues through commerce resolution', async () => {
   const { panel, requests, requestBodies } = await run();
   assert.equal(panel.firstElementChild.textContent, 'Scoop found this');
-  assert.ok(panel.children.some(child => child.textContent === 'Commercially searchable confidence: 85%'));
+  assert.ok(panel.children.some(child => child.textContent === 'Search confidence: 85%'));
   assert.ok(panel.children.some(child => child.textContent === 'No useful product candidates returned.'));
   assert.equal(requests, 2);
   assert.equal(requestBodies[1].source_image, requestBodies[0].dataUrl, 'the same selected crop reaches candidate verification');
@@ -131,8 +131,8 @@ test('a complete high-confidence identity can send nearby evidence without chang
   assert.equal(nearby.nearby_frames[0].dataUrl, 'neighbor-pixels');
   assert.equal(nearby.primary_description.identity_confidence, 0.99);
   assert.equal(nearby.primary_description.subcategory, 'mug');
-  assert.ok(panel.children.some(child => child.textContent === 'Identity confidence: 99%'));
-  assert.ok(panel.children.some(child => child.textContent === 'Nearby evidence did not change the selected-object hypothesis.'));
+  assert.ok(panel.children.some(child => child.textContent === 'Exact item confidence: 99%'));
+  assert.ok(panel.children.some(child => child.textContent === 'No clearer match found. Keeping this result.'));
 });
 
 

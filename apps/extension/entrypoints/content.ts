@@ -7,6 +7,27 @@ const RESULT_ID = 'vcl-capture-result';
 let activeCapture: AbortController | undefined;
 const alphaSessionId = crypto.randomUUID();
 
+const SEARCHING_QUIPS = [
+  'Searching…',
+  'Finding the perfect fit…',
+  'Checking the racks…',
+  'Digging through deals…',
+  'Chasing that look…',
+  'Oops, wrong aisle…',
+  'Hippo found the sale…',
+] as const;
+
+function startSearchingQuips(title: HTMLElement) {
+  let index = Math.floor(Math.random() * SEARCHING_QUIPS.length);
+  title.textContent = SEARCHING_QUIPS[index] ?? 'Searching…';
+  if (typeof window === 'undefined' || typeof window.setInterval !== 'function') return () => {};
+  const interval = window.setInterval(() => {
+    index = (index + 1) % SEARCHING_QUIPS.length;
+    title.textContent = SEARCHING_QUIPS[index] ?? 'Searching…';
+  }, 1800);
+  return () => window.clearInterval(interval);
+}
+
 type ObjectDescription = {
   category: string;
   subcategory: string;
@@ -434,7 +455,7 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
 async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, supplied?: ObjectDescription, captureDebug?: unknown, stageTiming: Record<string, number | null> = {}) {
   const scoopEventId = crypto.randomUUID();
   const interactionStarted = Date.now();
-  const panel = basePanel('Scoop is looking…');
+  const panel = basePanel('Searching…');
   const controller = new AbortController();
   activeCapture = controller;
   const imageWrap = document.createElement('div');
@@ -443,7 +464,7 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
   Object.assign(scanSurface.style, { position: 'relative', display: 'inline-block', overflow: 'hidden', borderRadius: '14px', background: '#000' });
   const image = document.createElement('img');
   image.src = result.dataUrl;
-  image.alt = 'Selected object crop';
+  image.alt = 'Selected item';
   Object.assign(image.style, { display: 'block', maxWidth: '100%', maxHeight: '220px', width: 'auto', height: 'auto' });
   const scanLine = document.createElement('div');
   Object.assign(scanLine.style, { position: 'absolute', left: '4%', right: '4%', top: '6%', height: '1px', borderRadius: '999px',
@@ -456,13 +477,15 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     { duration: 3400, iterations: Infinity, easing: 'ease-in-out' },
   ) : null;
   addClose(panel);
+  let stopSearchingQuips = () => {};
 
   try {
     // Alpha baseline: analyze the user-approved 50% crop directly.
     // Model localization/detail crops are intentionally bypassed because they can
     // redirect attention away from the pixels the user actually selected.
     stageTiming.localization_ms = null;
-    panel.firstElementChild!.textContent = 'Scoop is looking…';
+    const panelTitle = panel.firstElementChild as HTMLElement;
+    stopSearchingQuips = startSearchingQuips(panelTitle);
     const requestId = crypto.randomUUID();
     const visionStarted = Date.now();
     const response: unknown = supplied ?? await browser.runtime.sendMessage({ type: 'VCL_ANALYZE_SELECTION', requestId, dataUrl: result.dataUrl, timestamp: result.currentTime,
@@ -471,7 +494,8 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     if (controller.signal.aborted) return;
     if (response && typeof response === 'object' && 'error' in response && typeof response.error === 'string') throw new Error(response.error);
     const analysis = parseObjectDescription(response);
-    panel.firstElementChild!.textContent = 'Scoop found this';
+    stopSearchingQuips();
+    panelTitle.textContent = 'Scoop found this';
 
     const summary = document.createElement('div');
     const readable = (analysis.visible_text ?? []).map((value) => value.trim()).filter(Boolean);
@@ -521,12 +545,12 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     panel.appendChild(attrs);
 
     const confidence = document.createElement('div');
-    confidence.textContent = `Commercially searchable confidence: ${Math.round(analysis.confidence * 100)}%`;
+    confidence.textContent = `Search confidence: ${Math.round(analysis.confidence * 100)}%`;
     Object.assign(confidence.style, { opacity: '0.75' });
     panel.appendChild(confidence);
 
     const identityConfidence = document.createElement('div');
-    identityConfidence.textContent = `Identity confidence: ${Math.round(analysis.identity_confidence * 100)}%`;
+    identityConfidence.textContent = `Exact item confidence: ${Math.round(analysis.identity_confidence * 100)}%`;
     Object.assign(identityConfidence.style, { opacity: '0.75', marginTop: '3px' });
     panel.appendChild(identityConfidence);
 
@@ -543,9 +567,9 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     // Confidence still comes from grounded evidence, never from action availability.
     let improveControls: HTMLElement[] = [];
     if (!supplied) {
-      const improve = button('Improve with nearby frames');
+      const improve = button('Check nearby moments');
       const note = document.createElement('div');
-      note.textContent = 'Check up to two nearby frames (±0.5 seconds), then return to your paused position.';
+      note.textContent = 'Look around this moment for a clearer view.';
       Object.assign(note.style, { marginTop: '10px', lineHeight: '1.35', opacity: '0.78' });
       Object.assign(improve.style, { marginTop: '8px' });
       panel.append(note, improve);
@@ -554,17 +578,17 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
         improve.disabled = true;
         const limitation = nearbyCaptureLimitation(result);
         if (limitation) {
-          note.textContent = 'Nearby frames are unavailable for this video. Keeping the selected-frame result.';
+          note.textContent = 'Can’t check nearby moments here. Keeping this result.';
           if (__VCL_DEBUG_PROVENANCE__) note.textContent += ` (${limitation})`;
           return;
         }
-        note.textContent = 'Checking nearby frames…';
+        note.textContent = 'Checking nearby moments…';
         let captured;
         try {
           captured = await captureNearbyFrames(result, controller.signal);
           if (controller.signal.aborted) return;
           if (!captured.frames.length) {
-            note.textContent = 'No useful nearby crops were captured. Keeping the selected-frame result.';
+            note.textContent = 'No better view found. Keeping this result.';
             if (__VCL_DEBUG_PROVENANCE__) note.textContent += ` ${JSON.stringify(captured)}`;
             return;
           }
@@ -578,14 +602,14 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
           const debug = { attempts: captured.attempts, limitation: captured.limitation, mode: captured.mode, restored: captured.restored };
           if (merged.multi_frame?.changed_hypothesis) await showAnalysis(result, merged, debug);
           else {
-            note.textContent = 'Nearby evidence did not change the selected-object hypothesis.';
+            note.textContent = 'No clearer match found. Keeping this result.';
             if (__VCL_DEBUG_PROVENANCE__) {
               const text = document.createElement('pre'); text.style.whiteSpace = 'pre-wrap';
               text.textContent = JSON.stringify({ evidence: merged.multi_frame, capture: debug }, null, 2); panel.appendChild(text);
             }
           }
         } catch {
-          if (!controller.signal.aborted) note.textContent = 'Nearby analysis is unavailable. Keeping the selected-frame result.';
+          if (!controller.signal.aborted) note.textContent = 'Can’t check nearby moments right now. Keeping this result.';
         } finally { if (captured) captured.frames.length = 0; }
       }, { once: true });
     }
@@ -734,11 +758,12 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       timestamp_ms: Math.round(result.currentTime * 1000),
     });
   } catch (error) {
+    stopSearchingQuips();
     if (controller.signal.aborted) return;
     scanAnimation?.cancel();
     scanLine.remove();
     const message = document.createElement('div');
-    message.textContent = error instanceof Error ? error.message : 'VCL request failed.';
+    message.textContent = 'Scoop is temporarily unavailable. Try again in a moment.';
     Object.assign(message.style, { lineHeight: '1.4', opacity: '0.9', marginTop: '10px' });
     panel.appendChild(message);
   }
@@ -756,7 +781,7 @@ function showSelectionPreview(clientX: number, clientY: number) {
 
   const panel = basePanel('Scoop this');
   const image = document.createElement('img');
-  image.alt = 'Selected object crop preview';
+  image.alt = 'Selected item preview';
   Object.assign(image.style, { display: 'block', width: '100%', height: '100%', borderRadius: '10px', background: '#000' });
   const preview = document.createElement('div');
   Object.assign(preview.style, { position: 'relative', width: '220px', height: '220px', margin: '0 auto 10px' });
@@ -775,7 +800,7 @@ function showSelectionPreview(clientX: number, clientY: number) {
   Object.assign(controls.style, { display: 'flex', gap: '8px', flexWrap: 'wrap' });
   const tighter = button('− Tighter');
   const wider = button('+ Wider');
-  const analyze = button('Analyze');
+  const analyze = button('Search');
   Object.assign(analyze.style, { fontWeight: '700' });
   controls.append(tighter, wider, analyze);
   panel.appendChild(controls);
