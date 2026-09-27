@@ -242,6 +242,26 @@ export type SameVideoCanonicalCandidate = {
   identity: CanonicalProductIdentity;
 };
 
+function mergeUnique(values: Array<string | null | undefined>, maxItems = 24): string[] {
+  return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))].slice(0, maxItems);
+}
+
+export function identityWithTrustedVpmObservations(
+  identity: CanonicalProductIdentity,
+  mapping: VerifiedProductMapping,
+): CanonicalProductIdentity {
+  const observations = mapping.trusted_observations ?? [];
+  if (!observations.length) return identity;
+  return {
+    ...identity,
+    visible_text: mergeUnique([...(identity.visible_text ?? []), ...observations.flatMap((o) => o.visible_text ?? [])]),
+    logos_markings: mergeUnique([...(identity.logos_markings ?? []), ...observations.flatMap((o) => o.logos_markings ?? [])]),
+    distinctive_features: mergeUnique([...(identity.distinctive_features ?? []), ...observations.flatMap((o) => o.distinctive_features ?? [])]),
+    shape_silhouette: mergeUnique([...(identity.shape_silhouette ?? []), ...observations.flatMap((o) => o.shape_silhouette ?? [])]),
+    style_attributes: mergeUnique([...(identity.style_attributes ?? []), ...observations.flatMap((o) => o.style_attributes ?? [])]),
+  };
+}
+
 export function verifiedProductMemoryCandidates(input: {
   description: ObjectDescription;
   candidates: SameVideoCanonicalCandidate[];

@@ -3,6 +3,20 @@ import type { ObjectDescription } from './types.js';
 
 export type VerifiedProductProvenance = 'creator_verified' | 'brand_verified' | 'admin_verified' | 'test_fixture';
 
+export type VpmTrustedObservation = {
+  observed_at: string;
+  timestamp_ms?: number | null;
+  reason: 'promotion' | 'model_exact' | 'distinctive_text_exact' | 'visual_confirmed';
+  confidence: number;
+  visible_text: string[];
+  logos_markings: string[];
+  distinctive_features: string[];
+  shape_silhouette: string[];
+  style_attributes: string[];
+  color?: string | null;
+  material?: string | null;
+};
+
 export type VerifiedProductMapping = {
   platform: string;
   content_ref: string;
@@ -20,6 +34,7 @@ export type VerifiedProductMapping = {
   // A promoted product becomes a persistent identity track for this video.
   // Track membership is resolved from canonical visual/text evidence, not time alone.
   track_id?: string | null;
+  trusted_observations?: VpmTrustedObservation[];
   provenance: VerifiedProductProvenance;
 };
 

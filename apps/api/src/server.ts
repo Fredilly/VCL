@@ -29,8 +29,8 @@ export { FeedbackLedger } from './feedback-ledger.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
-import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
-import { distinctiveTextSameVideoReuse, eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, verifiedProductMemoryCandidates, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
+import { backfillLegacyAdminCanonicalMappings, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
+import { distinctiveTextSameVideoReuse, eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, verifiedProductMemoryCandidates, identityWithTrustedVpmObservations, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 export { AlphaAccessLedger } from './alpha-access.js';
@@ -1251,6 +1251,19 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           ...mappingBase,
           canonical_key: canonical.canonical_key,
           track_id: canonical.canonical_key,
+          trusted_observations: [{
+            observed_at: new Date().toISOString(),
+            timestamp_ms: timestampMs,
+            reason: 'promotion',
+            confidence: 1,
+            visible_text: description.visible_text,
+            logos_markings: description.logos_markings,
+            distinctive_features: description.distinctive_features,
+            shape_silhouette: description.shape_silhouette,
+            style_attributes: description.style_attributes,
+            color: description.color || null,
+            material: description.material || null,
+          }],
         };
         const saved = await persistAdminVerifiedMapping(env, mapping);
         await auditAdminAction(env, authorized.admin_id!, 'verified_product_saved', {
@@ -1519,7 +1532,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           const identity = mapping.canonical_key
             ? await durableCanonicalProductIdentity(env, mapping.canonical_key).catch(() => null)
             : null;
-          return identity ? { mapping, identity } : null;
+          return identity ? { mapping, identity: identityWithTrustedVpmObservations(identity, mapping) } : null;
         }))).filter((row): row is NonNullable<typeof row> => Boolean(row));
 
         sameVideoVisualCheck = await confirmSameVideoReuseWithImage(
@@ -1530,7 +1543,33 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           canonicalRows,
         );
         sameVideoReuse = sameVideoVisualCheck.decision;
-        if (sameVideoReuse.mapping) verifiedMapping = sameVideoReuse.mapping;
+        if (sameVideoReuse.mapping) {
+          verifiedMapping = sameVideoReuse.mapping;
+          const trustedReason = sameVideoReuse.reason === 'model_exact'
+            || sameVideoReuse.reason === 'distinctive_text_exact'
+            || sameVideoReuse.reason === 'visual_confirmed';
+          if (trustedReason && verifiedMapping.canonical_key && context?.platform && contentRef) {
+            const learned = await persistTrustedVpmObservation(env, {
+              platform: context.platform,
+              content_ref: contentRef,
+              canonical_key: verifiedMapping.canonical_key,
+              observation: {
+                observed_at: new Date().toISOString(),
+                timestamp_ms: context.timestamp_ms ?? null,
+                reason: sameVideoReuse.reason as 'model_exact' | 'distinctive_text_exact' | 'visual_confirmed',
+                confidence: sameVideoReuse.confidence,
+                visible_text: description.visible_text,
+                logos_markings: description.logos_markings,
+                distinctive_features: description.distinctive_features,
+                shape_silhouette: description.shape_silhouette,
+                style_attributes: description.style_attributes,
+                color: description.color || null,
+                material: description.material || null,
+              },
+            }).catch(() => null);
+            if (learned) verifiedMapping = learned;
+          }
+        }
       }
       if (verifiedMapping) {
         const configuredProviders = commerceProviders(env);
@@ -1605,6 +1644,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
               promotion_window_start_ms: verifiedMapping.timestamp_start_ms,
               promotion_window_end_ms: verifiedMapping.timestamp_end_ms,
               ...(record.vpm_observation_mode === 'nearby_frame_recovery' ? { observation_mode: 'nearby_frame_recovery' } : {}),
+              trusted_observation_count: verifiedMapping.trusted_observations?.length ?? 0,
             },
             ...(sameVideoReuse.mapping ? {
               reuse: 'same_video',

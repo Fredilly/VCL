@@ -1,4 +1,4 @@
-import type { VerifiedProductMapping } from './verified-product-mapping.js';
+import type { VerifiedProductMapping, VpmTrustedObservation } from './verified-product-mapping.js';
 import { canonicalProductIdentity, mergeCanonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 
 type DurableObjectStubLike = { fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> };
@@ -49,6 +49,19 @@ export async function persistAdminVerifiedMapping(
   const result = await postJson<{ mapping?: VerifiedProductMapping }>(env, '/verify', mapping);
   if (!result?.mapping) throw new Error('verified product ledger unavailable');
   return result.mapping;
+}
+
+export async function persistTrustedVpmObservation(
+  env: VerifiedProductLedgerEnv,
+  input: {
+    platform: string;
+    content_ref: string;
+    canonical_key: string;
+    observation: VpmTrustedObservation;
+  },
+): Promise<VerifiedProductMapping | null> {
+  const result = await postJson<{ mapping?: VerifiedProductMapping | null }>(env, '/observe', input);
+  return result?.mapping ?? null;
 }
 
 export async function revokeAdminVerifiedMapping(
@@ -104,6 +117,54 @@ function contentKey(platform: string, contentRef: string): string {
 
 function canonicalKey(value: string): string {
   return `canonical:${bounded(value, 220).toLowerCase()}`;
+}
+
+function boundedList(value: unknown, maxItems = 12): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((item) => bounded(item, 160)).filter(Boolean))].slice(0, maxItems);
+}
+
+function normalizeObservation(value: unknown): VpmTrustedObservation | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const reason = record.reason;
+  if (reason !== 'promotion' && reason !== 'model_exact' && reason !== 'distinctive_text_exact' && reason !== 'visual_confirmed') return null;
+  const confidence = typeof record.confidence === 'number' && Number.isFinite(record.confidence)
+    ? Math.max(0, Math.min(1, record.confidence))
+    : 0;
+  const observedAt = bounded(record.observed_at, 40);
+  if (!observedAt || !Number.isFinite(Date.parse(observedAt))) return null;
+  const timestamp = typeof record.timestamp_ms === 'number' && Number.isFinite(record.timestamp_ms) && record.timestamp_ms >= 0
+    ? Math.round(record.timestamp_ms)
+    : null;
+  return {
+    observed_at: observedAt,
+    timestamp_ms: timestamp,
+    reason,
+    confidence,
+    visible_text: boundedList(record.visible_text),
+    logos_markings: boundedList(record.logos_markings),
+    distinctive_features: boundedList(record.distinctive_features),
+    shape_silhouette: boundedList(record.shape_silhouette),
+    style_attributes: boundedList(record.style_attributes),
+    color: bounded(record.color, 80) || null,
+    material: bounded(record.material, 80) || null,
+  };
+}
+
+function observationKey(observation: VpmTrustedObservation): string {
+  const evidence = [
+    observation.reason,
+    observation.visible_text.join('|'),
+    observation.logos_markings.join('|'),
+    observation.distinctive_features.join('|'),
+    observation.shape_silhouette.join('|'),
+    observation.style_attributes.join('|'),
+    observation.color ?? '',
+    observation.material ?? '',
+  ].join('::').toLowerCase();
+  const bucket = observation.timestamp_ms == null ? 'none' : Math.floor(observation.timestamp_ms / 5000);
+  return `${bucket}:${evidence}`;
 }
 
 export class VerifiedProductLedger {
@@ -176,9 +237,48 @@ export class VerifiedProductLedger {
           entry.timestamp_end_ms === mapping.timestamp_end_ms
         );
       });
-      next.unshift(mapping);
+      const previous = current.find((entry) => {
+        const existingTrackId = bounded(entry.track_id ?? entry.canonical_key, 220);
+        return Boolean(trackId && existingTrackId && existingTrackId === trackId);
+      });
+      const saved = {
+        ...mapping,
+        ...(previous?.trusted_observations?.length ? { trusted_observations: previous.trusted_observations } : {}),
+      };
+      next.unshift(saved);
       await this.storage.put(key, next.slice(0, 100));
-      return Response.json({ accepted: true, mapping });
+      return Response.json({ accepted: true, mapping: saved });
+    }
+
+    if (path === '/observe') {
+      const body = await request.json() as Record<string, unknown>;
+      const platform = bounded(body.platform, 40);
+      const contentRef = bounded(body.content_ref, 180);
+      const canonical = bounded(body.canonical_key, 220);
+      const observation = normalizeObservation(body.observation);
+      if (!platform || !contentRef || !canonical || !observation) {
+        return Response.json({ error: 'Invalid VPM observation' }, { status: 400 });
+      }
+      const key = contentKey(platform, contentRef);
+      const current = await this.storage.get<VerifiedProductMapping[]>(key) ?? [];
+      const index = current.findIndex((entry) =>
+        bounded(entry.track_id ?? entry.canonical_key, 220) === canonical
+        && bounded(entry.canonical_key, 220) === canonical);
+      if (index < 0) return Response.json({ mapping: null });
+
+      const mapping = current[index]!;
+      const observations = [...(mapping.trusted_observations ?? [])];
+      const keyForObservation = observationKey(observation);
+      if (!observations.some((entry) => observationKey(entry) === keyForObservation)) observations.push(observation);
+      const updated: VerifiedProductMapping = {
+        ...mapping,
+        trusted_observations: observations
+          .sort((a, b) => Date.parse(b.observed_at) - Date.parse(a.observed_at))
+          .slice(0, 20),
+      };
+      current[index] = updated;
+      await this.storage.put(key, current);
+      return Response.json({ accepted: true, mapping: updated });
     }
 
     if (path === '/revoke') {
