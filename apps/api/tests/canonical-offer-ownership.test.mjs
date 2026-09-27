@@ -26,6 +26,7 @@ function identity(canonicalKey, itemId, destination) {
     model: null,
     object_type: 't-shirt',
     visible_text: ['BUILDING IS MY LOVE LANGUAGE'],
+    color: 'black',
     normalized_fingerprint: canonicalKey,
     relationship: 'EXACT',
     provenance: 'admin_verified',
@@ -95,4 +96,56 @@ test('sibling merchant variations remain distinct offers', async () => {
   ));
 
   assert.notEqual(a.identity.canonical_key, b.identity.canonical_key);
+});
+
+
+test('different offers consolidate only after explicit equivalent-product reconciliation', async () => {
+  const ledger = new ledgerMod.VerifiedProductLedger({ storage: storage().api });
+  const a = await upsert(ledger, identity(
+    'product:v1:seller-a',
+    'v1|111|aaa',
+    'https://www.ebay.com/itm/111?var=aaa',
+  ));
+  const b = await upsert(ledger, identity(
+    'product:v1:seller-b',
+    'v1|222|bbb',
+    'https://www.ebay.com/itm/222?var=bbb',
+  ));
+  assert.notEqual(a.identity.canonical_key, b.identity.canonical_key, 'different offers are not merged merely on write');
+
+  const response = await ledger.fetch(new Request('https://ledger/canonical/consolidate', {
+    method: 'POST',
+    body: JSON.stringify({ canonical_keys: [a.identity.canonical_key, b.identity.canonical_key] }),
+  }));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.consolidated, true);
+  assert.equal(body.identity.merchant_refs.length, 2);
+
+  const redirected = await ledger.fetch(new Request('https://ledger/canonical/get', {
+    method: 'POST',
+    body: JSON.stringify({ canonical_key: b.identity.canonical_key }),
+  }));
+  const redirectedBody = await redirected.json();
+  assert.equal(redirectedBody.identity.canonical_key, body.identity.canonical_key);
+});
+
+test('canonical consolidation fails closed when distinctive identity differs', async () => {
+  const ledger = new ledgerMod.VerifiedProductLedger({ storage: storage().api });
+  const a = await upsert(ledger, identity(
+    'product:v1:a',
+    'v1|111|aaa',
+    'https://www.ebay.com/itm/111?var=aaa',
+  ));
+  const different = {
+    ...identity('product:v1:b', 'v1|222|bbb', 'https://www.ebay.com/itm/222?var=bbb'),
+    visible_text: ['BUILDING SOMETHING ELSE ENTIRELY'],
+  };
+  const b = await upsert(ledger, different);
+
+  const response = await ledger.fetch(new Request('https://ledger/canonical/consolidate', {
+    method: 'POST',
+    body: JSON.stringify({ canonical_keys: [a.identity.canonical_key, b.identity.canonical_key] }),
+  }));
+  assert.equal(response.status, 409);
 });
