@@ -1,53 +1,30 @@
-# Product-track persistence benchmark
+# VPM frozen fidelity benchmark
 
-Purpose: measure whether promoted Exact products persist safely across a video before optimizing routing.
+Issue: #272
 
-## Protocol
+This is the deterministic trust gate for video product memory (VPM). It exercises frozen object observations against the same identity-reuse functions used by the API.
 
-Use frozen observations so OFF and ON see the same object descriptions, source crops, video IDs, and timestamps.
+Coverage:
+- presentation
+- multiple similar promoted products
+- disappear/reappear
+- occlusion
+- weak OCR
+- movie-style cuts
+- deliberate adversarial lookalikes
 
-Minimum corpus:
-- presentation: 2 promoted products + 2 negative/different products
-- similar-products video: 3 promoted products that could be confused + 2 negatives
-- moving/occluded video: 2 promoted products, disappearance/reappearance + 2 negatives
-- at least 10 observations per video
+Run:
 
-For each observation record:
-- video/content_ref and timestamp
-- expected track_id (or NONE)
-- returned product_id / track_id
-- track_diagnostics
-- result class
-- latency_ms
-- verification requests/tokens/cost
-- commerce calls
+```bash
+node tests/benchmark/product-tracks/run.mjs
+```
 
-Run A — persistence OFF:
-Use a clean ledger / fixture set without track_id, preserving the old time-window behavior.
+The runner reports persistence recall, false inherited Exact, multi-track accuracy, no-result rescue, decision p50/p95, verification requests, verification cost, and commerce calls.
 
-Run B — persistence ON:
-Use identical inputs with the promoted mappings carrying track_id.
+## Hard gate
 
-Do not change matching thresholds, Jev, providers, or frozen observations between runs.
+Any negative observation that inherits a promoted VPM track fails the benchmark. False inherited Exact must remain **0**.
 
-## Metrics
+The deterministic suite intentionally makes no paid provider calls, so `verification_cost_usd` is 0 and the latency metric is **VPM decision latency**, not end-to-end provider latency. Live provider latency/cost stays a separate benchmark concern.
 
-- persistence recall = expected promoted-track observations returning that track / expected promoted-track observations
-- false inheritance = negative observations incorrectly returning a promoted track / all negative observations
-- multi-track accuracy = correct track selected / observations where one of multiple promoted tracks is expected
-- no-result rescue = observations that returned no useful result OFF but the correct promoted Exact ON
-- p50 / p95 total latency
-- verification requests and cost per observation
-- commerce calls per observation
-
-## Trust gate
-
-Hard fail: any false inherited Exact.
-
-Report separately:
-1. same-track success
-2. wrong-track Exact
-3. ambiguous/fallback
-4. no-result rescue
-
-Do not optimize speed until this benchmark establishes that track persistence is safer/more useful than the old behavior.
+Do not weaken Exact thresholds or rewrite frozen cases to make a regression pass.
