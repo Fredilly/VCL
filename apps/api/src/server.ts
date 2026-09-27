@@ -1688,6 +1688,18 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         failures: 0,
         failure_reasons: {},
       };
+      let crossVideoReuse: CrossVideoReuseDecision = {
+        identity: null,
+        canonical_key: null,
+        confidence: 0,
+        reason: 'no_candidate',
+      };
+      let crossVideoVisualCheck: CrossVideoVisualCheck = {
+        decision: crossVideoReuse,
+        compared: 0,
+        failures: 0,
+        failure_reasons: {},
+      };
       if (!verifiedMapping && durableMappings.length) {
         const canonicalMappings = durableMappings.filter((mapping) => Boolean(mapping.canonical_key));
         const canonicalRows = (await Promise.all(canonicalMappings.map(async (mapping) => {
@@ -1733,6 +1745,29 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           }
         }
       }
+      if (!verifiedMapping) {
+        const sameVideoCanonicalKeys = new Set(
+          durableMappings.map((mapping) => mapping.canonical_key).filter((key): key is string => Boolean(key)),
+        );
+        crossVideoVisualCheck = await confirmCrossVideoReuseWithImage(
+          env,
+          description,
+          context,
+          sourceImage,
+          sameVideoCanonicalKeys,
+        );
+        crossVideoReuse = crossVideoVisualCheck.decision;
+        if (crossVideoReuse.identity) {
+          const reused = crossVideoMapping(crossVideoReuse.identity, context);
+          if (reused) {
+            verifiedMapping = reused;
+            if (reused.provenance === 'admin_verified') {
+              verifiedMapping = await persistAdminVerifiedMapping(env, reused).catch(() => reused);
+            }
+          }
+        }
+      }
+
       if (verifiedMapping) {
         const configuredProviders = commerceProviders(env);
         const refreshed = await refreshVerifiedOffers(configuredProviders, verifiedMapping, {
@@ -1748,7 +1783,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           totalMs: total_ms,
           providersUsed: refreshed.providers_used,
           resultRows: refreshed.products.map((product) => ({ id: product.id, result_class: product.result_class })),
-          verificationUsage: sameVideoVisualCheck.usage,
+          verificationUsage: sameVideoVisualCheck.usage ?? crossVideoVisualCheck.usage,
           commerceCalls: refreshed.commerce_calls,
           visionUsage: rawDescription?.provider_usage,
         });
@@ -1770,15 +1805,15 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             retrieved: refreshed.products.length,
             metadata_prefiltered: 0,
             light_escalations: 0,
-            compared: sameVideoVisualCheck.compared,
-            image_failures: sameVideoVisualCheck.failures,
-            image_failure_reasons: sameVideoVisualCheck.failure_reasons,
+            compared: sameVideoVisualCheck.compared + crossVideoVisualCheck.compared,
+            image_failures: sameVideoVisualCheck.failures + crossVideoVisualCheck.failures,
+            image_failure_reasons: { ...sameVideoVisualCheck.failure_reasons, ...crossVideoVisualCheck.failure_reasons },
             rejected: 0,
             contradictions: {},
           },
           cost_usage: {
             commerce_calls: refreshed.commerce_calls,
-            verification_usage: sameVideoVisualCheck.usage ?? {
+            verification_usage: sameVideoVisualCheck.usage ?? crossVideoVisualCheck.usage ?? {
               provider: 'none',
               model: 'none',
               requests: 0,
@@ -1795,20 +1830,28 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             ...(verifiedMapping.canonical_key ? { canonical_key: verifiedMapping.canonical_key } : {}),
             ...(verifiedMapping.track_id ? { track_id: verifiedMapping.track_id } : {}),
             track_diagnostics: {
-              outcome: sameVideoReuse.mapping ? 'TRACK_REUSED' : 'TIME_WINDOW_HIT',
+              outcome: crossVideoReuse.identity ? 'CROSS_VIDEO_REUSED' : sameVideoReuse.mapping ? 'TRACK_REUSED' : 'TIME_WINDOW_HIT',
               candidate_count: durableMappings.filter((mapping) => Boolean(mapping.track_id)).length,
-              decision_reason: sameVideoReuse.reason,
-              confidence: sameVideoReuse.confidence,
-              visual_compared: sameVideoVisualCheck.compared,
-              visual_failures: sameVideoVisualCheck.failures,
+              decision_reason: crossVideoReuse.identity ? crossVideoReuse.reason : sameVideoReuse.reason,
+              confidence: crossVideoReuse.identity ? crossVideoReuse.confidence : sameVideoReuse.confidence,
+              visual_compared: sameVideoVisualCheck.compared + crossVideoVisualCheck.compared,
+              visual_failures: sameVideoVisualCheck.failures + crossVideoVisualCheck.failures,
               ...(sameVideoReuse.mapping?.track_id ? { selected_track_id: sameVideoReuse.mapping.track_id } : {}),
+              ...(crossVideoReuse.canonical_key ? { selected_cross_video_canonical_key: crossVideoReuse.canonical_key } : {}),
               ...(context?.timestamp_ms != null ? { observation_timestamp_ms: context.timestamp_ms } : {}),
               promotion_window_start_ms: verifiedMapping.timestamp_start_ms,
               promotion_window_end_ms: verifiedMapping.timestamp_end_ms,
               ...(record.vpm_observation_mode === 'nearby_frame_recovery' ? { observation_mode: 'nearby_frame_recovery' } : {}),
               trusted_observation_count: verifiedMapping.trusted_observations?.length ?? 0,
             },
-            ...(sameVideoReuse.mapping ? {
+            ...(crossVideoReuse.identity ? {
+              reuse: 'cross_video',
+              canonical_key: crossVideoReuse.canonical_key,
+              confidence: crossVideoReuse.confidence,
+              reason: crossVideoReuse.reason,
+              visual_similarity: crossVideoReuse.visual_similarity,
+              visual_confidence: crossVideoReuse.visual_confidence,
+            } : sameVideoReuse.mapping ? {
               reuse: 'same_video',
               canonical_key: sameVideoReuse.canonical_key,
               confidence: sameVideoReuse.confidence,
@@ -1818,10 +1861,10 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           latency_ms: total_ms,
           timing: {
             provider_retrieval_ms: refreshed.provider_retrieval_ms,
-            candidate_verification_ms: sameVideoVisualCheck.timing?.total_ms ?? 0,
-            candidate_image_fetch_ms: sameVideoVisualCheck.timing?.image_fetch_ms ?? 0,
-            candidate_model_verification_ms: sameVideoVisualCheck.timing?.model_ms ?? 0,
-            verification_batches: sameVideoVisualCheck.timing?.batches ?? [],
+            candidate_verification_ms: (sameVideoVisualCheck.timing?.total_ms ?? 0) + (crossVideoVisualCheck.timing?.total_ms ?? 0),
+            candidate_image_fetch_ms: (sameVideoVisualCheck.timing?.image_fetch_ms ?? 0) + (crossVideoVisualCheck.timing?.image_fetch_ms ?? 0),
+            candidate_model_verification_ms: (sameVideoVisualCheck.timing?.model_ms ?? 0) + (crossVideoVisualCheck.timing?.model_ms ?? 0),
+            verification_batches: [...(sameVideoVisualCheck.timing?.batches ?? []), ...(crossVideoVisualCheck.timing?.batches ?? [])],
             total_ms,
           },
         });
