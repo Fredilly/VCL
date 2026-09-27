@@ -121,3 +121,35 @@ test('unknown or ambiguous outcomes cannot write VPM observations through the le
   }));
   assert.equal(bad.status, 400);
 });
+
+
+test('demote-style revoke by canonical key removes the video VPM and its observations', async () => {
+  const s = storage();
+  const ledger = new ledgerMod.VerifiedProductLedger({ storage: s.api });
+  await ledger.fetch(new Request('https://ledger/verify', { method: 'POST', body: JSON.stringify({
+    ...mapping,
+    trusted_observations: [observation(12000)],
+  }) }));
+  const revoked = await ledger.fetch(new Request('https://ledger/revoke', {
+    method: 'POST',
+    body: JSON.stringify({ platform: mapping.platform, content_ref: mapping.content_ref, canonical_key: mapping.canonical_key }),
+  }));
+  assert.deepEqual(await revoked.json(), { revoked: true });
+
+  const result = await (await ledger.fetch(new Request('https://ledger/lookup', {
+    method: 'POST',
+    body: JSON.stringify({ platform: mapping.platform, content_ref: mapping.content_ref }),
+  }))).json();
+  assert.equal(result.mappings.length, 0);
+});
+
+test('legacy revoke by product id still works', async () => {
+  const s = storage();
+  const ledger = new ledgerMod.VerifiedProductLedger({ storage: s.api });
+  await ledger.fetch(new Request('https://ledger/verify', { method: 'POST', body: JSON.stringify(mapping) }));
+  const revoked = await ledger.fetch(new Request('https://ledger/revoke', {
+    method: 'POST',
+    body: JSON.stringify({ platform: mapping.platform, content_ref: mapping.content_ref, product_id: mapping.product_id }),
+  }));
+  assert.equal((await revoked.json()).revoked, true);
+});
