@@ -872,6 +872,7 @@ async function confirmCrossVideoReuseWithImage(
   description: ReturnType<typeof normalizeObjectDescription>,
   context: ProductContext | undefined,
   sourceImage: ReturnType<typeof parseSourceImage>,
+  excludeCanonicalKeys: Set<string> = new Set(),
 ): Promise<CrossVideoVisualCheck> {
   const noDecision: CrossVideoReuseDecision = {
     identity: null,
@@ -882,7 +883,8 @@ async function confirmCrossVideoReuseWithImage(
   const empty = { decision: noDecision, compared: 0, failures: 0, failure_reasons: {} };
   if (!sourceImage) return empty;
 
-  const identities = await durableCanonicalProductIdentities(env).catch(() => []);
+  const identities = (await durableCanonicalProductIdentities(env).catch(() => []))
+    .filter((identity) => !excludeCanonicalKeys.has(identity.canonical_key));
   const candidates = crossVideoCanonicalCandidates({ description, identities });
   if (!candidates.length) return empty;
 
