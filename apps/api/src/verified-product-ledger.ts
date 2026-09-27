@@ -1,5 +1,5 @@
 import type { VerifiedProductMapping, VpmTrustedObservation } from './verified-product-mapping.js';
-import { canonicalMerchantOfferKey, canonicalProductIdentity, mergeCanonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
+import { canonicalMerchantOfferKey, canonicalProductIdentity, mergeCanonicalProductIdentity, normalizeIdentityText, type CanonicalProductIdentity } from './canonical-product-memory.js';
 
 type DurableObjectStubLike = { fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> };
 export type VerifiedProductLedgerNamespaceLike = {
@@ -97,6 +97,25 @@ export async function durableCanonicalProductIdentities(
   return Array.isArray(result?.identities) ? result!.identities! : [];
 }
 
+export type CanonicalRetrievalPath = 'TEXT' | 'MODEL' | 'STRUCTURED';
+
+export async function durableCanonicalCandidates(
+  env: VerifiedProductLedgerEnv,
+  input: {
+    paths: CanonicalRetrievalPath[];
+    brand?: string | null;
+    model?: string | null;
+    object_type?: string | null;
+    color?: string | null;
+    visible_text?: string[];
+    logos_markings?: string[];
+    limit?: number;
+  },
+): Promise<CanonicalProductIdentity[]> {
+  const result = await postJson<{ identities?: CanonicalProductIdentity[] }>(env, '/canonical/search', input);
+  return Array.isArray(result?.identities) ? result!.identities! : [];
+}
+
 export async function backfillLegacyAdminCanonicalMappings(
   env: VerifiedProductLedgerEnv,
   mappings: VerifiedProductMapping[],
@@ -127,6 +146,43 @@ function canonicalKey(value: string): string {
 }
 
 const CANONICAL_INDEX_KEY = 'canonical:index:v1';
+const CANONICAL_EVIDENCE_INDEX_READY = 'canonical:evidence-index:v1';
+
+function evidencePart(value: string | null | undefined): string {
+  return normalizeIdentityText(value).replace(/\s+/g, '_').slice(0, 120);
+}
+
+function evidenceWords(values: Array<string | null | undefined>): string[] {
+  return [...new Set(normalizeIdentityText(values.filter(Boolean).join(' '))
+    .split(' ')
+    .filter((token) => token.length >= 4))]
+    .slice(0, 12);
+}
+
+function canonicalIndexRow(prefix: string, canonical: string): string {
+  return `canonical-idx:${prefix}:${bounded(canonical, 220).toLowerCase()}`;
+}
+
+function canonicalIndexPrefixes(identity: CanonicalProductIdentity): string[] {
+  const prefixes: string[] = [];
+  const brand = evidencePart(identity.brand);
+  const model = evidencePart(identity.model);
+  const type = evidencePart(identity.object_type);
+  const color = evidencePart(identity.color);
+
+  if (model) prefixes.push(`model:${brand || '_'}:${model}`);
+  if (type) {
+    prefixes.push(`type:${type}`);
+    if (brand) prefixes.push(`type-brand:${type}:${brand}`);
+    if (color) prefixes.push(`type-color:${type}:${color}`);
+  }
+  for (const word of evidenceWords([
+    identity.title,
+    ...identity.visible_text,
+    ...(identity.logos_markings ?? []),
+  ])) prefixes.push(`text:${evidencePart(word)}`);
+  return [...new Set(prefixes)].slice(0, 32);
+}
 
 function offerOwnerKey(offerKey: string): string {
   return `offer-owner:${bounded(offerKey, 420).toLowerCase()}`;
@@ -227,6 +283,29 @@ export class VerifiedProductLedger {
     this.storage = ctx.storage;
   }
 
+  private async indexCanonicalIdentity(identity: CanonicalProductIdentity): Promise<void> {
+    for (const prefix of canonicalIndexPrefixes(identity)) {
+      await this.storage.put(canonicalIndexRow(prefix, identity.canonical_key), identity.canonical_key);
+    }
+  }
+
+  private async ensureCanonicalEvidenceIndex(): Promise<void> {
+    if (await this.storage.get<boolean>(CANONICAL_EVIDENCE_INDEX_READY)) return;
+    // One-time alpha migration. Steady-state retrieval never scans the canonical graph.
+    const keys = await this.storage.get<string[]>(CANONICAL_INDEX_KEY) ?? [];
+    for (const key of keys.slice(0, 500)) {
+      const identity = await this.storage.get<CanonicalProductIdentity>(canonicalKey(key));
+      if (identity) await this.indexCanonicalIdentity(identity);
+    }
+    await this.storage.put(CANONICAL_EVIDENCE_INDEX_READY, true);
+  }
+
+  private async canonicalKeysForPrefix(prefix: string, limit: number): Promise<string[]> {
+    if (!this.storage.list) return [];
+    const rows = await this.storage.list<string>({ prefix: `canonical-idx:${prefix}:`, limit });
+    return [...rows.values()].filter((value): value is string => typeof value === 'string');
+  }
+
   async fetch(request: Request): Promise<Response> {
     if (request.method !== 'POST') return Response.json({ error: 'Not found' }, { status: 404 });
     const path = new URL(request.url).pathname;
@@ -260,6 +339,62 @@ export class VerifiedProductLedger {
         canonical_key: canonical,
         identity: await this.storage.get<CanonicalProductIdentity>(canonicalKey(canonical)) ?? null,
       });
+    }
+
+    if (path === '/canonical/search') {
+      const body = await request.json() as Record<string, unknown>;
+      const rawPaths = Array.isArray(body.paths) ? body.paths : [];
+      const paths = new Set(rawPaths.filter((path): path is CanonicalRetrievalPath =>
+        path === 'TEXT' || path === 'MODEL' || path === 'STRUCTURED'));
+      const limit = typeof body.limit === 'number' && Number.isFinite(body.limit)
+        ? Math.max(1, Math.min(24, Math.floor(body.limit)))
+        : 12;
+      if (!paths.size) return Response.json({ identities: [] });
+
+      await this.ensureCanonicalEvidenceIndex();
+      const scores = new Map<string, number>();
+      const add = async (prefix: string, weight: number) => {
+        for (const key of await this.canonicalKeysForPrefix(prefix, Math.max(limit * 2, 16))) {
+          scores.set(key, (scores.get(key) ?? 0) + weight);
+        }
+      };
+
+      const brand = evidencePart(bounded(body.brand, 120));
+      const model = evidencePart(bounded(body.model, 160));
+      const objectType = evidencePart(bounded(body.object_type, 100));
+      const color = evidencePart(bounded(body.color, 80));
+
+      if (paths.has('MODEL') && model) await add(`model:${brand || '_'}:${model}`, 100);
+      if (paths.has('TEXT')) {
+        const text = [
+          ...boundedList(body.visible_text, 12),
+          ...boundedList(body.logos_markings, 8),
+        ];
+        for (const word of evidenceWords(text).slice(0, 8)) await add(`text:${evidencePart(word)}`, 10);
+      }
+      if (paths.has('STRUCTURED') && objectType) {
+        if (brand) await add(`type-brand:${objectType}:${brand}`, 6);
+        if (color) await add(`type-color:${objectType}:${color}`, 4);
+        await add(`type:${objectType}`, 1);
+      }
+
+      const rankedKeys = [...scores.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, limit)
+        .map(([key]) => key);
+      const identities: CanonicalProductIdentity[] = [];
+      const seen = new Set<string>();
+      for (const key of rankedKeys) {
+        const redirect = await this.storage.get<string>(canonicalRedirectKey(key));
+        const resolved = redirect || key;
+        if (seen.has(resolved)) continue;
+        const identity = await this.storage.get<CanonicalProductIdentity>(canonicalKey(resolved));
+        if (identity) {
+          seen.add(resolved);
+          identities.push(identity);
+        }
+      }
+      return Response.json({ identities });
     }
 
     if (path === '/canonical/list') {
@@ -321,6 +456,8 @@ export class VerifiedProductLedger {
         }
 
         await this.storage.put(storageKey, identity);
+        await this.indexCanonicalIdentity(identity);
+        await this.storage.put(CANONICAL_EVIDENCE_INDEX_READY, true);
         for (const ref of refs) await this.storage.put(offerOwnerKey(ref.offer_key!), survivorKey);
 
         if (requestedKey !== survivorKey) {
