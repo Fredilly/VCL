@@ -2,7 +2,7 @@ import type { ObjectDescription } from './types.js';
 import type { CanonicalProductIdentity } from './canonical-product-memory.js';
 import type { ImageComparison } from './verification-evidence.js';
 import { canonical, compatible } from './verification-evidence.js';
-import { normalizeIdentityText } from './canonical-product-memory.js';
+import { canonicalEquivalenceEvidenceKey, normalizeIdentityText } from './canonical-product-memory.js';
 
 export type CrossVideoReuseDecision = {
   identity: CanonicalProductIdentity | null;
@@ -11,6 +11,7 @@ export type CrossVideoReuseDecision = {
   reason: 'model_candidate' | 'distinctive_text_candidate' | 'visual_confirmed' | 'visual_rejected' | 'ambiguous' | 'no_candidate';
   visual_similarity?: number;
   visual_confidence?: number;
+  equivalent_canonical_keys?: string[];
 };
 
 function words(values: Array<string | null | undefined>): string[] {
@@ -135,6 +136,29 @@ export function confirmCrossVideoVisual(
 
   if (confirmed.length === 1) return confirmed[0];
   if (confirmed.length > 1) {
+    const keys = confirmed.map((candidate) =>
+      candidate.identity ? canonicalEquivalenceEvidenceKey(candidate.identity) : null);
+    const sharedKey = keys[0];
+    if (sharedKey && keys.every((key) => key === sharedKey)) {
+      const winner = [...confirmed]
+        .sort((a, b) => String(a.canonical_key).localeCompare(String(b.canonical_key)))[0]!;
+      const merchantRefs = confirmed.flatMap((candidate) => candidate.identity?.merchant_refs ?? []);
+      const seenOffers = new Set<string>();
+      const mergedRefs = merchantRefs.filter((ref) => {
+        const offerKey = ref.offer_key ?? `${ref.source ?? ''}:${ref.item_id ?? ref.destination}`;
+        if (seenOffers.has(offerKey)) return false;
+        seenOffers.add(offerKey);
+        return true;
+      });
+      return {
+        ...winner,
+        identity: winner.identity ? { ...winner.identity, merchant_refs: mergedRefs.slice(0, 25) } : null,
+        reason: 'visual_confirmed',
+        equivalent_canonical_keys: confirmed
+          .map((candidate) => candidate.canonical_key)
+          .filter((key): key is string => Boolean(key)),
+      };
+    }
     return { identity: null, canonical_key: null, confidence: 0, reason: 'ambiguous' };
   }
   return { identity: null, canonical_key: null, confidence: 0, reason: candidates.length ? 'visual_rejected' : 'no_candidate' };
