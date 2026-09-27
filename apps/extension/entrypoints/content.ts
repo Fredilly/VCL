@@ -14,6 +14,7 @@ const SEARCHING_QUIPS = [
   'Digging through deals…',
   'Chasing that look…',
   'Oops, wrong aisle…',
+  'Hippo found the sale…',
 ] as const;
 
 function startSearchingQuips(title: HTMLElement) {
