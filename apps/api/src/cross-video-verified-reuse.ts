@@ -72,11 +72,11 @@ export function crossVideoCanonicalCandidates(input: {
       }];
     }
 
-    const identityText = words([
+    const strongIdentityText = [
       ...identity.visible_text,
       ...(identity.logos_markings ?? []),
-      identity.title,
-    ]);
+    ];
+    const identityText = words(strongIdentityText.length ? strongIdentityText : [identity.title]);
     const text = overlap(identityText, observedText);
     if (text.shared >= 3 && text.ratio >= 0.8) {
       return [{
