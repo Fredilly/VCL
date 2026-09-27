@@ -285,3 +285,44 @@ test('canonical ledger exposes indexed identities for cross-video lookup and bac
   assert.equal(body.identities[0].canonical_key, identity.canonical_key);
   assert.deepEqual(values.get('canonical:index:v1'), [identity.canonical_key]);
 });
+
+
+test('legacy canonical equivalence accepts partial OCR when verified title carries the same distinctive phrase', () => {
+  const a = memory.canonicalProductIdentity({
+    mapping,
+    merchantItemId: '111',
+    visibleText: ['BUILDING IS MY LOVE LANGUAGE'],
+    color: 'black',
+  });
+  const b = memory.canonicalProductIdentity({
+    mapping: {
+      ...mapping,
+      title: 'Funny Quote Building is My Love Language Mark Saying Tee T-Shirt',
+      destination: 'https://www.ebay.com/itm/222',
+    },
+    merchantItemId: '222',
+    visibleText: ['BUILDING IS MY LOVE'],
+    color: 'black',
+  });
+  assert.equal(memory.canonicalProductsEquivalent(a, b), true);
+});
+
+test('legacy canonical equivalence rejects different slogans even when product type and color match', () => {
+  const a = memory.canonicalProductIdentity({
+    mapping,
+    merchantItemId: '111',
+    visibleText: ['BUILDING IS MY LOVE LANGUAGE'],
+    color: 'black',
+  });
+  const b = memory.canonicalProductIdentity({
+    mapping: {
+      ...mapping,
+      title: 'Building Something Else Entirely Black Tee',
+      destination: 'https://www.ebay.com/itm/222',
+    },
+    merchantItemId: '222',
+    visibleText: ['BUILDING SOMETHING ELSE ENTIRELY'],
+    color: 'black',
+  });
+  assert.equal(memory.canonicalProductsEquivalent(a, b), false);
+});
