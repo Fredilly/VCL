@@ -661,3 +661,59 @@ test('eBay getItemById hydrates the exact variation price', async () => {
   assert.equal(result?.price, '8.00');
   assert.equal(result?.currency, 'USD');
 });
+
+
+test('eBay search binds variation price to a variation-specific click URL', async () => {
+  const ctx = makeEbayContext(makeMockAuth(), {
+    fetch: async () => Response.json({
+      itemSummaries: [{
+        itemId: 'v1|307201252028|607039391882',
+        title: 'Building Is My Love Language Tee',
+        itemWebUrl: 'https://www.ebay.com/itm/307201252028?_skw=shirt',
+        price: { value: '18.99', currency: 'USD' },
+      }],
+    }),
+  });
+  loadModule(ebaySource, ctx);
+  const { EbayCommerceProvider } = ctx.exports;
+
+  const provider = new EbayCommerceProvider(makeMockAuth());
+  const [result] = await provider.search(query);
+
+  assert.equal(result.id, 'v1|307201252028|607039391882');
+  assert.equal(result.price, '18.99');
+  assert.equal(new URL(result.destination).searchParams.get('var'), '607039391882');
+});
+
+test('eBay exact hydration repairs parent URLs to target the priced variation', async () => {
+  const ctx = makeEbayContext(makeMockAuth(), {
+    fetch: async () => Response.json({
+      itemId: 'v1|307197731843|607037825830',
+      title: 'Building Is My Love Language Tee',
+      itemWebUrl: 'https://www.ebay.com/itm/307197731843',
+      price: { value: '8.00', currency: 'USD' },
+    }),
+  });
+  loadModule(ebaySource, ctx);
+  const { EbayCommerceProvider } = ctx.exports;
+
+  const provider = new EbayCommerceProvider(makeMockAuth());
+  const result = await provider.getItemById('v1|307197731843|607037825830', query);
+
+  assert.equal(result?.price, '8.00');
+  assert.equal(new URL(result?.destination).searchParams.get('var'), '607037825830');
+});
+
+test('eBay offer URL repair preserves affiliate parameters', () => {
+  const ctx = makeEbayContext(makeMockAuth());
+  loadModule(ebaySource, ctx);
+  const { ebayDestinationForOffer } = ctx.exports;
+  const url = ebayDestinationForOffer(
+    'v1|307197731843|607037825830',
+    'https://www.ebay.com/itm/307197731843?campid=123&customid=abc',
+  );
+  const parsed = new URL(url);
+  assert.equal(parsed.searchParams.get('var'), '607037825830');
+  assert.equal(parsed.searchParams.get('campid'), '123');
+  assert.equal(parsed.searchParams.get('customid'), 'abc');
+});
