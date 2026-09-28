@@ -11,9 +11,17 @@ const canonicalMod = loadModule(resolve(here, '../src/canonical-product-memory.t
 function storage() {
   const map = new Map();
   return {
+    map,
     api: {
       async get(key) { return map.get(key); },
       async put(key, value) { map.set(key, structuredClone(value)); },
+      async delete(key) { return map.delete(key); },
+      async list({ prefix = '', limit = 1000 } = {}) {
+        return new Map([...map.entries()]
+          .filter(([key]) => key.startsWith(prefix))
+          .sort(([a], [b]) => a.localeCompare(b))
+          .slice(0, limit));
+      },
     },
   };
 }
@@ -148,4 +156,74 @@ test('canonical consolidation fails closed when distinctive identity differs', a
     body: JSON.stringify({ canonical_keys: [a.identity.canonical_key, b.identity.canonical_key] }),
   }));
   assert.equal(response.status, 409);
+});
+
+
+test('consolidation removes loser canonical residue while old offers resolve to survivor', async () => {
+  const s = storage();
+  const ledger = new ledgerMod.VerifiedProductLedger({ storage: s.api });
+  const a = await upsert(ledger, identity(
+    'product:v1:survivor-a',
+    'v1|111|aaa',
+    'https://www.ebay.com/itm/111?var=aaa',
+  ));
+  const b = await upsert(ledger, identity(
+    'product:v1:loser-b',
+    'v1|222|bbb',
+    'https://www.ebay.com/itm/222?var=bbb',
+  ));
+
+  const response = await ledger.fetch(new Request('https://ledger/canonical/consolidate', {
+    method: 'POST',
+    body: JSON.stringify({ canonical_keys: [a.identity.canonical_key, b.identity.canonical_key] }),
+  }));
+  assert.equal(response.status, 200);
+  const body = await response.json();
+
+  const listResponse = await ledger.fetch(new Request('https://ledger/canonical/list', {
+    method: 'POST',
+    body: '{}',
+  }));
+  const listed = await listResponse.json();
+  assert.deepEqual(listed.identities.map((row) => row.canonical_key), [body.identity.canonical_key]);
+
+  const loserKey = [a.identity.canonical_key, b.identity.canonical_key]
+    .find((key) => key !== body.identity.canonical_key);
+  assert.ok(loserKey);
+  assert.equal(
+    s.map.has(`canonical:${loserKey}`),
+    false,
+    'loser canonical row is removed after redirect is written',
+  );
+
+  const loserWasB = loserKey === b.identity.canonical_key;
+  const offerKey = canonicalMod.canonicalMerchantOfferKey({
+    source: 'ebay',
+    item_id: loserWasB ? 'v1|222|bbb' : 'v1|111|aaa',
+    destination: loserWasB
+      ? 'https://www.ebay.com/itm/222?var=bbb'
+      : 'https://www.ebay.com/itm/111?var=aaa',
+  });
+  const offerLookup = await ledger.fetch(new Request('https://ledger/canonical/by-offer', {
+    method: 'POST',
+    body: JSON.stringify({ offer_key: offerKey }),
+  }));
+  const offerBody = await offerLookup.json();
+  assert.equal(offerBody.canonical_key, body.identity.canonical_key);
+});
+
+test('redirect chains resolve to one final canonical key', async () => {
+  const s = storage();
+  const ledger = new ledgerMod.VerifiedProductLedger({ storage: s.api });
+  const final = identity('product:v1:final', 'v1|333|ccc', 'https://www.ebay.com/itm/333?var=ccc');
+  await upsert(ledger, final);
+  await s.api.put('canonical-redirect:product:v1:old-a', 'product:v1:old-b');
+  await s.api.put('canonical-redirect:product:v1:old-b', 'product:v1:final');
+
+  const response = await ledger.fetch(new Request('https://ledger/canonical/get', {
+    method: 'POST',
+    body: JSON.stringify({ canonical_key: 'product:v1:old-a' }),
+  }));
+  const body = await response.json();
+  assert.equal(body.identity.canonical_key, 'product:v1:final');
 });

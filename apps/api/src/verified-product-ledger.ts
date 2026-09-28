@@ -276,6 +276,7 @@ export class VerifiedProductLedger {
   private readonly storage: {
     get<T = unknown>(key: string): Promise<T | undefined>;
     put<T = unknown>(key: string, value: T): Promise<void>;
+    delete?(key: string): Promise<boolean>;
     list?<T = unknown>(options?: { prefix?: string; limit?: number }): Promise<Map<string, T>>;
   };
   private canonicalWriteTail: Promise<void> = Promise.resolve();
@@ -291,6 +292,26 @@ export class VerifiedProductLedger {
 
   constructor(ctx: { storage: VerifiedProductLedger['storage'] }) {
     this.storage = ctx.storage;
+  }
+
+  private async resolveCanonicalKey(key: string): Promise<string> {
+    let current = bounded(key, 220);
+    const seen = new Set<string>();
+    for (let depth = 0; depth < 8 && current; depth += 1) {
+      if (seen.has(current)) break;
+      seen.add(current);
+      const next = await this.storage.get<string>(canonicalRedirectKey(current));
+      if (!next || next === current) break;
+      current = next;
+    }
+    return current;
+  }
+
+  private async deleteCanonicalIndexRows(identity: CanonicalProductIdentity): Promise<void> {
+    if (!this.storage.delete) return;
+    for (const prefix of canonicalIndexPrefixes(identity)) {
+      await this.storage.delete(canonicalIndexRow(prefix, identity.canonical_key));
+    }
   }
 
   private async indexCanonicalIdentity(identity: CanonicalProductIdentity): Promise<void> {
@@ -331,13 +352,13 @@ export class VerifiedProductLedger {
       const resolved = await Promise.all(mappings.map(async (mapping) => {
         const canonical = bounded(mapping.canonical_key, 220);
         if (!canonical) return mapping;
-        const redirect = await this.storage.get<string>(canonicalRedirectKey(canonical));
-        if (!redirect || redirect === canonical) return mapping;
+        const resolvedCanonical = await this.resolveCanonicalKey(canonical);
+        if (!resolvedCanonical || resolvedCanonical === canonical) return mapping;
         changed = true;
         return {
           ...mapping,
-          canonical_key: redirect,
-          ...(bounded(mapping.track_id, 220) === canonical ? { track_id: redirect } : {}),
+          canonical_key: resolvedCanonical,
+          ...(bounded(mapping.track_id, 220) === canonical ? { track_id: resolvedCanonical } : {}),
         };
       }));
       if (changed) await this.storage.put(key, resolved);
@@ -348,8 +369,7 @@ export class VerifiedProductLedger {
       const body = await request.json() as Record<string, unknown>;
       const key = bounded(body.canonical_key, 220);
       if (!key) return Response.json({ identity: null });
-      const redirect = await this.storage.get<string>(canonicalRedirectKey(key));
-      const resolvedKey = redirect || key;
+      const resolvedKey = await this.resolveCanonicalKey(key);
       return Response.json({ identity: await this.storage.get<CanonicalProductIdentity>(canonicalKey(resolvedKey)) ?? null });
     }
 
@@ -359,8 +379,7 @@ export class VerifiedProductLedger {
       if (!offerKey) return Response.json({ canonical_key: null, identity: null });
       const owner = await this.storage.get<string>(offerOwnerKey(offerKey));
       if (!owner) return Response.json({ canonical_key: null, identity: null });
-      const redirect = await this.storage.get<string>(canonicalRedirectKey(owner));
-      const canonical = redirect || owner;
+      const canonical = await this.resolveCanonicalKey(owner);
       return Response.json({
         canonical_key: canonical,
         identity: await this.storage.get<CanonicalProductIdentity>(canonicalKey(canonical)) ?? null,
@@ -376,8 +395,8 @@ export class VerifiedProductLedger {
       }
 
       return await this.serializeCanonicalWrite(async () => {
-        const resolvedKeys = [...new Set(await Promise.all(requested.map(async (key) =>
-          await this.storage.get<string>(canonicalRedirectKey(key)) || key)))];
+        const resolvedKeys = [...new Set(await Promise.all(requested.map((key) =>
+          this.resolveCanonicalKey(key))))];
         const identities = (await Promise.all(resolvedKeys.map((key) =>
           this.storage.get<CanonicalProductIdentity>(canonicalKey(key)))))
           .filter((identity): identity is CanonicalProductIdentity => Boolean(identity));
@@ -413,6 +432,8 @@ export class VerifiedProductLedger {
         for (const duplicate of identities) {
           if (duplicate.canonical_key !== survivorKey) {
             await this.storage.put(canonicalRedirectKey(duplicate.canonical_key), survivorKey);
+            await this.deleteCanonicalIndexRows(duplicate);
+            if (this.storage.delete) await this.storage.delete(canonicalKey(duplicate.canonical_key));
           }
         }
 
@@ -476,8 +497,7 @@ export class VerifiedProductLedger {
       const identities: CanonicalProductIdentity[] = [];
       const seen = new Set<string>();
       for (const key of rankedKeys) {
-        const redirect = await this.storage.get<string>(canonicalRedirectKey(key));
-        const resolved = redirect || key;
+        const resolved = await this.resolveCanonicalKey(key);
         if (seen.has(resolved)) continue;
         const identity = await this.storage.get<CanonicalProductIdentity>(canonicalKey(resolved));
         if (identity) {
@@ -520,8 +540,8 @@ export class VerifiedProductLedger {
         const owners = (await Promise.all(refs.map((ref) =>
           this.storage.get<string>(offerOwnerKey(ref.offer_key!)))))
           .filter((owner): owner is string => Boolean(owner));
-        const resolvedOwners = await Promise.all(owners.map(async (owner) =>
-          await this.storage.get<string>(canonicalRedirectKey(owner)) || owner));
+        const resolvedOwners = await Promise.all(owners.map((owner) =>
+          this.resolveCanonicalKey(owner)));
         const survivorKey = [...new Set(resolvedOwners)].sort()[0] || requestedKey;
         const normalizedIncoming: CanonicalProductIdentity = {
           ...incoming,
