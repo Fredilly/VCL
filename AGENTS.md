@@ -12,6 +12,8 @@ The browser extension is a distribution surface, not the moat.
 
 ## Current phase
 
+Current shipped alpha baseline is treated as **v0.1** for engineering/versioning purposes. The repository did not previously declare an application SemVer. **v0.2** is the modular perception + identity iteration and must remain benchmark-gated.
+
 This is a side-quest MVP. Optimize for:
 1. technical proof,
 2. user trust,
@@ -123,3 +125,32 @@ Decision rule:
 `Can this be handled by the system/agent instead of consuming founder attention?`
 
 If yes, handle or automate it.
+
+
+## v0.2 Voltron architecture
+
+Treat perception and identity as replaceable modules rather than one model pipeline.
+
+Required boundaries:
+- `FrameSource`
+- `SelectionLocalizer`
+- `ObjectTracker`
+- `EvidenceExtractor`
+- `VisionProvider`
+- `CandidateRetriever`
+- `CandidateVerifier`
+- `IdentityResolver`
+- `ProductMemory`
+- `CommerceResolver`
+- `TelemetrySink`
+
+The current crop path is the fallback baseline. SAM 2 may be added only as an experimental `ObjectTracker`/selection adapter and must not require paid GPU infrastructure for v0.2.
+
+Promote a module only after a controlled whole-pipeline benchmark shows improvement without unacceptable regression in:
+- useful-result rate,
+- false EXACT,
+- latency,
+- cost,
+- graceful-response rate.
+
+Result classes are `EXACT`, `SIMILAR`, and `RELATED`. `SPONSORED` is separate commercial metadata.
