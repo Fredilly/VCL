@@ -34,6 +34,7 @@ import { distinctiveTextSameVideoReuse, eligibleSameVideoCanonicalCandidates, ex
 import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
+import { fetchProductPageMetadata } from './product-page-enrichment.js';
 export { AlphaAccessLedger } from './alpha-access.js';
 export { VerifiedProductLedger } from './verified-product-ledger.js';
 export { AdminAccessLedger } from './admin-access.js';
@@ -1348,12 +1349,24 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         const description = normalizeObjectDescription(body.description);
         const timestampMs = typeof body.timestamp_ms === 'number' && Number.isFinite(body.timestamp_ms) && body.timestamp_ms >= 0 ? Math.round(body.timestamp_ms) : null;
         if (timestampMs === null) return jsonResponse({ error: 'Missing timestamp' }, 400);
-        const destination = typeof product.destination === 'string' ? product.destination : '';
-        try { new URL(destination); } catch { return jsonResponse({ error: 'Verified result needs a valid destination' }, 400); }
-        const productId = typeof product.model === 'string' && product.model.trim()
-          ? product.model.trim().slice(0, 160)
-          : typeof product.id === 'string' ? product.id.trim().slice(0, 160) : '';
-        const title = typeof product.title === 'string' ? product.title.trim().slice(0, 300) : '';
+        const destinationInput = typeof product.destination === 'string' ? product.destination.trim() : '';
+        try { new URL(destinationInput); } catch { return jsonResponse({ error: 'Verified result needs a valid destination' }, 400); }
+
+        // Enrich once when the verified mapping is created so repeated Scoops reuse
+        // canonical product metadata instead of scraping the merchant page every time.
+        // Source-page metadata wins; supplied fields remain a graceful fallback.
+        const sourceMetadata = await fetchProductPageMetadata(destinationInput);
+        const destination = (sourceMetadata.canonical_url || destinationInput).slice(0, 1200);
+        const suppliedProductId = typeof product.model === 'string' && product.model.trim()
+          ? product.model.trim()
+          : typeof product.id === 'string' ? product.id.trim() : '';
+        const productId = (suppliedProductId || sourceMetadata.sku || '').slice(0, 160);
+        const suppliedTitle = typeof product.title === 'string' ? product.title.trim() : '';
+        const title = (sourceMetadata.title || suppliedTitle).slice(0, 300);
+        const suppliedImage = typeof product.image_reference === 'string' && product.image_reference.trim()
+          ? product.image_reference.trim()
+          : '';
+        const imageReference = (sourceMetadata.image_reference || suppliedImage || '').slice(0, 1200) || null;
         if (!productId || !title) return jsonResponse({ error: 'Verified result is missing product identity' }, 400);
         const mappingBase: VerifiedProductMapping = {
           platform,
@@ -1368,9 +1381,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           product_id: productId,
           title,
           destination,
-          image_reference: typeof product.image_reference === 'string' && product.image_reference.trim()
-            ? product.image_reference.trim().slice(0, 1200)
-            : null,
+          image_reference: imageReference,
           provider: typeof product.provider === 'string' && product.provider.trim()
             ? verifiedSourceProviderName(product.provider, destination).slice(0, 80) || null
             : typeof product.provenance === 'string' && product.provenance.trim()
