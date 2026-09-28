@@ -187,13 +187,22 @@ test('consolidation removes loser canonical residue while old offers resolve to 
   const listed = await listResponse.json();
   assert.deepEqual(listed.identities.map((row) => row.canonical_key), [body.identity.canonical_key]);
 
-  const loserStorageKey = `canonical:${b.identity.canonical_key}`;
-  assert.equal(s.map.has(loserStorageKey), false, 'loser canonical row is removed after redirect is written');
+  const loserKey = [a.identity.canonical_key, b.identity.canonical_key]
+    .find((key) => key !== body.identity.canonical_key);
+  assert.ok(loserKey);
+  assert.equal(
+    s.map.has(`canonical:${loserKey}`),
+    false,
+    'loser canonical row is removed after redirect is written',
+  );
 
+  const loserWasB = loserKey === b.identity.canonical_key;
   const offerKey = canonicalMod.canonicalMerchantOfferKey({
     source: 'ebay',
-    item_id: 'v1|222|bbb',
-    destination: 'https://www.ebay.com/itm/222?var=bbb',
+    item_id: loserWasB ? 'v1|222|bbb' : 'v1|111|aaa',
+    destination: loserWasB
+      ? 'https://www.ebay.com/itm/222?var=bbb'
+      : 'https://www.ebay.com/itm/111?var=aaa',
   });
   const offerLookup = await ledger.fetch(new Request('https://ledger/canonical/by-offer', {
     method: 'POST',
