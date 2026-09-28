@@ -1,5 +1,5 @@
 import type { VerifiedProductMapping, VpmTrustedObservation } from './verified-product-mapping.js';
-import { canonicalEquivalenceEvidenceKey, canonicalMerchantOfferKey, canonicalProductIdentity, mergeCanonicalProductIdentity, normalizeIdentityText, type CanonicalProductIdentity } from './canonical-product-memory.js';
+import { canonicalMerchantOfferKey, canonicalProductIdentity, canonicalProductsEquivalent, mergeCanonicalProductIdentity, normalizeIdentityText, type CanonicalProductIdentity } from './canonical-product-memory.js';
 
 type DurableObjectStubLike = { fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> };
 export type VerifiedProductLedgerNamespaceLike = {
@@ -385,9 +385,8 @@ export class VerifiedProductLedger {
           return Response.json({ identity: identities[0] ?? null, consolidated: false });
         }
 
-        const evidenceKeys = identities.map(canonicalEquivalenceEvidenceKey);
-        const sharedEvidence = evidenceKeys[0];
-        if (!sharedEvidence || !evidenceKeys.every((key) => key === sharedEvidence)) {
+        const anchorIdentity = identities[0]!;
+        if (!identities.slice(1).every((identity) => canonicalProductsEquivalent(anchorIdentity, identity))) {
           return Response.json({ error: 'Canonical identities are not equivalent' }, { status: 409 });
         }
 

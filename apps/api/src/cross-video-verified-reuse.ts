@@ -2,7 +2,7 @@ import type { ObjectDescription } from './types.js';
 import type { CanonicalProductIdentity } from './canonical-product-memory.js';
 import type { ImageComparison } from './verification-evidence.js';
 import { canonical, compatible } from './verification-evidence.js';
-import { canonicalEquivalenceEvidenceKey, normalizeIdentityText } from './canonical-product-memory.js';
+import { canonicalProductsEquivalent, normalizeIdentityText } from './canonical-product-memory.js';
 
 export type CrossVideoReuseDecision = {
   identity: CanonicalProductIdentity | null;
@@ -136,10 +136,13 @@ export function confirmCrossVideoVisual(
 
   if (confirmed.length === 1) return confirmed[0];
   if (confirmed.length > 1) {
-    const keys = confirmed.map((candidate) =>
-      candidate.identity ? canonicalEquivalenceEvidenceKey(candidate.identity) : null);
-    const sharedKey = keys[0];
-    if (sharedKey && keys.every((key) => key === sharedKey)) {
+    const identities = confirmed
+      .map((candidate) => candidate.identity)
+      .filter((identity): identity is CanonicalProductIdentity => Boolean(identity));
+    const equivalent = identities.length === confirmed.length
+      && identities.every((identity, index) =>
+        index === 0 || canonicalProductsEquivalent(identities[0]!, identity));
+    if (equivalent) {
       const winner = [...confirmed]
         .sort((a, b) => String(a.canonical_key).localeCompare(String(b.canonical_key)))[0]!;
       const merchantRefs = confirmed.flatMap((candidate) => candidate.identity?.merchant_refs ?? []);

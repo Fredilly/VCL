@@ -113,6 +113,66 @@ export function canonicalEquivalenceEvidenceKey(identity: Pick<CanonicalProductI
   return `marking|${objectType}|${color}|${phrase}`;
 }
 
+
+function identityWords(values: Array<string | null | undefined>): string[] {
+  return normalizeIdentityText(values.filter(Boolean).join(' '))
+    .split(' ')
+    .filter((token) => token.length >= 2);
+}
+
+function wordOverlap(a: string[], b: string[]): { shared: number; ratio: number } {
+  const left = new Set(a);
+  const right = new Set(b);
+  let shared = 0;
+  for (const token of left) if (right.has(token)) shared += 1;
+  return { shared, ratio: shared / Math.max(1, Math.min(left.size, right.size)) };
+}
+
+export function canonicalProductsEquivalent(
+  a: Pick<CanonicalProductIdentity, 'title' | 'brand' | 'model' | 'object_type' | 'visible_text' | 'logos_markings' | 'color'>,
+  b: Pick<CanonicalProductIdentity, 'title' | 'brand' | 'model' | 'object_type' | 'visible_text' | 'logos_markings' | 'color'>,
+): boolean {
+  const typeA = normalizeIdentityText(a.object_type);
+  const typeB = normalizeIdentityText(b.object_type);
+  if (!typeA || !typeB || typeA !== typeB) return false;
+
+  const brandA = normalizeIdentityText(a.brand);
+  const brandB = normalizeIdentityText(b.brand);
+  if (brandA && brandB && brandA !== brandB) return false;
+
+  const modelA = normalizeIdentityText(a.model);
+  const modelB = normalizeIdentityText(b.model);
+  if (modelA && modelB) return modelA === modelB && (!brandA || !brandB || brandA === brandB);
+  if (modelA || modelB) return false;
+
+  const colorA = normalizeIdentityText(a.color);
+  const colorB = normalizeIdentityText(b.color);
+  if (colorA && colorB && colorA !== colorB) return false;
+
+  const strongA = identityWords([
+    ...(a.visible_text ?? []),
+    ...(a.logos_markings ?? []),
+  ]);
+  const strongB = identityWords([
+    ...(b.visible_text ?? []),
+    ...(b.logos_markings ?? []),
+  ]);
+  const titleA = identityWords([a.title]);
+  const titleB = identityWords([b.title]);
+
+  const direct = wordOverlap(strongA, strongB);
+  if (strongA.length >= 4 && strongB.length >= 4) {
+    return direct.shared >= 4 && direct.ratio >= 0.8;
+  }
+
+  const checks = [
+    direct,
+    ...(strongA.length >= 4 ? [wordOverlap(strongA, titleB)] : []),
+    ...(strongB.length >= 4 ? [wordOverlap(titleA, strongB)] : []),
+  ];
+  return checks.some((match) => match.shared >= 4 && match.ratio >= 0.8);
+}
+
 export function canonicalIdentityHasMerchantOffer(
   identity: Pick<CanonicalProductIdentity, 'merchant_refs'>,
   ref: Pick<CanonicalMerchantRef, 'source' | 'item_id' | 'destination'>,
