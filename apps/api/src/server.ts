@@ -421,11 +421,19 @@ export async function refreshVerifiedOffers(
     if (exactSource?.model) canonicalModel = exactSource.model;
   }
 
+  const merchantMetadata = exactSource?.price
+    ? null
+    : await fetchProductPageMetadata(mapping.destination).catch(() => null);
   const sourceImage = exactSource?.image_reference
     ?? mapping.image_reference
+    ?? merchantMetadata?.image_reference
     ?? await sourceImageForVerifiedMapping(mapping);
   const hydratedMapping = sourceImage ? { ...mapping, image_reference: sourceImage } : mapping;
-  const fallback = verifiedMappingProduct(hydratedMapping);
+  const fallback = {
+    ...verifiedMappingProduct(hydratedMapping),
+    price: merchantMetadata?.price ?? null,
+    currency: merchantMetadata?.currency ?? null,
+  };
 
   const identityKey = `verified:${verifiedIdentityKey(canonicalModel) || verifiedIdentityKey(mapping.product_id)}`;
   const makeExact = (product: ProductCandidate, reason = `${mapping.provenance} product identity; same verified SKU/model`): ProductCandidate => ({

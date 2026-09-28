@@ -3,6 +3,8 @@ export type ProductPageMetadata = {
   title: string | null;
   canonical_url: string | null;
   image_reference: string | null;
+  price: string | null;
+  currency: string | null;
 };
 
 function decodeHtml(value: string): string {
@@ -86,6 +88,24 @@ function jsonLdProduct(html: string): Record<string, unknown> | null {
   return null;
 }
 
+function offerPrice(value: unknown): { price: string | null; currency: string | null } {
+  if (!value) return { price: null, currency: null };
+  const offers = Array.isArray(value) ? value : [value];
+  for (const offer of offers) {
+    if (!offer || typeof offer !== 'object') continue;
+    const record = offer as Record<string, unknown>;
+    const rawPrice = record.price ?? record.lowPrice ?? record.highPrice;
+    const price = typeof rawPrice === 'number'
+      ? String(rawPrice)
+      : typeof rawPrice === 'string' && rawPrice.trim()
+        ? rawPrice.trim()
+        : null;
+    const currency = asString(record.priceCurrency);
+    if (price || currency) return { price, currency };
+  }
+  return { price: null, currency: null };
+}
+
 function firstImage(value: unknown): string | null {
   if (typeof value === 'string') return value.trim() || null;
   if (Array.isArray(value)) {
@@ -103,7 +123,7 @@ function firstImage(value: unknown): string | null {
 
 export function extractProductPageMetadata(html: string, sourceUrl: string): ProductPageMetadata {
   const source = safeHttpUrl(sourceUrl);
-  if (!source) return { sku: null, title: null, canonical_url: null, image_reference: null };
+  if (!source) return { sku: null, title: null, canonical_url: null, image_reference: null, price: null, currency: null };
 
   const product = jsonLdProduct(html);
   const sku = asString(product?.sku) ?? asString(product?.productID) ?? asString(product?.mpn);
@@ -120,12 +140,21 @@ export function extractProductPageMetadata(html: string, sourceUrl: string): Pro
   const imageRaw = firstImage(product?.image)
     ?? metaContent(html, ['og:image', 'og:image:secure_url', 'twitter:image']);
   const image = imageRaw ? safeHttpUrl(imageRaw, source) : null;
+  const structuredOffer = offerPrice(product?.offers);
+  const price = structuredOffer.price
+    ?? metaContent(html, ['product:price:amount', 'og:price:amount'])
+    ?? null;
+  const currency = structuredOffer.currency
+    ?? metaContent(html, ['product:price:currency', 'og:price:currency'])
+    ?? null;
 
   return {
     sku,
     title,
     canonical_url: canonicalUrl,
     image_reference: image?.toString() ?? null,
+    price,
+    currency,
   };
 }
 
@@ -135,7 +164,7 @@ export async function fetchProductPageMetadata(
   timeoutMs = 1800,
 ): Promise<ProductPageMetadata> {
   const source = safeHttpUrl(destination);
-  if (!source) return { sku: null, title: null, canonical_url: null, image_reference: null };
+  if (!source) return { sku: null, title: null, canonical_url: null, image_reference: null, price: null, currency: null };
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -147,11 +176,11 @@ export async function fetchProductPageMetadata(
     });
     const finalUrl = safeHttpUrl(response.url || source.toString()) ?? source;
     if (!response.ok || !(response.headers.get('content-type') ?? '').toLowerCase().includes('text/html')) {
-      return { sku: null, title: null, canonical_url: finalUrl.toString(), image_reference: null };
+      return { sku: null, title: null, canonical_url: finalUrl.toString(), image_reference: null, price: null, currency: null };
     }
 
     const reader = response.body?.getReader();
-    if (!reader) return { sku: null, title: null, canonical_url: finalUrl.toString(), image_reference: null };
+    if (!reader) return { sku: null, title: null, canonical_url: finalUrl.toString(), image_reference: null, price: null, currency: null };
 
     const decoder = new TextDecoder();
     let html = '';
@@ -168,7 +197,7 @@ export async function fetchProductPageMetadata(
     html += decoder.decode();
     return extractProductPageMetadata(html, finalUrl.toString());
   } catch {
-    return { sku: null, title: null, canonical_url: source.toString(), image_reference: null };
+    return { sku: null, title: null, canonical_url: source.toString(), image_reference: null, price: null, currency: null };
   } finally {
     clearTimeout(timeout);
   }
