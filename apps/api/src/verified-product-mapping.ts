@@ -131,7 +131,7 @@ export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProduc
   const platform = normalize(input.platform);
   const contentRef = normalizeContentRef(input.platform, input.contentRef);
   const mappings = [...parseVerifiedProductMappings(input.rawRegistry), ...(input.mappings ?? [])];
-  return mappings.find((mapping) => {
+  const matches = mappings.filter((mapping) => {
     if (mapping.provenance === 'test_fixture' && !input.allowTestFixtures) return false;
     const timestampMatches = mapping.scope === 'entire_video'
       || (typeof input.timestampMs === 'number'
@@ -143,7 +143,27 @@ export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProduc
       && normalizeContentRef(mapping.platform, mapping.content_ref) === contentRef
       && timestampMatches
       && objectCompatible(mapping.object_type, input.description);
-  }) ?? null;
+  });
+  const primary = matches[0];
+  if (!primary) return null;
+
+  // The same verified SKU may exist in both durable storage and a seed/registry
+  // during migration. Keep the first mapping as authority, but fill missing
+  // non-identity metadata from equivalent records so image/provider data does
+  // not randomly disappear depending on which path resolved first.
+  const identity = normalize(primary.product_id);
+  return matches
+    .filter((mapping) => normalize(mapping.product_id) === identity)
+    .reduce<VerifiedProductMapping>((merged, mapping) => ({
+      ...merged,
+      image_reference: merged.image_reference ?? mapping.image_reference ?? null,
+      provider: merged.provider ?? mapping.provider ?? null,
+      canonical_key: merged.canonical_key ?? mapping.canonical_key ?? null,
+      track_id: merged.track_id ?? mapping.track_id ?? null,
+      trusted_observations: merged.trusted_observations?.length
+        ? merged.trusted_observations
+        : mapping.trusted_observations,
+    }), primary);
 }
 
 export function verifiedMappingProduct(mapping: VerifiedProductMapping): ProductCandidate {

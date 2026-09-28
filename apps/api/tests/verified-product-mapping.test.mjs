@@ -166,3 +166,46 @@ test('verified mapping preserves merchant thumbnail and provider for fallback di
   assert.equal(product.provider, 'ebay');
   assert.equal(product.result_class, 'EXACT');
 });
+
+
+test('equivalent durable and seed mappings merge richer metadata without changing product identity', () => {
+  const hit = mod.lookupVerifiedProductMapping({
+    mappings: [
+      {
+        platform: 'youtube',
+        content_ref: 'youtube:BR5fQYeqlJo',
+        scope: 'entire_video',
+        object_type: 'shirt',
+        brand: 'Mizzen+Main',
+        product_id: '1WS-1916',
+        title: 'Leeward Dress Shirt',
+        destination: 'https://www.mizzenandmain.com/products/steel-blue-tonal-texture-leeward-dress-shirt',
+        image_reference: null,
+        provider: null,
+        provenance: 'admin_verified',
+      },
+      {
+        platform: 'youtube',
+        content_ref: 'BR5fQYeqlJo',
+        scope: 'entire_video',
+        object_type: 'shirt',
+        brand: 'Mizzen+Main',
+        product_id: '1WS-1916',
+        title: 'Leeward Dress Shirt',
+        destination: 'https://www.mizzenandmain.com/products/steel-blue-tonal-texture-leeward-dress-shirt',
+        image_reference: 'https://cdn.shopify.com/1WS-1916.jpg',
+        provider: 'mizzenandmain',
+        provenance: 'admin_verified',
+      },
+    ],
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: 'BR5fQYeqlJo',
+    description: shirt,
+  });
+
+  assert.equal(hit?.product_id, '1WS-1916');
+  assert.equal(hit?.content_ref, 'youtube:BR5fQYeqlJo');
+  assert.equal(hit?.image_reference, 'https://cdn.shopify.com/1WS-1916.jpg');
+  assert.equal(hit?.provider, 'mizzenandmain');
+});
