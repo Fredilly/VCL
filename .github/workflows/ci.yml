@@ -35,6 +35,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Guard production config
+        run: node apps/api/scripts/check-production-config.mjs
+
       - name: Prepare WXT types
         run: pnpm --filter @vcl/extension exec wxt prepare
 
@@ -76,6 +79,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Guard production config
+        run: node apps/api/scripts/check-production-config.mjs
 
       - name: Deploy API to Cloudflare
         run: pnpm exec wrangler deploy --config apps/api/wrangler.jsonc
