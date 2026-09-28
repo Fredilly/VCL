@@ -1319,10 +1319,67 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       if (!authorized.admin || !authorized.admin_id) return jsonResponse({ error: 'Unauthorized' }, 401);
       try {
         const body = await request.json() as Record<string, unknown>;
-        const action = body.action === 'revoke' || body.action === 'demote' ? 'revoke' : 'verify';
+        const action = body.action === 'revoke' || body.action === 'demote'
+          ? 'revoke'
+          : body.action === 'producer_seed'
+            ? 'producer_seed'
+            : 'verify';
         const platform = typeof body.platform === 'string' ? body.platform.slice(0, 40) : '';
         const contentRef = typeof body.content_ref === 'string' ? body.content_ref.slice(0, 180) : '';
         if (!platform || !contentRef) return jsonResponse({ error: 'Missing content identity' }, 400);
+
+        // Generic creator/producer SKU ingestion. This is the durable path for
+        // partner-supplied product truth and does not require a code change per video.
+        if (action === 'producer_seed') {
+          const destinationInput = typeof body.destination === 'string' ? body.destination.trim() : '';
+          try { new URL(destinationInput); } catch { return jsonResponse({ error: 'Producer mapping needs a valid product URL' }, 400); }
+
+          const objectType = typeof body.object_type === 'string' ? body.object_type.trim().slice(0, 100) : '';
+          if (!objectType) return jsonResponse({ error: 'Producer mapping needs object_type' }, 400);
+
+          const sourceMetadata = await fetchProductPageMetadata(destinationInput);
+          const destination = (sourceMetadata.canonical_url || destinationInput).slice(0, 1200);
+          const suppliedSku = typeof body.product_id === 'string' && body.product_id.trim()
+            ? body.product_id.trim()
+            : typeof body.sku === 'string' ? body.sku.trim() : '';
+          const productId = (suppliedSku || sourceMetadata.sku || '').slice(0, 160);
+          if (!productId) return jsonResponse({ error: 'Producer mapping needs a SKU/product_id' }, 400);
+
+          const suppliedTitle = typeof body.title === 'string' ? body.title.trim() : '';
+          const title = (sourceMetadata.title || suppliedTitle || productId).slice(0, 300);
+          const suppliedImage = typeof body.image_reference === 'string' ? body.image_reference.trim() : '';
+          const imageReference = (sourceMetadata.image_reference || suppliedImage || '').slice(0, 1200) || null;
+          const brand = typeof body.brand === 'string' ? body.brand.trim().slice(0, 120) : '';
+          const requestedProvenance = body.provenance;
+          const provenance: VerifiedProductMapping['provenance'] =
+            requestedProvenance === 'creator_verified' || requestedProvenance === 'brand_verified'
+              ? requestedProvenance
+              : 'admin_verified';
+
+          const mapping: VerifiedProductMapping = {
+            platform,
+            content_ref: contentRef,
+            scope: 'entire_video',
+            object_type: objectType,
+            brand,
+            product_id: productId,
+            title,
+            destination,
+            image_reference: imageReference,
+            provider: verifiedSourceProviderName(null, destination) || null,
+            provenance,
+          };
+
+          const saved = await persistAdminVerifiedMapping(env, mapping);
+          await auditAdminAction(env, authorized.admin_id!, 'producer_verified_product_saved', {
+            platform,
+            content_ref: contentRef,
+            product_id: productId,
+            provenance,
+          });
+          return jsonResponse({ accepted: true, mapping: saved });
+        }
+
         if (action === 'revoke') {
           const product = body.product && typeof body.product === 'object' && !Array.isArray(body.product) ? body.product as Record<string, unknown> : {};
           const canonicalKey = typeof body.canonical_key === 'string' ? body.canonical_key.slice(0, 220) : '';
