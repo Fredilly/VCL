@@ -160,10 +160,15 @@ export function canonicalProductsEquivalent(
   const titleA = identityWords([a.title]);
   const titleB = identityWords([b.title]);
 
+  const direct = wordOverlap(strongA, strongB);
+  if (strongA.length >= 4 && strongB.length >= 4) {
+    return direct.shared >= 4 && direct.ratio >= 0.8;
+  }
+
   const checks = [
-    wordOverlap(strongA, strongB),
-    wordOverlap(strongA, titleB),
-    wordOverlap(titleA, strongB),
+    direct,
+    ...(strongA.length >= 4 ? [wordOverlap(strongA, titleB)] : []),
+    ...(strongB.length >= 4 ? [wordOverlap(titleA, strongB)] : []),
   ];
   return checks.some((match) => match.shared >= 4 && match.ratio >= 0.8);
 }
