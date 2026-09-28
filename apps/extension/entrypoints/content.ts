@@ -132,11 +132,12 @@ function startSearchingQuips(title: HTMLElement) {
       title.textContent = text;
       return;
     }
-    outAnimation = (title as any).animate(
+    const out = (title as any).animate(
       [{ opacity: 1, transform: 'translateY(0)' }, { opacity: 0.35, transform: 'translateY(-2px)' }],
       { duration: 180, easing: 'ease-out' },
-    );
-    outAnimation.addEventListener('finish', () => {
+    ) as Animation;
+    outAnimation = out;
+    out.addEventListener('finish', () => {
       if (!active) return;
       title.textContent = text;
       inAnimation = (title as any).animate(
