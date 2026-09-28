@@ -647,11 +647,24 @@ export async function refreshVerifiedOffers(
     }
   }
 
-  // Previously verified merchant offers are inventory for this remembered identity,
-  // so they must survive the result cap ahead of unverified visual alternatives.
-  // Fresh provider-backed Exact rows still come first so live price/currency wins
-  // when the same merchant offer appears in both sets.
-  const exactProducts = dedupeProducts([canonicalProduct, ...metadataExact, ...visualExact, ...rememberedExact, ...visualAlternatives]).slice(0, 8);
+  // One canonical identity must render as one Exact product card.
+  // Merchant rows and remembered offers are evidence/offers for that identity,
+  // not additional Exact products. Preserve their freshest image/price on the
+  // canonical card, then keep genuinely different products as Similar/Related.
+  const exactEvidence = [...metadataExact, ...visualExact, ...rememberedExact];
+  const pricedExact = exactEvidence.find((product) => Boolean(product.price));
+  const imagedExact = exactEvidence.find((product) => Boolean(product.image_reference));
+  const canonicalExact: ProductCandidate = {
+    ...canonicalProduct,
+    image_reference: canonicalProduct.image_reference
+      || mapping.image_reference
+      || imagedExact?.image_reference
+      || sourceImage
+      || null,
+    price: canonicalProduct.price ?? pricedExact?.price ?? null,
+    currency: canonicalProduct.currency ?? pricedExact?.currency ?? null,
+  };
+  const exactProducts = dedupeProducts([canonicalExact, ...visualAlternatives]).slice(0, 8);
 
   // Teach canonical memory which merchant offers have now independently passed.
   if (mapping.canonical_key && visual?.env && visualExact.length) {
