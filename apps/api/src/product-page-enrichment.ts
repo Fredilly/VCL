@@ -161,7 +161,7 @@ export function extractProductPageMetadata(html: string, sourceUrl: string): Pro
 export async function fetchProductPageMetadata(
   destination: string,
   fetchImpl: typeof fetch = fetch,
-  timeoutMs = 1800,
+  timeoutMs = 2500,
 ): Promise<ProductPageMetadata> {
   const source = safeHttpUrl(destination);
   if (!source) return { sku: null, title: null, canonical_url: null, image_reference: null, price: null, currency: null };
@@ -185,13 +185,11 @@ export async function fetchProductPageMetadata(
     const decoder = new TextDecoder();
     let html = '';
     let bytes = 0;
-    while (bytes < 400_000) {
+    while (bytes < 800_000) {
       const { done, value } = await reader.read();
       if (done) break;
       bytes += value.byteLength;
       html += decoder.decode(value, { stream: true });
-      if (/<script\b[^>]*application\/ld\+json/i.test(html)
-        && /<meta\b[^>]*(?:og:image|twitter:image)/i.test(html)) break;
     }
     try { await reader.cancel(); } catch {}
     html += decoder.decode();
