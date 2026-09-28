@@ -56,6 +56,33 @@ That is when it can return **EXACT**.
 Known-good merge point for this milestone:
 `9086ab102bf35f0884da6596ebf443e7a72158d6`
 
+## Scale fallback
+
+The current identity architecture is intended to survive storage/search changes.
+
+If Scoop starts buckling under large graph load, **do not redesign Exact identity first**. Preserve:
+
+```text
+canonical product identity
++ merchant-offer ownership
++ indexed bounded retrieval
++ strict verifier truth gate
++ redirects for merged canonicals
+```
+
+The first scaling move should be infrastructure, not identity semantics:
+
+1. keep the same canonical IDs and evidence model,
+2. move or replicate evidence indexes onto storage/search infrastructure designed for very large cardinality,
+3. keep candidate retrieval bounded,
+4. shard/partition by stable evidence dimensions where needed,
+5. benchmark lookup latency and storage reads at 1M, 100M, then larger synthetic/equivalent loads,
+6. preserve the verifier as the final Exact gate.
+
+A billion-product claim is **not yet proven**. What is proven is the bounded/indexed lookup shape and live cross-video Exact behavior. The identity model should remain portable if Durable Object storage becomes the bottleneck.
+
+Trigger for scale work: measured latency/read amplification, storage limits, or sustained partner/catalog volume—not speculation.
+
 ## Trust invariant
 
 Do not weaken this:
