@@ -122,6 +122,25 @@ function shuffledSearchingQuips() {
 function startSearchingQuips(title: HTMLElement) {
   let quips = shuffledSearchingQuips();
   let index = 0;
+
+  const show = (text: string) => {
+    if (typeof (title as any).animate !== 'function') {
+      title.textContent = text;
+      return;
+    }
+    const out = (title as any).animate(
+      [{ opacity: 1, transform: 'translateY(0)' }, { opacity: 0.35, transform: 'translateY(-2px)' }],
+      { duration: 180, easing: 'ease-out' },
+    );
+    out.addEventListener('finish', () => {
+      title.textContent = text;
+      (title as any).animate(
+        [{ opacity: 0.35, transform: 'translateY(2px)' }, { opacity: 1, transform: 'translateY(0)' }],
+        { duration: 240, easing: 'ease-out' },
+      );
+    }, { once: true });
+  };
+
   title.textContent = quips[index] ?? 'Searching…';
   if (typeof window === 'undefined' || typeof window.setInterval !== 'function') return () => {};
   const interval = window.setInterval(() => {
@@ -130,8 +149,8 @@ function startSearchingQuips(title: HTMLElement) {
       quips = shuffledSearchingQuips();
       index = 0;
     }
-    title.textContent = quips[index] ?? 'Searching…';
-  }, 1800);
+    show(quips[index] ?? 'Searching…');
+  }, 2800);
   return () => window.clearInterval(interval);
 }
 
@@ -610,8 +629,6 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     if (controller.signal.aborted) return;
     if (response && typeof response === 'object' && 'error' in response && typeof response.error === 'string') throw new Error(response.error);
     const analysis = parseObjectDescription(response);
-    stopSearchingQuips();
-    panelTitle.textContent = 'Scoop found this';
 
     const summary = document.createElement('div');
     const readable = (analysis.visible_text ?? []).map((value) => value.trim()).filter(Boolean);
@@ -800,6 +817,9 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
       }
     }
 
+    stopSearchingQuips();
+    panelTitle.textContent = 'Scoop results';
+
     const verifiedProduct = commerce.verified_mapping?.hit
       ? commerce.products.find((product) => product.result_class === 'EXACT') ?? commerce.products[0]
       : null;
@@ -876,6 +896,8 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
   } catch (error) {
     stopSearchingQuips();
     if (controller.signal.aborted) return;
+    const panelTitle = panel.firstElementChild as HTMLElement;
+    panelTitle.textContent = 'Scoop couldn’t finish the search';
     scanAnimation?.cancel();
     scanLine.remove();
     const message = document.createElement('div');
