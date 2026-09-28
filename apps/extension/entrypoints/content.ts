@@ -896,6 +896,8 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
   } catch (error) {
     stopSearchingQuips();
     if (controller.signal.aborted) return;
+    const panelTitle = panel.firstElementChild as HTMLElement;
+    panelTitle.textContent = 'Scoop couldn’t finish the search';
     scanAnimation?.cancel();
     scanLine.remove();
     const message = document.createElement('div');
