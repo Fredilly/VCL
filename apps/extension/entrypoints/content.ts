@@ -122,8 +122,12 @@ function shuffledSearchingQuips() {
 function startSearchingQuips(title: HTMLElement) {
   let quips = shuffledSearchingQuips();
   let index = 0;
+  let active = true;
+  let outAnimation: Animation | null = null;
+  let inAnimation: Animation | null = null;
 
   const show = (text: string) => {
+    if (!active) return;
     if (typeof (title as any).animate !== 'function') {
       title.textContent = text;
       return;
@@ -131,10 +135,12 @@ function startSearchingQuips(title: HTMLElement) {
     const out = (title as any).animate(
       [{ opacity: 1, transform: 'translateY(0)' }, { opacity: 0.35, transform: 'translateY(-2px)' }],
       { duration: 180, easing: 'ease-out' },
-    );
+    ) as Animation;
+    outAnimation = out;
     out.addEventListener('finish', () => {
+      if (!active) return;
       title.textContent = text;
-      (title as any).animate(
+      inAnimation = (title as any).animate(
         [{ opacity: 0.35, transform: 'translateY(2px)' }, { opacity: 1, transform: 'translateY(0)' }],
         { duration: 240, easing: 'ease-out' },
       );
@@ -142,7 +148,9 @@ function startSearchingQuips(title: HTMLElement) {
   };
 
   title.textContent = quips[index] ?? 'Searching…';
-  if (typeof window === 'undefined' || typeof window.setInterval !== 'function') return () => {};
+  if (typeof window === 'undefined' || typeof window.setInterval !== 'function') {
+    return () => { active = false; };
+  }
   const interval = window.setInterval(() => {
     index += 1;
     if (index >= quips.length) {
@@ -151,7 +159,12 @@ function startSearchingQuips(title: HTMLElement) {
     }
     show(quips[index] ?? 'Searching…');
   }, 2800);
-  return () => window.clearInterval(interval);
+  return () => {
+    active = false;
+    window.clearInterval(interval);
+    outAnimation?.cancel();
+    inAnimation?.cancel();
+  };
 }
 
 type ObjectDescription = {
