@@ -117,7 +117,7 @@ export function canonicalEquivalenceEvidenceKey(identity: Pick<CanonicalProductI
 function identityWords(values: Array<string | null | undefined>): string[] {
   return normalizeIdentityText(values.filter(Boolean).join(' '))
     .split(' ')
-    .filter((token) => token.length >= 4);
+    .filter((token) => token.length >= 2);
 }
 
 function wordOverlap(a: string[], b: string[]): { shared: number; ratio: number } {
