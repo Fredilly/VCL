@@ -35,6 +35,7 @@ import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, type Canon
 import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 import { fetchProductPageMetadata } from './product-page-enrichment.js';
+import { ALPHA_VERIFIED_PRODUCT_SEEDS } from './alpha-verified-product-seeds.js';
 export { AlphaAccessLedger } from './alpha-access.js';
 export { VerifiedProductLedger } from './verified-product-ledger.js';
 export { AdminAccessLedger } from './admin-access.js';
@@ -1728,7 +1729,9 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
       let verifiedMapping = lookupVerifiedProductMapping({
         rawRegistry: env.VERIFIED_PRODUCT_MAPPINGS_JSON,
-        mappings: durableMappings,
+        // Durable/admin mappings win. Alpha seed data is only the fallback until
+        // a creator/brand-confirmed mapping is persisted for the same content.
+        mappings: [...durableMappings, ...ALPHA_VERIFIED_PRODUCT_SEEDS],
         allowTestFixtures: benchmarkMode || env.VERIFIED_PRODUCT_TEST_MODE === 'true',
         platform: context?.platform ?? null,
         contentRef,
