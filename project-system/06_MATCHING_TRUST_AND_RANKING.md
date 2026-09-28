@@ -49,7 +49,7 @@ Prefer multiple independent signals that agree, such as:
 - contextual evidence from the video,
 - verified first-party metadata.
 
-Where evidence is incomplete, use `LIKELY` or `SIMILAR`.
+Where exact identity is not supported, use `SIMILAR` or `RELATED` according to the strength and type of relevance.
 
 ## Result classes
 
@@ -60,16 +60,16 @@ Use only when evidence strongly supports the same product identity.
 
 False-exact claims are a critical trust failure.
 
-### LIKELY
-Best candidate, meaningful uncertainty remains.
-
 ### SIMILAR
-Not represented as the original item.
+Not represented as the original item. Use when the candidate is a close visual/product substitute supported by meaningful agreement in category, form, attributes, or design.
+
+### RELATED
+Not represented as the original item. Use when the candidate is useful to the same intent or category but is not visually/product-similar enough for `SIMILAR`.
 
 ### SPONSORED
 A commercially promoted candidate.
 
-`SPONSORED` is orthogonal to relevance class. A sponsored item can be similar, but it cannot become exact by payment.
+`SPONSORED` is orthogonal to relevance class. A sponsored item can be similar or related, but it cannot become exact by payment.
 
 ## Candidate verification
 
@@ -126,7 +126,7 @@ After retrieval:
 4. score visual/text/context agreement for survivors,
 5. rerank using multimodal evidence,
 6. resolve the best canonical product hypothesis where evidence permits,
-7. assign `EXACT`, `LIKELY`, or `SIMILAR`,
+7. assign `EXACT`, `SIMILAR`, or `RELATED`,
 8. only then apply merchant/commercial ranking.
 
 Search rank is not identity confidence.
@@ -221,7 +221,7 @@ Every result card should be able to answer:
 - Is it sponsored?
 - Where will I go if I click?
 
-For `EXACT` and `LIKELY`, the system should eventually be able to expose a concise reason such as:
+For `EXACT` and strong `SIMILAR`, the system should eventually be able to expose a concise reason such as:
 - visible logo + matching model geometry,
 - matching distinctive hardware + catalog image,
 - creator metadata + visual agreement.
@@ -242,3 +242,57 @@ Do not train on user feedback without a documented privacy/consent policy.
 ## Commerce eligibility gate principle
 
 Before product retrieval, Scoop should consider whether an identified object is likely to represent a purchasable item. Preserve truthful no-result behavior.
+
+
+## v0.2 modular identity pipeline
+
+The matching stack must remain separable so improvements in tracking, perception, retrieval, verification, or memory can be evaluated independently without rewriting the whole system.
+
+```text
+user click
+  -> selection localization
+  -> same-video object tracking
+  -> evidence-frame selection
+  -> OCR / attributes / visual evidence
+  -> commodity multimodal reasoning
+  -> graph/memory lookup first
+  -> candidate retrieval on miss
+  -> contradiction filtering
+  -> candidate-image verification
+  -> canonical identity resolution
+  -> EXACT / SIMILAR / RELATED
+  -> merchant offers
+```
+
+### Same-video tracking rule
+
+Do not ask the multimodal model to rediscover the clicked object independently in every frame when a tracking module can preserve object continuity.
+
+v0.2 benchmark:
+- current crop/focus path vs SAM 2-assisted mask propagation,
+- same videos and click points,
+- compare identity stability, localization quality, useful-result rate, false EXACT, latency, and total cost.
+
+SAM 2 is only promoted if the end-to-end benchmark improves the system without violating the zero-budget operating constraint.
+
+### Model role
+
+Gemini Flash Lite or another configured multimodal model is an evidence generator and semantic reasoner. It must not be treated as:
+- the persistent object tracker,
+- the canonical product database,
+- product identity truth.
+
+### Cross-video rule
+
+Cross-video persistence is anchored on Scoop's canonical product identity, not on a language-model statement that two frames "look the same."
+
+Use:
+- canonical product keys,
+- verified mappings,
+- distinctive OCR/marks,
+- normalized attributes,
+- candidate-image verification,
+- future visual embeddings where benchmarked,
+- contradiction rejection.
+
+A graph/memory hit must remain evidence-bearing and revocable. Historical reuse may reduce fresh inference, but it must not bypass trust gates.

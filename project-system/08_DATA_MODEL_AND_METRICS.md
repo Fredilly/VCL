@@ -321,7 +321,7 @@ Human feedback is evaluation/supervision data first. It must not silently change
 
 ### Utility
 - useful-result rate
-- exact/likely precision on benchmark
+- exact precision / similar precision on benchmark
 - no-result rate
 - wrong-category rate
 - user correction rate
@@ -367,3 +367,47 @@ Latency experiments should track:
 - commerce calls per event
 - verification calls per event
 - provider calls per event
+
+
+## Current persistence reality — v0.2
+
+The runtime already persists more than the original minimal-storage section described.
+
+Current durable components:
+- `FeedbackLedger` Durable Object: result context, feedback, and correction-derived mapping signals,
+- `VerifiedProductLedger` Durable Object: verified/canonical product memory and mappings,
+- same-video verified reuse,
+- cross-video verified reuse,
+- alpha access/admin ledgers,
+- structured `ALPHA_SCOOP` and `ALPHA_FEEDBACK` telemetry through Worker logs/observability.
+
+This is a partial operational graph/memory system, not yet the complete future `ContentProductGraph`.
+
+v0.2 rule:
+- extend existing ledgers/contracts rather than creating a second graph store,
+- preserve provenance and revocation,
+- keep merchant offers separate from canonical identity,
+- do not persist raw video,
+- do not add a paid graph/vector database.
+
+### Result classes
+
+Runtime and documentation should converge on:
+- `EXACT`: same canonical product is strongly supported,
+- `SIMILAR`: close substitute with meaningful visual/product agreement,
+- `RELATED`: useful same-intent/category result without enough similarity for `SIMILAR`.
+
+`SPONSORED` remains a commercial flag orthogonal to these relevance classes.
+
+### v0.2 track evidence
+
+When a tracking adapter is used, derived track evidence may include:
+- content reference hash,
+- appearance start/end timestamps,
+- per-observation region/mask reference or derived fingerprint,
+- selected evidence-frame references,
+- tracking confidence,
+- canonical product key when resolved,
+- evidence provenance.
+
+Do not require persistent mask images or frame archives. Prefer derived hashes, coordinates, attributes, and short-lived processing artifacts.

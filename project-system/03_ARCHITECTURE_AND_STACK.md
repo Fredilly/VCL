@@ -48,17 +48,98 @@ Do not store raw video.
 
 Avoid storing raw frame images unless required for debugging and explicitly enabled.
 
-## Object extraction
+## Perception modules — v0.2
 
-Phase 1:
-- selected-region crop.
+Scoop uses a Voltron architecture: each stage has one job, a stable provider-neutral contract, and can be replaced or benchmarked independently.
 
-Phase 2:
-- open segmentation model if crop quality proves insufficient.
+```text
+FrameSource
+  -> SelectionLocalizer
+  -> ObjectTracker
+  -> EvidenceExtractor
+  -> VisionReasoner
+  -> CandidateRetriever
+  -> CandidateVerifier
+  -> IdentityResolver
+  -> ProductMemory
+  -> CommerceResolver
+  -> TelemetrySink
+```
+
+Rules:
+- no module may depend on a provider-specific response shape,
+- every optional module must have a truthful fallback,
+- experiments change one module at a time where practical,
+- promotion to default requires whole-pipeline evidence, not an isolated component benchmark,
+- the $0 infrastructure constraint remains in force.
+
+### SelectionLocalizer
+
+Current default:
+- click coordinates + bounded crop,
+- existing focus/tight/wider behavior.
+
+v0.2 experiment:
+- `Sam2SelectionTracker` may use a user click/point to initialize an object mask and propagate it through nearby frames.
+- SAM 2 is an experimental adapter, not a mandatory runtime dependency.
+- do not introduce paid GPU infrastructure merely to host SAM 2.
+- if SAM 2 cannot run within free/local/available compute, keep the current crop path.
+
+### ObjectTracker
+
+Contract goal:
+
+```ts
+interface ObjectTracker {
+  track(input: TrackInput): Promise<ObjectTrack>
+}
+```
+
+`ObjectTrack` should expose:
+- per-frame mask or region,
+- timestamp/frame reference,
+- tracking confidence,
+- visibility/occlusion signal where available,
+- no raw-video persistence requirement.
+
+Initial adapters:
+- `CropOnlyTracker`: current behavior/fallback,
+- `Sam2SelectionTracker`: experimental same-video mask propagation.
+
+Future automated partner-video ingestion may benchmark dedicated MOT/ReID approaches such as OC-SORT/Deep OC-SORT, but those are not required for the user-click alpha path.
+
+### EvidenceExtractor
+
+Consumes an object track and chooses the most useful observations rather than blindly analyzing every nearby frame.
+
+Possible evidence:
+- best full-object view,
+- logo/text view,
+- silhouette,
+- hardware/details,
+- color/material,
+- OCR,
+- visual embedding when benchmarked.
+
+### VisionReasoner
+
+Gemini Flash Lite or another configured commodity multimodal model remains one evidence generator. It is not the tracker and is not product truth.
+
+```ts
+interface VisionProvider {
+  analyzeSelection(input: SelectionInput): Promise<ObjectDescription>
+}
+```
+
+### Visual retrieval
+
+Reserve a provider-neutral `VisualEmbedder` / `VisualRetriever` interface for benchmarking image-level retrieval alongside text/OCR retrieval.
+
+Do not add a paid vector database for v0.2. Start with benchmark fixtures, in-memory/local indexes, or an existing free store where practical.
 
 Roboflow:
 - not required in MVP,
-- evaluate later for annotation/training/deployment if custom detection becomes a measured need.
+- evaluate later for annotation/training/deployment only if a measured bottleneck appears.
 
 ## Vision provider
 
@@ -171,7 +252,7 @@ multimodal relevance reranking
         ↓
 canonical product resolution
         ↓
-EXACT / LIKELY / SIMILAR
+EXACT / SIMILAR / RELATED
         ↓
 merchant offers / availability / geography / price
         ↓
