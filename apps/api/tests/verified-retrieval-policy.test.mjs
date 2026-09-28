@@ -77,7 +77,7 @@ test('verified source page supplies a missing thumbnail without broad commerce r
   assert.equal(fetches[0], 'https://brand.example/products/sku-1');
 });
 
-test('verified commerce mapping hydrates its thumbnail and returns every same-SKU exact offer', async () => {
+test('verified commerce mapping hydrates its thumbnail and collapses same-SKU seller offers into one Exact card', async () => {
   const { refreshVerifiedOffers } = loadModule(serverFile, { console: { error() {}, warn() {} } });
 
   const mapping = {
@@ -165,12 +165,11 @@ test('verified commerce mapping hydrates its thumbnail and returns every same-SK
   const result = await refreshVerifiedOffers([{ name: 'ebay', provider, tier: 'primary' }], mapping);
 
   assert.deepEqual(calls, [['getItemById', 'ITEM-EXACT'], ['search', 'SKU-42']]);
-  assert.equal(result.products.length, 2, 'canonical listing plus second seller with same SKU');
+  assert.equal(result.products.length, 1, 'same-SKU seller offers collapse into one canonical Exact card');
   assert.equal(result.products[0].id, 'ITEM-EXACT');
   assert.equal(result.products[0].image_reference, 'https://i.ebayimg.com/live-source.jpg');
-  assert.equal(result.products[1].id, 'ITEM-EXACT-2');
-  assert.equal(result.products[1].image_reference, 'https://i.ebayimg.com/second.jpg');
-  assert.equal(result.products.every((product) => product.result_class === 'EXACT'), true);
+  assert.equal(result.products[0].result_class, 'EXACT');
+  assert.equal(result.products.some((product) => product.id === 'ITEM-EXACT-2'), false);
   assert.equal(result.products.some((product) => product.id === 'ITEM-SIMILAR'), false);
   assert.deepEqual(Array.from(result.providers_used), ['ebay']);
   assert.equal(result.commerce_calls.ebay, 2);
