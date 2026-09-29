@@ -60,6 +60,19 @@ test('resolver broadens after every first-query candidate is rejected and uses s
   assert.equal(result.verification.rejected, 1);
 });
 
+
+test('all commerce providers failing returns TEMPORARILY_UNAVAILABLE without leaking provider errors', async () => {
+  const providers = [
+    { name: 'ebay', provider: { async search() { throw new Error('eBay secret provider failure'); } }, tier: 'primary' },
+    { name: 'brave', provider: { async search() { throw new Error('Brave secret provider failure'); } }, tier: 'fallback' },
+    { name: 'serpapi', provider: { async search() { throw new Error('SerpAPI secret provider failure'); } }, tier: 'fallback' },
+  ];
+  const result = await resolveProducts(providers, [queries[0]], description, env);
+  assert.equal(result.state, 'TEMPORARILY_UNAVAILABLE');
+  assert.equal(result.products.length, 0);
+  assert.ok(!JSON.stringify(result).includes('secret provider failure'), 'raw provider errors must not leak into the client response');
+});
+
 test('all candidates rejected by images returns NO_RESULTS after broadening', async () => {
   const bad = async (...args) => {
     const result = await verifier(...args);
