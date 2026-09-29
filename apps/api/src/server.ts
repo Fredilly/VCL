@@ -1302,6 +1302,29 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
     return jsonResponse(await authorizeAdminSession(env, request.headers.get('x-scoop-admin-session') ?? ''));
   }
   if (request.method !== 'POST') return jsonResponse({ error: 'Not found' }, 404);
+  if (path === '/alpha/waitlist') {
+    try {
+      const body = await request.text();
+      const upstream = await fetch('https://article6.org/api/scoop-waitlist', {
+        method: 'POST',
+        headers: { 'content-type': request.headers.get('content-type') || 'application/json' },
+        body,
+        redirect: 'follow',
+      });
+      const text = await upstream.text();
+      return new Response(text || null, {
+        status: upstream.status,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': upstream.headers.get('content-type') || 'application/json',
+          'Cache-Control': 'no-store',
+        },
+      });
+    } catch (error) {
+      logSafeError(error);
+      return jsonResponse({ error: 'Could not join the Founding 100. Please try again.' }, 502);
+    }
+  }
   if (env.ALPHA_ENABLED === 'false' && path !== '/feedback' && path !== '/commerce-click') {
     return jsonResponse({ error: 'Scoop alpha is temporarily paused', reason: 'ALPHA_DISABLED', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: false }, 503);
   }
