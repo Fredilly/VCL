@@ -298,6 +298,12 @@ export async function compareCandidateImages(
                     ? { type: 'text', text: part.text }
                     : { type: 'image_url', image_url: { url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` } }) },
                 ],
+                // Keep candidate verification on the same privacy-safe routing
+                // policy as the primary OpenRouter vision request.
+                provider: {
+                  data_collection: 'deny',
+                  zdr: true,
+                },
                 response_format: { type: 'json_object' },
                 temperature: 0,
                 max_tokens: 12000,
