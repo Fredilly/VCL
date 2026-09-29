@@ -49,6 +49,38 @@ test('multimodal request includes source crop, candidate image, title and contex
   assert.ok(parts.every((part) => !part.text?.includes('"price"')));
 });
 
+
+test('OpenRouter candidate verification enforces the production privacy routing policy', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  let request;
+  const { compareCandidateImages } = loadModule(filename, { fetch: async (url, options) => {
+    if (String(url).includes('openrouter.ai')) {
+      request = JSON.parse(options.body);
+      assert.equal(options.headers.Authorization, 'Bearer test-key');
+      return Response.json({
+        choices: [{ message: { content: JSON.stringify({
+          source: comparison.source,
+          candidates: [{ index: 0, attributes: comparison.candidate, ...comparison }],
+        }) } }],
+        usage: {},
+      });
+    }
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+  } });
+  const result = await compareCandidateImages(
+    'test-key',
+    'google/gemini-2.5-flash-lite',
+    image,
+    description,
+    [candidate],
+    { title: 'Product review' },
+    undefined,
+    { provider: 'openrouter' },
+  );
+  assert.equal(result.compared, 1);
+  assert.deepEqual(request.provider, { data_collection: 'deny', zdr: true });
+});
+
 test('failed, oversized and non-image fetches are reported as unavailable, never false comparisons', async () => {
   const { candidate, description } = example(apparelCases[0]);
   for (const response of [new Response('error', { status: 500 }), new Response('html', { headers: { 'content-type': 'text/html' } }),
