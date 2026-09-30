@@ -2142,6 +2142,19 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         visionUsage: rawDescription?.provider_usage,
         failureState,
       });
+      const learningWrite = persistAlphaLearning({
+        env,
+        telemetry: alphaTelemetry,
+        description,
+        state: resolved.state,
+        total_ms,
+        products: resolved.products,
+        query: resolved.query,
+        verification_usage: resolved.cost_usage?.verification_usage,
+        commerce_calls: resolved.cost_usage?.commerce_calls,
+      }).catch((error) => { logSafeError(error); });
+      if (ctx?.waitUntil) ctx.waitUntil(learningWrite);
+      else await learningWrite;
       if (alphaTelemetry && env.FEEDBACK_LEDGER && resolved.products.length) {
         const feedbackWrites = resolved.products.map((product) => persistFeedbackContext(env, {
           event_id: alphaTelemetry!.event_id,
