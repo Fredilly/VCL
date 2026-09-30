@@ -37,6 +37,30 @@ export type FeedbackPenalty = {
   correct_count: number;
 };
 
+export type ScoopLearningRecord = {
+  event_id: string;
+  session_id: string | null;
+  state: string;
+  evidence_key: string;
+  category: string;
+  subcategory: string;
+  brand: string | null;
+  model: string | null;
+  color: string | null;
+  material: string | null;
+  visible_text: string[];
+  logos_markings: string[];
+  distinctive_features: string[];
+  shape_silhouette: string[];
+  style_attributes: string[];
+  vision_model: string | null;
+  latency_ms: number;
+  verification_cost_usd: number;
+  commerce_calls: Record<string, number>;
+  verified_canonical_key: string | null;
+  created_at: string;
+};
+
 const WRONG_TYPES = new Set(['wrong_item', 'wrong_category', 'not_similar']);
 const CORRECT_TYPES = new Set(['correct_match', 'useful']);
 export const FEEDBACK_RANKING_POLICY = 'alpha-feedback-v2';
@@ -97,6 +121,10 @@ async function postJson<T>(env: FeedbackLedgerEnv, path: string, body: unknown):
 
 export async function persistFeedbackContext(env: FeedbackLedgerEnv, context: FeedbackResultContext): Promise<void> {
   await postJson(env, '/context', context);
+}
+
+export async function persistScoopLearningRecord(env: FeedbackLedgerEnv, record: ScoopLearningRecord): Promise<void> {
+  await postJson(env, '/scoop', record);
 }
 
 export async function persistFeedback(env: FeedbackLedgerEnv, value: unknown): Promise<UserFeedback> {
@@ -192,9 +220,35 @@ export class FeedbackLedger {
         updated_at TEXT NOT NULL,
         PRIMARY KEY (evidence_key, candidate_key)
       );
+      CREATE TABLE IF NOT EXISTS scoop_learning (
+        event_id TEXT PRIMARY KEY,
+        session_id TEXT,
+        state TEXT NOT NULL,
+        evidence_key TEXT NOT NULL,
+        category TEXT NOT NULL,
+        subcategory TEXT NOT NULL,
+        brand TEXT,
+        model TEXT,
+        color TEXT,
+        material TEXT,
+        visible_text_json TEXT NOT NULL,
+        logos_markings_json TEXT NOT NULL,
+        distinctive_features_json TEXT NOT NULL,
+        shape_silhouette_json TEXT NOT NULL,
+        style_attributes_json TEXT NOT NULL,
+        vision_model TEXT,
+        latency_ms INTEGER NOT NULL,
+        verification_cost_usd REAL NOT NULL,
+        commerce_calls_json TEXT NOT NULL,
+        verified_canonical_key TEXT,
+        created_at TEXT NOT NULL
+      );
       CREATE INDEX IF NOT EXISTS idx_feedback_event ON feedback(event_id);
       CREATE INDEX IF NOT EXISTS idx_feedback_type ON feedback(feedback_type);
       CREATE INDEX IF NOT EXISTS idx_context_session ON result_context(session_id);
+      CREATE INDEX IF NOT EXISTS idx_learning_session ON scoop_learning(session_id);
+      CREATE INDEX IF NOT EXISTS idx_learning_category ON scoop_learning(category, subcategory);
+      CREATE INDEX IF NOT EXISTS idx_learning_evidence ON scoop_learning(evidence_key);
     `);
   }
 
@@ -236,6 +290,43 @@ export class FeedbackLedger {
   async fetch(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;
     if (request.method !== 'POST') return Response.json({ error: 'Not found' }, { status: 404 });
+
+    if (path === '/scoop') {
+      const value = await request.json() as ScoopLearningRecord;
+      const eventId = bounded(value.event_id, 160);
+      if (!eventId) return Response.json({ accepted: false }, { status: 400 });
+      const list = (input: unknown, max = 12) => JSON.stringify(
+        Array.isArray(input) ? input.map((item) => bounded(item, 160)).filter(Boolean).slice(0, max) : [],
+      );
+      const calls = value.commerce_calls && typeof value.commerce_calls === 'object'
+        ? Object.fromEntries(Object.entries(value.commerce_calls).slice(0, 20).map(([key, count]) => [bounded(key, 80), Math.max(0, Number(count) || 0)]))
+        : {};
+      this.sql.exec(
+        `INSERT INTO scoop_learning (
+          event_id, session_id, state, evidence_key, category, subcategory, brand, model, color, material,
+          visible_text_json, logos_markings_json, distinctive_features_json, shape_silhouette_json, style_attributes_json,
+          vision_model, latency_ms, verification_cost_usd, commerce_calls_json, verified_canonical_key, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(event_id) DO UPDATE SET
+          state=excluded.state, evidence_key=excluded.evidence_key, category=excluded.category, subcategory=excluded.subcategory,
+          brand=excluded.brand, model=excluded.model, color=excluded.color, material=excluded.material,
+          visible_text_json=excluded.visible_text_json, logos_markings_json=excluded.logos_markings_json,
+          distinctive_features_json=excluded.distinctive_features_json, shape_silhouette_json=excluded.shape_silhouette_json,
+          style_attributes_json=excluded.style_attributes_json, vision_model=excluded.vision_model,
+          latency_ms=excluded.latency_ms, verification_cost_usd=excluded.verification_cost_usd,
+          commerce_calls_json=excluded.commerce_calls_json, verified_canonical_key=excluded.verified_canonical_key`,
+        eventId, value.session_id ? bounded(value.session_id, 160) : null, bounded(value.state, 40), bounded(value.evidence_key, 80),
+        bounded(value.category, 80), bounded(value.subcategory, 80), value.brand ? bounded(value.brand, 100) : null,
+        value.model ? bounded(value.model, 120) : null, value.color ? bounded(value.color, 80) : null,
+        value.material ? bounded(value.material, 80) : null, list(value.visible_text, 8), list(value.logos_markings, 8),
+        list(value.distinctive_features, 12), list(value.shape_silhouette, 8), list(value.style_attributes, 12),
+        value.vision_model ? bounded(value.vision_model, 120) : null, Math.max(0, Math.floor(Number(value.latency_ms) || 0)),
+        Math.max(0, Number(value.verification_cost_usd) || 0), JSON.stringify(calls),
+        value.verified_canonical_key ? bounded(value.verified_canonical_key, 220) : null,
+        bounded(value.created_at, 40) || new Date().toISOString(),
+      );
+      return Response.json({ accepted: true });
+    }
 
     if (path === '/context') {
       const value = await request.json() as FeedbackResultContext;
@@ -354,7 +445,47 @@ export class FeedbackLedger {
         ORDER BY corrections DESC
         LIMIT 25
       `, ...sessionBindings);
-      return Response.json({ session_id: sessionId || null, totals, corrections, repeated_bad_candidates: repeated, provider_query_patterns: providerPatterns });
+      const learning = this.rows(`
+        SELECT
+          COUNT(*) AS scoop_count,
+          SUM(CASE WHEN state = 'RESULTS' THEN 1 ELSE 0 END) AS results_count,
+          SUM(CASE WHEN state = 'NO_RESULTS' THEN 1 ELSE 0 END) AS no_results_count,
+          AVG(latency_ms) AS avg_latency_ms,
+          SUM(verification_cost_usd) AS verification_cost_usd
+        FROM scoop_learning
+        WHERE 1 = 1${sessionId ? ' AND session_id = ?' : ''}
+      `, ...sessionBindings)[0] ?? {};
+      const failureCategories = this.rows(`
+        SELECT category, subcategory, COUNT(*) AS failures
+        FROM scoop_learning
+        WHERE state <> 'RESULTS'${sessionId ? ' AND session_id = ?' : ''}
+        GROUP BY category, subcategory
+        ORDER BY failures DESC
+        LIMIT 20
+      `, ...sessionBindings);
+      const learningQueue = this.rows(`
+        SELECT l.event_id, l.session_id, l.state, l.evidence_key, l.category, l.subcategory, l.brand, l.model,
+               l.color, l.material, l.visible_text_json, l.logos_markings_json, l.distinctive_features_json,
+               l.shape_silhouette_json, l.style_attributes_json, l.vision_model, l.latency_ms,
+               l.verification_cost_usd, l.verified_canonical_key, l.created_at,
+               f.result_id, f.feedback_type, c.candidate_key, c.provider, c.provenance, c.result_class
+        FROM feedback f
+        JOIN scoop_learning l ON l.event_id = f.event_id
+        LEFT JOIN result_context c ON c.event_id = f.event_id AND c.result_id = f.result_id
+        WHERE f.feedback_type IN ('wrong_item','wrong_category','not_similar')${sessionId ? ' AND l.session_id = ?' : ''}
+        ORDER BY f.created_at DESC
+        LIMIT 100
+      `, ...sessionBindings);
+      return Response.json({
+        session_id: sessionId || null,
+        totals,
+        learning,
+        corrections,
+        learning_queue: learningQueue,
+        failure_categories: failureCategories,
+        repeated_bad_candidates: repeated,
+        provider_query_patterns: providerPatterns,
+      });
     }
 
     return Response.json({ error: 'Not found' }, { status: 404 });
