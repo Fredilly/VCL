@@ -15,6 +15,9 @@ async function getInstallId() {
 
 function friendlyError(responseStatus?: number, providerMessage?: string, reason?: string) {
   const detail = `${providerMessage ?? ''} ${reason ?? ''}`.toLowerCase();
+  if (reason === 'ALPHA_MONTHLY_LIMIT') {
+    return { error: 'You have used your 100 Scoops for this month. Your allowance resets next month.', failure_state: 'MONTHLY_LIMIT_REACHED', retryable: false };
+  }
   const temporarilyUnavailable = [429, 502, 503, 504].includes(responseStatus ?? 0) ||
     detail.includes('temporarily unavailable') || detail.includes('rate limit') || detail.includes('quota') ||
     detail.includes('timeout') || detail.includes('provider');
