@@ -105,11 +105,11 @@ export function sanitizeLearningText(value: unknown, max = 160): string {
   let text = bounded(value, max * 2);
   if (!text) return '';
   text = text
-    .replace(/\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b/gi, '[redacted-email]')
-    .replace(/\\bhttps?:\\/\\/\\S+/gi, '[redacted-url]')
-    .replace(/(?:\\+?\\d[\\d\\s().-]{7,}\\d)/g, '[redacted-phone]')
-    .replace(/\\b\\d{13,19}\\b/g, '[redacted-number]')
-    .replace(/\\s+/g, ' ')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[redacted-email]')
+    .replace(/\bhttps?:\/\/\S+/gi, '[redacted-url]')
+    .replace(/(?:\+?\d[\d\s().-]{7,}\d)/g, '[redacted-phone]')
+    .replace(/\b\d{13,19}\b/g, '[redacted-number]')
+    .replace(/\s+/g, ' ')
     .trim();
   return text.slice(0, max);
 }
