@@ -37,6 +37,38 @@ export type FeedbackPenalty = {
   correct_count: number;
 };
 
+export type FeedbackReviewAction = 'dismiss' | 'hard_negative' | 'verify_product';
+
+export type FeedbackReviewItem = {
+  event_id: string;
+  result_id: string;
+  feedback_type: string;
+  evidence_key: string;
+  category: string;
+  subcategory: string;
+  brand: string | null;
+  model: string | null;
+  color: string | null;
+  material: string | null;
+  visible_text: string[];
+  logos_markings: string[];
+  distinctive_features: string[];
+  shape_silhouette: string[];
+  style_attributes: string[];
+  candidate_key: string | null;
+  provider: string | null;
+  provenance: string | null;
+  result_class: string | null;
+};
+
+export type FeedbackReviewResolution = {
+  event_id: string;
+  result_id: string;
+  action: FeedbackReviewAction;
+  canonical_key?: string | null;
+  note?: string | null;
+};
+
 export type ScoopLearningRecord = {
   event_id: string;
   session_id: string | null;
@@ -67,6 +99,29 @@ export const FEEDBACK_RANKING_POLICY = 'alpha-feedback-v2';
 
 function bounded(value: unknown, max: number): string {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
+}
+
+export function sanitizeLearningText(value: unknown, max = 160): string {
+  let text = bounded(value, max * 2);
+  if (!text) return '';
+  text = text
+    .replace(/\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b/gi, '[redacted-email]')
+    .replace(/\\bhttps?:\\/\\/\\S+/gi, '[redacted-url]')
+    .replace(/(?:\\+?\\d[\\d\\s().-]{7,}\\d)/g, '[redacted-phone]')
+    .replace(/\\b\\d{13,19}\\b/g, '[redacted-number]')
+    .replace(/\\s+/g, ' ')
+    .trim();
+  return text.slice(0, max);
+}
+
+function sanitizedList(value: unknown, maxItems = 12): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((item) => sanitizeLearningText(item)).filter(Boolean))].slice(0, maxItems);
+}
+
+function parseJsonList(value: unknown): string[] {
+  if (typeof value !== 'string') return [];
+  try { return sanitizedList(JSON.parse(value)); } catch { return []; }
 }
 
 function stableHash(value: string): string {
@@ -135,6 +190,15 @@ export async function persistFeedback(env: FeedbackLedgerEnv, value: unknown): P
 
 export async function feedbackReport(env: FeedbackLedgerEnv, session_id?: string | null): Promise<unknown> {
   return await postJson(env, '/report', { session_id: session_id ? bounded(session_id, 160) : null });
+}
+
+export async function feedbackReviewItem(env: FeedbackLedgerEnv, event_id: string, result_id: string): Promise<FeedbackReviewItem | null> {
+  const result = await postJson<{ item?: FeedbackReviewItem | null }>(env, '/review-item', { event_id, result_id });
+  return result?.item ?? null;
+}
+
+export async function resolveFeedbackReview(env: FeedbackLedgerEnv, resolution: FeedbackReviewResolution): Promise<void> {
+  await postJson(env, '/review-resolve', resolution);
 }
 
 export async function feedbackPenalties(
@@ -220,6 +284,15 @@ export class FeedbackLedger {
         updated_at TEXT NOT NULL,
         PRIMARY KEY (evidence_key, candidate_key)
       );
+      CREATE TABLE IF NOT EXISTS feedback_review (
+        event_id TEXT NOT NULL,
+        result_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        canonical_key TEXT,
+        note TEXT,
+        reviewed_at TEXT NOT NULL,
+        PRIMARY KEY (event_id, result_id)
+      );
       CREATE TABLE IF NOT EXISTS scoop_learning (
         event_id TEXT PRIMARY KEY,
         session_id TEXT,
@@ -249,6 +322,7 @@ export class FeedbackLedger {
       CREATE INDEX IF NOT EXISTS idx_learning_session ON scoop_learning(session_id);
       CREATE INDEX IF NOT EXISTS idx_learning_category ON scoop_learning(category, subcategory);
       CREATE INDEX IF NOT EXISTS idx_learning_evidence ON scoop_learning(evidence_key);
+      CREATE INDEX IF NOT EXISTS idx_feedback_review_action ON feedback_review(action);
     `);
   }
 
@@ -295,9 +369,7 @@ export class FeedbackLedger {
       const value = await request.json() as ScoopLearningRecord;
       const eventId = bounded(value.event_id, 160);
       if (!eventId) return Response.json({ accepted: false }, { status: 400 });
-      const list = (input: unknown, max = 12) => JSON.stringify(
-        Array.isArray(input) ? input.map((item) => bounded(item, 160)).filter(Boolean).slice(0, max) : [],
-      );
+      const list = (input: unknown, max = 12) => JSON.stringify(sanitizedList(input, max));
       const calls = value.commerce_calls && typeof value.commerce_calls === 'object'
         ? Object.fromEntries(Object.entries(value.commerce_calls).slice(0, 20).map(([key, count]) => [bounded(key, 80), Math.max(0, Number(count) || 0)]))
         : {};
@@ -316,9 +388,9 @@ export class FeedbackLedger {
           latency_ms=excluded.latency_ms, verification_cost_usd=excluded.verification_cost_usd,
           commerce_calls_json=excluded.commerce_calls_json, verified_canonical_key=excluded.verified_canonical_key`,
         eventId, value.session_id ? bounded(value.session_id, 160) : null, bounded(value.state, 40), bounded(value.evidence_key, 80),
-        bounded(value.category, 80), bounded(value.subcategory, 80), value.brand ? bounded(value.brand, 100) : null,
-        value.model ? bounded(value.model, 120) : null, value.color ? bounded(value.color, 80) : null,
-        value.material ? bounded(value.material, 80) : null, list(value.visible_text, 8), list(value.logos_markings, 8),
+        sanitizeLearningText(value.category, 80), sanitizeLearningText(value.subcategory, 80), value.brand ? sanitizeLearningText(value.brand, 100) : null,
+        value.model ? sanitizeLearningText(value.model, 120) : null, value.color ? sanitizeLearningText(value.color, 80) : null,
+        value.material ? sanitizeLearningText(value.material, 80) : null, list(value.visible_text, 8), list(value.logos_markings, 8),
         list(value.distinctive_features, 12), list(value.shape_silhouette, 8), list(value.style_attributes, 12),
         value.vision_model ? bounded(value.vision_model, 120) : null, Math.max(0, Math.floor(Number(value.latency_ms) || 0)),
         Math.max(0, Number(value.verification_cost_usd) || 0), JSON.stringify(calls),
@@ -338,8 +410,8 @@ export class FeedbackLedger {
         bounded(value.event_id, 160), value.session_id ? bounded(value.session_id, 160) : null,
         bounded(value.result_id, 180), bounded(value.candidate_key, 80), bounded(value.provider, 80),
         bounded(value.provenance, 80), bounded(value.result_class, 20), bounded(value.evidence_key, 80),
-        bounded(value.query, 300), bounded(value.category, 80), bounded(value.subcategory, 80),
-        value.brand ? bounded(value.brand, 100) : null, value.model ? bounded(value.model, 120) : null,
+        sanitizeLearningText(value.query, 300), sanitizeLearningText(value.category, 80), sanitizeLearningText(value.subcategory, 80),
+        value.brand ? sanitizeLearningText(value.brand, 100) : null, value.model ? sanitizeLearningText(value.model, 120) : null,
         value.vision_model ? bounded(value.vision_model, 120) : null, bounded(value.ranking_policy, 80),
         bounded(value.created_at, 40),
       );
@@ -383,6 +455,68 @@ export class FeedbackLedger {
         this.applyUnapplied(feedback.event_id, feedback.result_id);
       }
       return Response.json({ accepted: true, changed: !unchanged, feedback });
+    }
+
+    if (path === '/review-item') {
+      const body = await request.json() as Record<string, unknown>;
+      const eventId = bounded(body.event_id, 160);
+      const resultId = bounded(body.result_id, 180);
+      if (!eventId || !resultId) return Response.json({ item: null }, { status: 400 });
+      const row = this.rows(`
+        SELECT f.event_id, f.result_id, f.feedback_type,
+               l.evidence_key, l.category, l.subcategory, l.brand, l.model, l.color, l.material,
+               l.visible_text_json, l.logos_markings_json, l.distinctive_features_json,
+               l.shape_silhouette_json, l.style_attributes_json,
+               c.candidate_key, c.provider, c.provenance, c.result_class
+        FROM feedback f
+        JOIN scoop_learning l ON l.event_id = f.event_id
+        LEFT JOIN result_context c ON c.event_id = f.event_id AND c.result_id = f.result_id
+        WHERE f.event_id = ? AND f.result_id = ?
+        LIMIT 1
+      `, eventId, resultId)[0];
+      if (!row) return Response.json({ item: null });
+      const item: FeedbackReviewItem = {
+        event_id: String(row.event_id ?? ''),
+        result_id: String(row.result_id ?? ''),
+        feedback_type: String(row.feedback_type ?? ''),
+        evidence_key: String(row.evidence_key ?? ''),
+        category: String(row.category ?? ''),
+        subcategory: String(row.subcategory ?? ''),
+        brand: row.brand == null ? null : String(row.brand),
+        model: row.model == null ? null : String(row.model),
+        color: row.color == null ? null : String(row.color),
+        material: row.material == null ? null : String(row.material),
+        visible_text: parseJsonList(row.visible_text_json),
+        logos_markings: parseJsonList(row.logos_markings_json),
+        distinctive_features: parseJsonList(row.distinctive_features_json),
+        shape_silhouette: parseJsonList(row.shape_silhouette_json),
+        style_attributes: parseJsonList(row.style_attributes_json),
+        candidate_key: row.candidate_key == null ? null : String(row.candidate_key),
+        provider: row.provider == null ? null : String(row.provider),
+        provenance: row.provenance == null ? null : String(row.provenance),
+        result_class: row.result_class == null ? null : String(row.result_class),
+      };
+      return Response.json({ item });
+    }
+
+    if (path === '/review-resolve') {
+      const body = await request.json() as Record<string, unknown>;
+      const eventId = bounded(body.event_id, 160);
+      const resultId = bounded(body.result_id, 180);
+      const action = body.action;
+      if (!eventId || !resultId || (action !== 'dismiss' && action !== 'hard_negative' && action !== 'verify_product')) {
+        return Response.json({ accepted: false }, { status: 400 });
+      }
+      const canonicalKey = action === 'verify_product' ? bounded(body.canonical_key, 220) : '';
+      if (action === 'verify_product' && !canonicalKey) return Response.json({ accepted: false }, { status: 400 });
+      this.sql.exec(
+        `INSERT INTO feedback_review (event_id, result_id, action, canonical_key, note, reviewed_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(event_id, result_id) DO UPDATE SET
+           action=excluded.action, canonical_key=excluded.canonical_key, note=excluded.note, reviewed_at=excluded.reviewed_at`,
+        eventId, resultId, action, canonicalKey || null, sanitizeLearningText(body.note, 300) || null, new Date().toISOString(),
+      );
+      return Response.json({ accepted: true });
     }
 
     if (path === '/penalties') {
@@ -472,7 +606,9 @@ export class FeedbackLedger {
         FROM feedback f
         JOIN scoop_learning l ON l.event_id = f.event_id
         LEFT JOIN result_context c ON c.event_id = f.event_id AND c.result_id = f.result_id
-        WHERE f.feedback_type IN ('wrong_item','wrong_category','not_similar')${sessionId ? ' AND l.session_id = ?' : ''}
+        LEFT JOIN feedback_review r ON r.event_id = f.event_id AND r.result_id = f.result_id
+        WHERE f.feedback_type IN ('wrong_item','wrong_category','not_similar')
+          AND r.event_id IS NULL${sessionId ? ' AND l.session_id = ?' : ''}
         ORDER BY f.created_at DESC
         LIMIT 100
       `, ...sessionBindings);
