@@ -1,0 +1,54 @@
+name: Release alpha extension
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "alpha-extension-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build extension
+        run: pnpm --filter @vcl/extension build
+
+      - name: Package Chrome/Brave extension
+        run: |
+          test -f apps/extension/.output/chrome-mv3/manifest.json
+          cd apps/extension/.output/chrome-mv3
+          zip -r "$GITHUB_WORKSPACE/scoop-extension.zip" .
+
+      - name: Upload CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scoop-extension
+          path: scoop-extension.zip
+          retention-days: 14
+
+      - name: Publish stable alpha download
+        if: startsWith(github.ref, 'refs/tags/alpha-extension-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME"             scoop-extension.zip             --title "Scoop Alpha Extension $GITHUB_REF_NAME"             --notes "Founding Alpha build for Chrome and Brave on macOS and Windows."
