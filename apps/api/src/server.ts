@@ -26,6 +26,7 @@ import { resolveJevBinding } from './jev-binding.js';
 import { normalizeAlphaTelemetry, recordAlphaFeedback, recordAlphaScoop } from './alpha-telemetry.js';
 import { applyFeedbackPenalties, evidenceFingerprint, feedbackCandidateKey, feedbackPenalties, feedbackReport, persistFeedback, persistFeedbackContext, persistScoopLearningRecord, FEEDBACK_RANKING_POLICY, type DurableObjectNamespaceLike } from './feedback-ledger.js';
 export { FeedbackLedger } from './feedback-ledger.js';
+import { persistAlphaLearning } from './alpha-learning.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
