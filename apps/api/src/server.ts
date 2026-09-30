@@ -24,8 +24,9 @@ import { routeWithJevFabric } from './jev-fabric.js';
 import type { WorkersAiBinding } from './jev.js';
 import { resolveJevBinding } from './jev-binding.js';
 import { normalizeAlphaTelemetry, recordAlphaFeedback, recordAlphaScoop } from './alpha-telemetry.js';
-import { applyFeedbackPenalties, evidenceFingerprint, feedbackCandidateKey, feedbackPenalties, feedbackReport, persistFeedback, persistFeedbackContext, FEEDBACK_RANKING_POLICY, type DurableObjectNamespaceLike } from './feedback-ledger.js';
+import { applyFeedbackPenalties, evidenceFingerprint, feedbackCandidateKey, feedbackPenalties, feedbackReport, feedbackReviewItem, persistFeedback, persistFeedbackContext, resolveFeedbackReview, FEEDBACK_RANKING_POLICY, type DurableObjectNamespaceLike } from './feedback-ledger.js';
 export { FeedbackLedger } from './feedback-ledger.js';
+import { persistAlphaLearning } from './alpha-learning.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
@@ -1766,6 +1767,85 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         return jsonResponse({ error: 'Feedback report unavailable' }, 500);
       }
     }
+    if (path === '/feedback-review') {
+      const authorized = await authorizeAdminSession(env, request.headers.get('x-scoop-admin-session') ?? '');
+      if (!authorized.admin || !authorized.admin_id) return jsonResponse({ error: 'Unauthorized' }, 401);
+      try {
+        const body = await request.json() as Record<string, unknown>;
+        const eventId = typeof body.event_id === 'string' ? body.event_id.slice(0, 160) : '';
+        const resultId = typeof body.result_id === 'string' ? body.result_id.slice(0, 180) : '';
+        const action = body.action;
+        if (!eventId || !resultId || (action !== 'dismiss' && action !== 'hard_negative' && action !== 'verify_product')) {
+          return jsonResponse({ error: 'Invalid review action' }, 400);
+        }
+        const item = await feedbackReviewItem(env, eventId, resultId);
+        if (!item) return jsonResponse({ error: 'Review item not found' }, 404);
+
+        let canonicalKey: string | null = null;
+        if (action === 'verify_product') {
+          const product = body.product && typeof body.product === 'object' && !Array.isArray(body.product)
+            ? body.product as Record<string, unknown>
+            : {};
+          const destinationInput = typeof product.destination === 'string' ? product.destination.trim() : '';
+          try { new URL(destinationInput); } catch { return jsonResponse({ error: 'Verified product needs a valid destination' }, 400); }
+          const sourceMetadata = await fetchProductPageMetadata(destinationInput);
+          const destination = (sourceMetadata.canonical_url || destinationInput).slice(0, 1200);
+          const suppliedId = typeof product.model === 'string' && product.model.trim()
+            ? product.model.trim()
+            : typeof product.id === 'string' ? product.id.trim() : '';
+          const productId = (suppliedId || sourceMetadata.sku || '').slice(0, 160);
+          if (!productId) return jsonResponse({ error: 'Verified product needs a SKU/model' }, 400);
+          const title = (sourceMetadata.title || (typeof product.title === 'string' ? product.title.trim() : '') || productId).slice(0, 300);
+          const imageReference = (sourceMetadata.image_reference || (typeof product.image_reference === 'string' ? product.image_reference.trim() : '') || '').slice(0, 1200) || null;
+          const brand = (typeof product.brand === 'string' ? product.brand.trim() : item.brand || '').slice(0, 120);
+          const mapping: VerifiedProductMapping = {
+            platform: 'alpha-learning',
+            content_ref: eventId,
+            scope: 'entire_video',
+            object_type: item.subcategory || item.category,
+            brand,
+            product_id: productId,
+            title,
+            destination,
+            image_reference: imageReference,
+            provider: verifiedSourceProviderName(null, destination) || null,
+            provenance: 'admin_verified',
+          };
+          const canonical = canonicalProductIdentity({
+            mapping,
+            model: productId,
+            merchantItemId: productId,
+            visibleText: item.visible_text,
+            color: item.color,
+            material: item.material,
+            styleAttributes: item.style_attributes,
+            logosMarkings: item.logos_markings,
+            distinctiveFeatures: item.distinctive_features,
+            shapeSilhouette: item.shape_silhouette,
+          });
+          const saved = await persistCanonicalProductIdentity(env, canonical);
+          canonicalKey = saved.canonical_key;
+        }
+
+        await resolveFeedbackReview(env, {
+          event_id: eventId,
+          result_id: resultId,
+          action,
+          canonical_key: canonicalKey,
+          note: typeof body.note === 'string' ? body.note : null,
+        });
+        await auditAdminAction(env, authorized.admin_id, 'feedback_review_resolved', {
+          event_id: eventId,
+          result_id: resultId,
+          action,
+          ...(canonicalKey ? { canonical_key: canonicalKey } : {}),
+        });
+        return jsonResponse({ accepted: true, action, canonical_key: canonicalKey });
+      } catch (error) {
+        logSafeError(error);
+        return jsonResponse({ error: 'Could not resolve feedback review' }, 400);
+      }
+    }
     if (path === '/resolve-products') {
       const installId = request.headers.get('x-scoop-install-id') ?? '';
       const benchmarkMode = env.BENCHMARK_MODE === 'true';
@@ -1964,6 +2044,27 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           commerceCalls: refreshed.commerce_calls,
           visionUsage: rawDescription?.provider_usage,
         });
+        const verifiedLearning = persistAlphaLearning({
+          env,
+          telemetry: alphaTelemetry,
+          description,
+          state: 'RESULTS',
+          total_ms,
+          products: refreshed.products,
+          query: {
+            query: verifiedMapping.title,
+            category: verifiedMapping.object_type,
+            subcategory: verifiedMapping.object_type,
+            brand: verifiedMapping.brand || null,
+            model: verifiedMapping.product_id || null,
+            attributes: [],
+          },
+          verification_usage: sameVideoVisualCheck.usage ?? crossVideoVisualCheck.usage,
+          commerce_calls: refreshed.commerce_calls,
+          verified_canonical_key: verifiedMapping.canonical_key ?? null,
+        }).catch((error) => { logSafeError(error); });
+        if (ctx?.waitUntil) ctx.waitUntil(verifiedLearning);
+        else await verifiedLearning;
         return jsonResponse({
           query: {
             query: verifiedMapping.title,
@@ -2120,6 +2221,19 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         visionUsage: rawDescription?.provider_usage,
         failureState,
       });
+      const learningWrite = persistAlphaLearning({
+        env,
+        telemetry: alphaTelemetry,
+        description,
+        state: resolved.state,
+        total_ms,
+        products: resolved.products,
+        query: resolved.query,
+        verification_usage: resolved.cost_usage?.verification_usage,
+        commerce_calls: resolved.cost_usage?.commerce_calls,
+      }).catch((error) => { logSafeError(error); });
+      if (ctx?.waitUntil) ctx.waitUntil(learningWrite);
+      else await learningWrite;
       if (alphaTelemetry && env.FEEDBACK_LEDGER && resolved.products.length) {
         const feedbackWrites = resolved.products.map((product) => persistFeedbackContext(env, {
           event_id: alphaTelemetry!.event_id,
