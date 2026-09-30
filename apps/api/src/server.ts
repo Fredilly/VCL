@@ -1965,6 +1965,27 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           commerceCalls: refreshed.commerce_calls,
           visionUsage: rawDescription?.provider_usage,
         });
+        const verifiedLearning = persistAlphaLearning({
+          env,
+          telemetry: alphaTelemetry,
+          description,
+          state: 'RESULTS',
+          total_ms,
+          products: refreshed.products,
+          query: {
+            query: verifiedMapping.title,
+            category: verifiedMapping.object_type,
+            subcategory: verifiedMapping.object_type,
+            brand: verifiedMapping.brand || null,
+            model: verifiedMapping.product_id || null,
+            attributes: [],
+          },
+          verification_usage: sameVideoVisualCheck.usage ?? crossVideoVisualCheck.usage,
+          commerce_calls: refreshed.commerce_calls,
+          verified_canonical_key: verifiedMapping.canonical_key ?? null,
+        }).catch((error) => { logSafeError(error); });
+        if (ctx?.waitUntil) ctx.waitUntil(verifiedLearning);
+        else await verifiedLearning;
         return jsonResponse({
           query: {
             query: verifiedMapping.title,
