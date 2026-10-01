@@ -21,4 +21,17 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     provider: null,
     provenance: 'admin_verified',
   },
+  {
+    platform: 'youtube',
+    content_ref: 'PsL2hXoDVCw',
+    scope: 'entire_video',
+    object_type: 'cap',
+    brand: 'Kith & \'47',
+    product_id: 'KHMA050113-001',
+    title: "Kith & '47 for the New York Yankees Sun Faded Franchise LS Cap - Black",
+    destination: 'https://kith.com/collections/kith-for-the-new-york-yankees-2026/products/khma050113-001',
+    image_reference: 'https://kith.com/cdn/shop/files/KHMA050113-001-Detail.jpg?v=1788561574&width=1920',
+    provider: null,
+    provenance: 'admin_verified',
+  },
 ];
