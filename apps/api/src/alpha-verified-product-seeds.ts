@@ -34,4 +34,17 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     provider: null,
     provenance: 'admin_verified',
   },
+  {
+    platform: 'youtube',
+    content_ref: 'wDev1WhWvQs',
+    scope: 'entire_video',
+    object_type: 'shirt',
+    brand: 'Jordan',
+    product_id: 'II5381-417',
+    title: "Jordan Men's Polo - Old Royal / White",
+    destination: 'https://www.nike.com/t/jordan-mens-polo-mbLOwHgG/II5381-417',
+    image_reference: null,
+    provider: null,
+    provenance: 'admin_verified',
+  },
 ];
