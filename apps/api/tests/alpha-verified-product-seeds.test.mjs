@@ -26,6 +26,25 @@ const ricShirt = {
   identity_confidence: 0.1,
 };
 
+
+const stephenAJordanPolo = {
+  category: 'apparel',
+  subcategory: 'polo',
+  brand_candidate: 'Jordan',
+  model_candidate: null,
+  color: 'blue',
+  material: '',
+  style_attributes: ['polo shirt', 'short sleeve'],
+  visible_text: [],
+  logos_markings: ['Jumpman'],
+  distinctive_features: [],
+  hardware_details: [],
+  shape_silhouette: ['polo'],
+  search_terms: ['Jordan blue polo'],
+  confidence: 0.95,
+  identity_confidence: 0.3,
+};
+
 const kithYankeesCap = {
   category: 'apparel',
   subcategory: 'baseball cap',
@@ -102,6 +121,45 @@ test('Ronnie Fieg cap seed does not fire for jacket, jeans, or sunglasses clicks
       timestampMs: 600000,
       description: {
         ...kithYankeesCap,
+        subcategory,
+        style_attributes: [],
+        shape_silhouette: [subcategory],
+        search_terms: [subcategory],
+      },
+    });
+    assert.equal(miss, null, `seed must not leak into ${subcategory}`);
+  }
+});
+
+
+test('Stephen A. Smith video resolves the verified Jordan polo across the video', () => {
+  const hit = mappingMod.lookupVerifiedProductMapping({
+    mappings: seedMod.ALPHA_VERIFIED_PRODUCT_SEEDS,
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: 'wDev1WhWvQs',
+    timestampMs: 120000,
+    description: stephenAJordanPolo,
+  });
+
+  assert.equal(hit?.product_id, 'II5381-417');
+  assert.equal(hit?.scope, 'entire_video');
+  assert.equal(hit?.provenance, 'admin_verified');
+  assert.equal(hit?.brand, 'Jordan');
+  assert.equal(hit?.destination, 'https://www.nike.com/t/jordan-mens-polo-mbLOwHgG/II5381-417');
+});
+
+test('Stephen A. Jordan polo seed does not fire for non-shirt clicks in the same video', () => {
+  for (const subcategory of ['watch', 'glasses', 'microphone']) {
+    const miss = mappingMod.lookupVerifiedProductMapping({
+      mappings: seedMod.ALPHA_VERIFIED_PRODUCT_SEEDS,
+      allowTestFixtures: false,
+      platform: 'youtube',
+      contentRef: 'wDev1WhWvQs',
+      timestampMs: 120000,
+      description: {
+        ...stephenAJordanPolo,
+        category: subcategory === 'microphone' ? 'electronics' : 'accessories',
         subcategory,
         style_attributes: [],
         shape_silhouette: [subcategory],
