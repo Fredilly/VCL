@@ -121,6 +121,60 @@ function firstImage(value: unknown): string | null {
   return null;
 }
 
+
+function isShopifyHtml(html: string): boolean {
+  return /cdn\.shopify\.com|shopify-section|Shopify\.(?:theme|routes)|window\.__st/i.test(html);
+}
+
+function shopifyProductJsonUrl(source: URL): URL | null {
+  if (!/\/products\/[^/?#]+/i.test(source.pathname)) return null;
+  const url = new URL(source.toString());
+  url.search = '';
+  url.hash = '';
+  url.pathname = url.pathname.replace(/\/$/, '') + '.js';
+  return url;
+}
+
+function shopifyPrice(value: unknown): { price: string | null; currency: string | null } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { price: null, currency: null };
+  const record = value as Record<string, unknown>;
+  const raw = record.price_min ?? record.price;
+  let price: string | null = null;
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    // Shopify product JSON prices are integer minor units (for USD, cents).
+    price = (raw / 100).toFixed(2);
+  } else if (typeof raw === 'string' && raw.trim()) {
+    const parsed = Number(raw);
+    price = Number.isFinite(parsed) && /^\d+$/.test(raw.trim())
+      ? (parsed / 100).toFixed(2)
+      : raw.trim();
+  }
+  const currency = asString(record.currency) ?? null;
+  return { price, currency };
+}
+
+async function fetchShopifyPrice(
+  source: URL,
+  fetchImpl: typeof fetch,
+  signal: AbortSignal,
+): Promise<{ price: string | null; currency: string | null }> {
+  const productJsonUrl = shopifyProductJsonUrl(source);
+  if (!productJsonUrl) return { price: null, currency: null };
+  try {
+    const response = await fetchImpl(productJsonUrl.toString(), {
+      redirect: 'follow',
+      signal,
+      headers: { accept: 'application/json,text/javascript,*/*;q=0.8' },
+    });
+    if (!response.ok) return { price: null, currency: null };
+    const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
+    if (!contentType.includes('json') && !contentType.includes('javascript')) return { price: null, currency: null };
+    return shopifyPrice(await response.json());
+  } catch {
+    return { price: null, currency: null };
+  }
+}
+
 export function extractProductPageMetadata(html: string, sourceUrl: string): ProductPageMetadata {
   const source = safeHttpUrl(sourceUrl);
   if (!source) return { sku: null, title: null, canonical_url: null, image_reference: null, price: null, currency: null };
@@ -142,10 +196,10 @@ export function extractProductPageMetadata(html: string, sourceUrl: string): Pro
   const image = imageRaw ? safeHttpUrl(imageRaw, source) : null;
   const structuredOffer = offerPrice(product?.offers);
   const price = structuredOffer.price
-    ?? metaContent(html, ['product:price:amount', 'og:price:amount'])
+    ?? metaContent(html, ['product:price:amount', 'og:price:amount', 'price'])
     ?? null;
   const currency = structuredOffer.currency
-    ?? metaContent(html, ['product:price:currency', 'og:price:currency'])
+    ?? metaContent(html, ['product:price:currency', 'og:price:currency', 'priceCurrency'])
     ?? null;
 
   return {
@@ -185,7 +239,7 @@ export async function fetchProductPageMetadata(
     const decoder = new TextDecoder();
     let html = '';
     let bytes = 0;
-    while (bytes < 800_000) {
+    while (bytes < 2_500_000) {
       const { done, value } = await reader.read();
       if (done) break;
       bytes += value.byteLength;
@@ -193,7 +247,16 @@ export async function fetchProductPageMetadata(
     }
     try { await reader.cancel(); } catch {}
     html += decoder.decode();
-    return extractProductPageMetadata(html, finalUrl.toString());
+    const metadata = extractProductPageMetadata(html, finalUrl.toString());
+    if (!metadata.price && isShopifyHtml(html)) {
+      const live = await fetchShopifyPrice(finalUrl, fetchImpl, controller.signal);
+      return {
+        ...metadata,
+        price: live.price ?? metadata.price,
+        currency: live.currency ?? metadata.currency ?? (live.price ? 'USD' : null),
+      };
+    }
+    return metadata;
   } catch {
     return { sku: null, title: null, canonical_url: source.toString(), image_reference: null, price: null, currency: null };
   } finally {
