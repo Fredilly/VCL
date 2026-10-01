@@ -133,11 +133,11 @@ function shopifyLikelyHost(source: URL): boolean {
 }
 
 function shopifyProductJsonUrl(source: URL): URL | null {
-  if (!/\/products\/[^/?#]+/i.test(source.pathname)) return null;
-  const url = new URL(source.toString());
-  url.search = '';
-  url.hash = '';
-  url.pathname = url.pathname.replace(/\/$/, '') + '.js';
+  const match = source.pathname.match(/\/products\/([^/?#]+)/i);
+  const handle = match?.[1];
+  if (!handle) return null;
+  const url = new URL(source.origin);
+  url.pathname = `/products/${handle}.js`;
   return url;
 }
 
@@ -228,7 +228,11 @@ export async function fetchProductPageMetadata(
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let shopifyLive: { price: string | null; currency: string | null } = { price: null, currency: null };
   try {
+    if (shopifyLikelyHost(source)) {
+      shopifyLive = await fetchShopifyPrice(source, fetchImpl, controller.signal);
+    }
     const response = await fetchImpl(source.toString(), {
       redirect: 'follow',
       signal: controller.signal,
@@ -254,17 +258,24 @@ export async function fetchProductPageMetadata(
     try { await reader.cancel(); } catch {}
     html += decoder.decode();
     const metadata = extractProductPageMetadata(html, finalUrl.toString());
-    if (!metadata.price && shopifyProductJsonUrl(finalUrl) && (isShopifyHtml(html) || shopifyLikelyHost(finalUrl))) {
-      const live = await fetchShopifyPrice(finalUrl, fetchImpl, controller.signal);
-      return {
-        ...metadata,
-        price: live.price ?? metadata.price,
-        currency: live.currency ?? metadata.currency ?? (live.price ? 'USD' : null),
-      };
+    let live = shopifyLive;
+    if (!metadata.price && !live.price && shopifyProductJsonUrl(finalUrl) && isShopifyHtml(html)) {
+      live = await fetchShopifyPrice(finalUrl, fetchImpl, controller.signal);
     }
-    return metadata;
+    return {
+      ...metadata,
+      price: metadata.price ?? live.price,
+      currency: metadata.currency ?? live.currency ?? (live.price ? 'USD' : null),
+    };
   } catch {
-    return { sku: null, title: null, canonical_url: source.toString(), image_reference: null, price: null, currency: null };
+    return {
+      sku: null,
+      title: null,
+      canonical_url: source.toString(),
+      image_reference: null,
+      price: shopifyLive.price,
+      currency: shopifyLive.currency ?? (shopifyLive.price ? 'USD' : null),
+    };
   } finally {
     clearTimeout(timeout);
   }
