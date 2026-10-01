@@ -126,6 +126,12 @@ function isShopifyHtml(html: string): boolean {
   return /cdn\.shopify\.com|shopify-section|\bShopify\b|window\.__st/i.test(html);
 }
 
+function shopifyLikelyHost(source: URL): boolean {
+  const host = source.hostname.toLowerCase().replace(/^www\./, '');
+  return host === 'kith.com'
+    || host.endsWith('.myshopify.com');
+}
+
 function shopifyProductJsonUrl(source: URL): URL | null {
   if (!/\/products\/[^/?#]+/i.test(source.pathname)) return null;
   const url = new URL(source.toString());
@@ -248,7 +254,7 @@ export async function fetchProductPageMetadata(
     try { await reader.cancel(); } catch {}
     html += decoder.decode();
     const metadata = extractProductPageMetadata(html, finalUrl.toString());
-    if (!metadata.price && isShopifyHtml(html)) {
+    if (!metadata.price && shopifyProductJsonUrl(finalUrl) && (isShopifyHtml(html) || shopifyLikelyHost(finalUrl))) {
       const live = await fetchShopifyPrice(finalUrl, fetchImpl, controller.signal);
       return {
         ...metadata,
