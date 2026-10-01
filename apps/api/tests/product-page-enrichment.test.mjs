@@ -147,3 +147,29 @@ test('tries product JSON fallback even when Shopify markers are absent', async (
   assert.equal(metadata.currency, 'USD');
   assert.ok(calls.some((url) => url.endsWith('/collections/kith-for-the-new-york-yankees-2026/products/khma050113-001.js')));
 });
+
+
+test('known Shopify merchant price uses product JSON before storefront HTML', async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(String(url));
+    if (String(url).endsWith('.js')) {
+      return new Response(JSON.stringify({ price: 6500, price_min: 6500 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    throw new Error('storefront HTML should not be needed when Shopify JSON has price');
+  };
+
+  const metadata = await mod.fetchProductPageMetadata(
+    'https://kith.com/collections/kith-for-the-new-york-yankees-2026/products/khma050113-001',
+    fetchImpl,
+  );
+
+  assert.equal(metadata.price, '65.00');
+  assert.equal(metadata.currency, 'USD');
+  assert.deepEqual(calls, [
+    'https://kith.com/collections/kith-for-the-new-york-yankees-2026/products/khma050113-001.js',
+  ]);
+});
