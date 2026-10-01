@@ -229,6 +229,22 @@ export async function fetchProductPageMetadata(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    // Known Shopify merchants should use the lightweight product JSON endpoint
+    // before downloading a potentially multi-megabyte storefront page.
+    if (shopifyLikelyHost(source) && shopifyProductJsonUrl(source)) {
+      const live = await fetchShopifyPrice(source, fetchImpl, controller.signal);
+      if (live.price) {
+        return {
+          sku: null,
+          title: null,
+          canonical_url: source.toString(),
+          image_reference: null,
+          price: live.price,
+          currency: live.currency ?? 'USD',
+        };
+      }
+    }
+
     const response = await fetchImpl(source.toString(), {
       redirect: 'follow',
       signal: controller.signal,
