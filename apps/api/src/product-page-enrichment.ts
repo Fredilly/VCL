@@ -248,7 +248,7 @@ export async function fetchProductPageMetadata(
     try { await reader.cancel(); } catch {}
     html += decoder.decode();
     const metadata = extractProductPageMetadata(html, finalUrl.toString());
-    if (!metadata.price && isShopifyHtml(html)) {
+    if (!metadata.price && shopifyProductJsonUrl(finalUrl)) {
       const live = await fetchShopifyPrice(finalUrl, fetchImpl, controller.signal);
       return {
         ...metadata,
