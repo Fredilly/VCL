@@ -123,7 +123,7 @@ function firstImage(value: unknown): string | null {
 
 
 function isShopifyHtml(html: string): boolean {
-  return /cdn\.shopify\.com|shopify-section|Shopify\.(?:theme|routes)|window\.__st/i.test(html);
+  return /cdn\.shopify\.com|shopify-section|\bShopify\b|window\.__st/i.test(html);
 }
 
 function shopifyProductJsonUrl(source: URL): URL | null {
