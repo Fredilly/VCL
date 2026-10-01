@@ -72,3 +72,51 @@ test('falls back to merchant price meta tags when structured offers are absent',
   assert.equal(metadata.price, '89.50');
   assert.equal(metadata.currency, 'USD');
 });
+
+
+test('fetches price metadata beyond the old 800 KB HTML cap', async () => {
+  const padding = 'x'.repeat(900_000);
+  const html = `<html><head>${padding}<meta property="product:price:amount" content="119.00"><meta property="product:price:currency" content="USD"></head></html>`;
+  const fetchImpl = async () => new Response(html, {
+    status: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+  });
+
+  const metadata = await mod.fetchProductPageMetadata(
+    'https://www.mizzenandmain.com/products/steel-blue-tonal-texture-leeward-dress-shirt',
+    fetchImpl,
+  );
+
+  assert.equal(metadata.price, '119.00');
+  assert.equal(metadata.currency, 'USD');
+});
+
+test('falls back to Shopify product JSON when HTML omits the live price', async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(String(url));
+    if (String(url).endsWith('.js')) {
+      return new Response(JSON.stringify({
+        title: "Kith & '47 Yankees Cap",
+        price: 6500,
+        price_min: 6500,
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Response('<html><head><script>window.Shopify = { theme: {} }</script><meta property="og:title" content="Kith Cap"></head></html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html; charset=utf-8' },
+    });
+  };
+
+  const metadata = await mod.fetchProductPageMetadata(
+    'https://kith.com/products/khma050113-001',
+    fetchImpl,
+  );
+
+  assert.equal(metadata.price, '65.00');
+  assert.equal(metadata.currency, 'USD');
+  assert.ok(calls.some((url) => url.endsWith('/products/khma050113-001.js')));
+});
