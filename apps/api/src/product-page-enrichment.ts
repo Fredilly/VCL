@@ -132,22 +132,44 @@ function shopifyLikelyHost(source: URL): boolean {
     || host.endsWith('.myshopify.com');
 }
 
-function shopifyProductJsonUrl(source: URL): URL | null {
-  if (!/\/products\/[^/?#]+/i.test(source.pathname)) return null;
-  const url = new URL(source.toString());
-  url.search = '';
-  url.hash = '';
-  url.pathname = url.pathname.replace(/\/$/, '') + '.js';
+function shopifyProductHandle(source: URL): string | null {
+  const match = source.pathname.match(/\/products\/([^/?#]+)/i);
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
+}
+
+function shopifyProductEndpoint(source: URL, extension: 'json' | 'js'): URL | null {
+  const handle = shopifyProductHandle(source);
+  if (!handle) return null;
+  const url = new URL(source.origin);
+  url.pathname = `/products/${encodeURIComponent(handle)}.${extension}`;
   return url;
 }
 
 function shopifyPrice(value: unknown): { price: string | null; currency: string | null } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { price: null, currency: null };
-  const record = value as Record<string, unknown>;
+  const root = value as Record<string, unknown>;
+  const record = root.product && typeof root.product === 'object' && !Array.isArray(root.product)
+    ? root.product as Record<string, unknown>
+    : root;
+
+  const variants = Array.isArray(record.variants) ? record.variants : [];
+  for (const variant of variants) {
+    if (!variant || typeof variant !== 'object' || Array.isArray(variant)) continue;
+    const row = variant as Record<string, unknown>;
+    const raw = row.price;
+    const price = typeof raw === 'number'
+      ? String(raw)
+      : typeof raw === 'string' && raw.trim()
+        ? raw.trim()
+        : null;
+    const currency = asString(row.price_currency) ?? asString(row.currency);
+    if (price) return { price, currency };
+  }
+
   const raw = record.price_min ?? record.price;
   let price: string | null = null;
   if (typeof raw === 'number' && Number.isFinite(raw)) {
-    // Shopify product JSON prices are integer minor units (for USD, cents).
+    // Shopify .js prices use integer minor units.
     price = (raw / 100).toFixed(2);
   } else if (typeof raw === 'string' && raw.trim()) {
     const parsed = Number(raw);
@@ -162,23 +184,33 @@ function shopifyPrice(value: unknown): { price: string | null; currency: string 
 async function fetchShopifyPrice(
   source: URL,
   fetchImpl: typeof fetch,
-  signal: AbortSignal,
+  timeoutMs = 1400,
 ): Promise<{ price: string | null; currency: string | null }> {
-  const productJsonUrl = shopifyProductJsonUrl(source);
-  if (!productJsonUrl) return { price: null, currency: null };
-  try {
-    const response = await fetchImpl(productJsonUrl.toString(), {
-      redirect: 'follow',
-      signal,
-      headers: { accept: 'application/json,text/javascript,*/*;q=0.8' },
-    });
-    if (!response.ok) return { price: null, currency: null };
-    const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
-    if (!contentType.includes('json') && !contentType.includes('javascript')) return { price: null, currency: null };
-    return shopifyPrice(await response.json());
-  } catch {
-    return { price: null, currency: null };
+  for (const extension of ['json', 'js'] as const) {
+    const endpoint = shopifyProductEndpoint(source, extension);
+    if (!endpoint) return { price: null, currency: null };
+    try {
+      const response = await fetchImpl(endpoint.toString(), {
+        redirect: 'follow',
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: { accept: 'application/json,text/javascript,*/*;q=0.8' },
+      });
+      if (!response.ok) continue;
+      const text = await response.text();
+      if (!text.trim()) continue;
+      let payload: unknown;
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        continue;
+      }
+      const price = shopifyPrice(payload);
+      if (price.price) return price;
+    } catch {
+      // Try the next Shopify endpoint, then fall through to HTML metadata.
+    }
   }
+  return { price: null, currency: null };
 }
 
 export function extractProductPageMetadata(html: string, sourceUrl: string): ProductPageMetadata {
@@ -231,8 +263,8 @@ export async function fetchProductPageMetadata(
   try {
     // Known Shopify merchants should use the lightweight product JSON endpoint
     // before downloading a potentially multi-megabyte storefront page.
-    if (shopifyLikelyHost(source) && shopifyProductJsonUrl(source)) {
-      const live = await fetchShopifyPrice(source, fetchImpl, controller.signal);
+    if (shopifyLikelyHost(source) && shopifyProductHandle(source)) {
+      const live = await fetchShopifyPrice(source, fetchImpl);
       if (live.price) {
         return {
           sku: null,
@@ -270,8 +302,8 @@ export async function fetchProductPageMetadata(
     try { await reader.cancel(); } catch {}
     html += decoder.decode();
     const metadata = extractProductPageMetadata(html, finalUrl.toString());
-    if (!metadata.price && shopifyProductJsonUrl(finalUrl) && (isShopifyHtml(html) || shopifyLikelyHost(finalUrl))) {
-      const live = await fetchShopifyPrice(finalUrl, fetchImpl, controller.signal);
+    if (!metadata.price && shopifyProductHandle(finalUrl) && (isShopifyHtml(html) || shopifyLikelyHost(finalUrl))) {
+      const live = await fetchShopifyPrice(finalUrl, fetchImpl);
       return {
         ...metadata,
         price: live.price ?? metadata.price,
