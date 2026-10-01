@@ -95,11 +95,12 @@ test('falls back to Shopify product JSON when HTML omits the live price', async 
   const calls = [];
   const fetchImpl = async (url) => {
     calls.push(String(url));
-    if (String(url).endsWith('.js')) {
+    if (String(url).endsWith('.json')) {
       return new Response(JSON.stringify({
-        title: "Kith & '47 Yankees Cap",
-        price: 6500,
-        price_min: 6500,
+        product: {
+          title: "Kith & '47 Yankees Cap",
+          variants: [{ price: "65.00", price_currency: "USD" }],
+        },
       }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -118,7 +119,7 @@ test('falls back to Shopify product JSON when HTML omits the live price', async 
 
   assert.equal(metadata.price, '65.00');
   assert.equal(metadata.currency, 'USD');
-  assert.ok(calls.some((url) => url.endsWith('/products/khma050113-001.js')));
+  assert.ok(calls.some((url) => url.endsWith('/products/khma050113-001.json')));
 });
 
 
@@ -126,8 +127,10 @@ test('tries product JSON fallback even when Shopify markers are absent', async (
   const calls = [];
   const fetchImpl = async (url) => {
     calls.push(String(url));
-    if (String(url).endsWith('.js')) {
-      return new Response(JSON.stringify({ price: 6500, price_min: 6500 }), {
+    if (String(url).endsWith('.json')) {
+      return new Response(JSON.stringify({
+        product: { variants: [{ price: "65.00", price_currency: "USD" }] },
+      }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
@@ -145,7 +148,7 @@ test('tries product JSON fallback even when Shopify markers are absent', async (
 
   assert.equal(metadata.price, '65.00');
   assert.equal(metadata.currency, 'USD');
-  assert.ok(calls.some((url) => url.endsWith('/collections/kith-for-the-new-york-yankees-2026/products/khma050113-001.js')));
+  assert.ok(calls.some((url) => url.endsWith('/products/khma050113-001.json')));
 });
 
 
@@ -153,8 +156,10 @@ test('known Shopify merchant price uses product JSON before storefront HTML', as
   const calls = [];
   const fetchImpl = async (url) => {
     calls.push(String(url));
-    if (String(url).endsWith('.js')) {
-      return new Response(JSON.stringify({ price: 6500, price_min: 6500 }), {
+    if (String(url).endsWith('.json')) {
+      return new Response(JSON.stringify({
+        product: { variants: [{ price: "65.00", price_currency: "USD" }] },
+      }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
@@ -170,6 +175,6 @@ test('known Shopify merchant price uses product JSON before storefront HTML', as
   assert.equal(metadata.price, '65.00');
   assert.equal(metadata.currency, 'USD');
   assert.deepEqual(calls, [
-    'https://kith.com/collections/kith-for-the-new-york-yankees-2026/products/khma050113-001.js',
+    'https://kith.com/products/khma050113-001.json',
   ]);
 });
