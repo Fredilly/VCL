@@ -147,3 +147,50 @@ test('tries product JSON fallback even when Shopify markers are absent', async (
   assert.equal(metadata.currency, 'USD');
   assert.ok(calls.some((url) => url.endsWith('/collections/kith-for-the-new-york-yankees-2026/products/khma050113-001.js')));
 });
+
+
+test('uses canonical Shopify product JSON before slow HTML for collection URLs', async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(String(url));
+    if (String(url) === 'https://kith.com/products/khma050113-001.js') {
+      return new Response(JSON.stringify({ price: 6500, price_min: 6500 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Response('<html><head><meta property="og:title" content="Kith Cap"></head></html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html; charset=utf-8' },
+    });
+  };
+
+  const metadata = await mod.fetchProductPageMetadata(
+    'https://kith.com/collections/kith-for-the-new-york-yankees-2026/products/khma050113-001',
+    fetchImpl,
+  );
+
+  assert.equal(metadata.price, '65.00');
+  assert.equal(metadata.currency, 'USD');
+  assert.equal(calls[0], 'https://kith.com/products/khma050113-001.js');
+});
+
+test('preserves prefetched Shopify price if later HTML enrichment fails', async () => {
+  const fetchImpl = async (url) => {
+    if (String(url) === 'https://kith.com/products/khma050113-001.js') {
+      return new Response(JSON.stringify({ price: 6500 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    throw new Error('merchant html timeout');
+  };
+
+  const metadata = await mod.fetchProductPageMetadata(
+    'https://kith.com/collections/kith-for-the-new-york-yankees-2026/products/khma050113-001',
+    fetchImpl,
+  );
+
+  assert.equal(metadata.price, '65.00');
+  assert.equal(metadata.currency, 'USD');
+});
