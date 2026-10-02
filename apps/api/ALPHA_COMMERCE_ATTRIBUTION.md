@@ -37,12 +37,22 @@ The server verifies the signature before logging the click. A client cannot rewr
 
 Scoop derives one compact 32-character `click_ref` per attributed Scoop event. Every product token from that event carries the same reference so the affiliate-network transaction and Scoop click ledger reconcile to the same event.
 
-Current primary-source verification:
+Current Chrome shipping rule:
 
-- eBay Partner Network: set `EBAY_AFFILIATE_CAMPAIGN_ID`. Scoop sends the request `click_ref` as Browse API `affiliateReferenceId` and uses eBay's returned `itemAffiliateWebUrl` as the outbound destination.
-- Awin supports ClickRef/SubID values and reports conversions/commission by ClickRef.
+- Affiliate credentials alone do **not** enable affiliate destinations.
+- Every adapter defaults to `DISABLED_IN_EXTENSION` / plain-link behavior.
+- eBay uses `itemWebUrl` for Chrome unless its adapter is explicitly classified `COMPLIANT_ENABLED`.
+- Unknown or unconfigured affiliate status fails closed.
+- If no plain merchant URL exists, a non-compliant affiliate-only URL is not exposed.
+- Awin, Sovrn, Skimlinks, eBay EPN, or any future affiliate route must pass the same gate.
 
-Do not append tracking parameters to ordinary merchant URLs blindly. The commercial adapter must produce the network-approved affiliate destination first, then place Scoop's `click_ref` in that network's documented tracking field.
+Allowed adapter statuses:
+
+- `COMPLIANT_ENABLED`
+- `PLAIN_LINK_ONLY`
+- `DISABLED_IN_EXTENSION`
+
+Do not append tracking parameters to ordinary merchant URLs blindly. Product discovery must continue with plain merchant links when affiliate monetization is disabled.
 
 ## Ledger states
 
