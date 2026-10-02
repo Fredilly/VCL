@@ -180,6 +180,30 @@ Until then:
 
 Tracking issue: GitHub #249.
 
+### D-019 — Chrome distribution outranks affiliate monetization
+
+For the Chrome extension, merchant destinations are plain links by default.
+
+Affiliate adapters are optional and fail closed unless the exact shipped flow has been reviewed against current Chrome Web Store policy and the adapter is explicitly classified `COMPLIANT_ENABLED`.
+
+Allowed states:
+- `COMPLIANT_ENABLED`,
+- `PLAIN_LINK_ONLY`,
+- `DISABLED_IN_EXTENSION`.
+
+Rules:
+- affiliate credentials do not enable monetization by themselves,
+- unknown/unconfigured status is `DISABLED_IN_EXTENSION`,
+- do not rewrite existing creator/platform links,
+- do not create affiliate tracking before the qualifying user action,
+- turning affiliate monetization off must not change product identity, ranking, or ordinary merchant-link availability,
+- when policy eligibility is unclear, ship the plain merchant URL.
+
+Reason:
+Chrome Web Store distribution is strategically more important than alpha affiliate revenue.
+
+Tracking issues: GitHub #324 and #325.
+
 ## Commerce redundancy implementation queue
 
 Implement as six bounded PRs:
