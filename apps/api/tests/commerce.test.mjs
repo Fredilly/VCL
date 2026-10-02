@@ -164,6 +164,10 @@ test('commerce errors expose stable resolver codes', () => {
 });
 
 const ebaySource = await readFile(new URL('../src/ebay-commerce.ts', import.meta.url), 'utf8');
+const affiliateComplianceSource = await readFile(new URL('../src/affiliate-compliance.ts', import.meta.url), 'utf8');
+const affiliateContext = vm.createContext({ exports: {} });
+vm.runInContext(compile(stripImports(affiliateComplianceSource)), affiliateContext);
+const { resolveChromeMerchantDestination, shouldRequestAffiliateTreatment } = affiliateContext.exports;
 
 function makeMockAuth() {
   return { getAccessToken: async () => 'mock-token', getBrowseBaseUrl: () => 'https://api.sandbox.ebay.com' };
@@ -174,6 +178,8 @@ const ebayContext = vm.createContext({
   CommerceNoResultsError,
   CommerceProviderError,
   EbayAuth: makeMockAuth(),
+  resolveChromeMerchantDestination,
+  shouldRequestAffiliateTreatment,
   crypto: { randomUUID: () => 'generated' },
   URL,
   AbortSignal,

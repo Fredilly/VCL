@@ -18,7 +18,12 @@ function loadModule(source, context) {
 
 const authSource = await readFile(new URL('../src/ebay-auth.ts', import.meta.url), 'utf8');
 const ebaySource = await readFile(new URL('../src/ebay-commerce.ts', import.meta.url), 'utf8');
+const affiliateComplianceSource = await readFile(new URL('../src/affiliate-compliance.ts', import.meta.url), 'utf8');
 const commerceSource = await readFile(new URL('../src/commerce.ts', import.meta.url), 'utf8');
+
+const affiliateContext = vm.createContext({ exports: {} });
+vm.runInContext(compile(stripImports(affiliateComplianceSource)), affiliateContext);
+const { resolveChromeMerchantDestination, shouldRequestAffiliateTreatment } = affiliateContext.exports;
 
 const commerceContext = vm.createContext({ exports: {} });
 vm.runInContext(compile(stripImports(commerceSource)), commerceContext);
@@ -46,6 +51,8 @@ function makeEbayContext(authInstance, overrides = {}) {
     CommerceNoResultsError,
     CommerceProviderError,
     EbayAuth: authInstance,
+    resolveChromeMerchantDestination,
+    shouldRequestAffiliateTreatment,
     crypto: { randomUUID: () => 'generated-id' },
     URL,
     AbortSignal,
@@ -537,7 +544,7 @@ test('eBay adapter: retrieves 12 candidates before verification limits display',
 });
 
 
-test('eBay adapter: configured affiliate context carries click_ref and prefers affiliate URL', async () => {
+test('eBay adapter: affiliate credentials still fail closed to plain links by default', async () => {
   let capturedHeaders = {};
   const ctx = makeEbayContext(makeMockAuth(), {
     fetch: async (_url, opts) => {
@@ -556,6 +563,36 @@ test('eBay adapter: configured affiliate context carries click_ref and prefers a
   const { EbayCommerceProvider } = ctx.exports;
 
   const provider = new EbayCommerceProvider(makeMockAuth(), 2500, '1234567890');
+  const [result] = await provider.search({ ...query, affiliate_reference_id: 'abc123def456' });
+
+  assert.equal(capturedHeaders['X-EBAY-C-ENDUSERCTX'], undefined);
+  assert.equal(result.destination, 'https://example.test/plain');
+});
+
+test('eBay adapter: explicitly compliant status enables documented affiliate treatment', async () => {
+  let capturedHeaders = {};
+  const ctx = makeEbayContext(makeMockAuth(), {
+    fetch: async (_url, opts) => {
+      capturedHeaders = opts?.headers ?? {};
+      return Response.json({
+        itemSummaries: [{
+          itemId: 'affiliate-1',
+          title: 'Nike Air Max 90 White',
+          itemWebUrl: 'https://example.test/plain',
+          itemAffiliateWebUrl: 'https://example.test/affiliate',
+        }],
+      });
+    },
+  });
+  loadModule(ebaySource, ctx);
+  const { EbayCommerceProvider } = ctx.exports;
+
+  const provider = new EbayCommerceProvider(
+    makeMockAuth(),
+    2500,
+    '1234567890',
+    'COMPLIANT_ENABLED',
+  );
   const [result] = await provider.search({ ...query, affiliate_reference_id: 'abc123def456' });
 
   assert.equal(capturedHeaders['X-EBAY-C-ENDUSERCTX'], 'affiliateCampaignId=1234567890,affiliateReferenceId=abc123def456');

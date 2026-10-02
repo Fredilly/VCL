@@ -6,6 +6,11 @@ import {
   type ProductQuery,
 } from './commerce.js';
 import type { EbayAuth } from './ebay-auth.js';
+import {
+  resolveChromeMerchantDestination,
+  shouldRequestAffiliateTreatment,
+  type AffiliateComplianceStatus,
+} from './affiliate-compliance.js';
 
 type EbayItemSummary = {
   itemId?: string;
@@ -76,7 +81,11 @@ export function ebayDestinationForOffer(itemId: string | null | undefined, desti
   }
 }
 
-function normalizeItem(item: EbayItemSummary, query: ProductQuery): ProductCandidate {
+function normalizeItem(
+  item: EbayItemSummary,
+  query: ProductQuery,
+  affiliateComplianceStatus: AffiliateComplianceStatus,
+): ProductCandidate {
   const title = item.title ?? '';
   const model = ebayModel(item);
   const isLikely = Boolean(query.brand && query.model
@@ -92,7 +101,11 @@ function normalizeItem(item: EbayItemSummary, query: ProductQuery): ProductCandi
     metadata: { brand: item.brand?.brandName, model: model ?? undefined, category: item.categories?.[0]?.categoryName },
     image_reference: item.image?.imageUrl ?? item.additionalImages?.[0]?.imageUrl ?? null,
     provenance: 'ebay:browse',
-    destination: ebayDestinationForOffer(item.itemId, item.itemAffiliateWebUrl ?? item.itemWebUrl ?? null),
+    destination: ebayDestinationForOffer(item.itemId, resolveChromeMerchantDestination({
+      plain_url: item.itemWebUrl ?? null,
+      affiliate_url: item.itemAffiliateWebUrl ?? null,
+      status: affiliateComplianceStatus,
+    })),
     price: item.price?.value ?? null,
     currency: item.price?.currency ?? null,
     result_class: isLikely ? 'LIKELY' : 'SIMILAR',
@@ -107,6 +120,7 @@ export class EbayCommerceProvider implements CommerceProvider {
     private readonly auth: EbayAuth,
     timeoutMs = 2500,
     private readonly affiliateCampaignId?: string,
+    private readonly affiliateComplianceStatus: AffiliateComplianceStatus = 'DISABLED_IN_EXTENSION',
   ) {
     this.timeoutMs = timeoutMs;
   }
@@ -145,7 +159,7 @@ export class EbayCommerceProvider implements CommerceProvider {
       if (!response.ok) return null;
       try {
         const item = await response.json() as EbayItemSummary;
-        return item.title ? normalizeItem(item, query) : null;
+        return item.title ? normalizeItem(item, query, this.affiliateComplianceStatus) : null;
       } catch {
         return null;
       }
@@ -182,7 +196,7 @@ export class EbayCommerceProvider implements CommerceProvider {
         const id = String(item.itemId ?? '');
         return id === rawId || id.split('|').includes(rawId);
       });
-      return match?.title ? normalizeItem(match, query) : null;
+      return match?.title ? normalizeItem(match, query, this.affiliateComplianceStatus) : null;
     } catch {
       return null;
     }
@@ -222,7 +236,9 @@ export class EbayCommerceProvider implements CommerceProvider {
         headers: {
           Authorization: `Bearer ${token}`,
           'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
-          ...(this.affiliateCampaignId && query.affiliate_reference_id
+          ...(this.affiliateCampaignId
+            && query.affiliate_reference_id
+            && shouldRequestAffiliateTreatment(this.affiliateComplianceStatus)
             ? { 'X-EBAY-C-ENDUSERCTX': `affiliateCampaignId=${this.affiliateCampaignId},affiliateReferenceId=${query.affiliate_reference_id}` }
             : {}),
           ...options.headers,
@@ -251,6 +267,6 @@ export class EbayCommerceProvider implements CommerceProvider {
     const items = (payload.itemSummaries ?? []).filter((item) => Boolean(item.title));
     if (items.length === 0) throw new CommerceNoResultsError('eBay returned no results.');
 
-    return items.slice(0, 12).map((item) => normalizeItem(item, query));
+    return items.slice(0, 12).map((item) => normalizeItem(item, query, this.affiliateComplianceStatus));
   }
 }
