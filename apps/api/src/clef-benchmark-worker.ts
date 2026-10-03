@@ -14,12 +14,19 @@ const json = (body: unknown, status = 200) =>
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method !== 'POST') return json({ error: 'POST required' }, 405);
-    let input: JevRouterInput;
+
+    let body: { input?: JevRouterInput; image?: string } | JevRouterInput;
     try {
-      input = await request.json() as JevRouterInput;
+      body = await request.json() as { input?: JevRouterInput; image?: string } | JevRouterInput;
     } catch {
       return json({ error: 'invalid json' }, 400);
     }
+
+    const wrapped = Boolean(body && typeof body === 'object' && 'input' in body);
+    const input = (wrapped ? (body as { input?: JevRouterInput }).input : body) as JevRouterInput;
+    const image = wrapped && typeof (body as { image?: unknown }).image === 'string'
+      ? (body as { image?: string }).image
+      : undefined;
 
     const typesafeKey = request.headers.get('x-benchmark-typesafe-key');
     const binding = typesafeKey
@@ -27,7 +34,13 @@ export default {
       : resolveJevBinding({ ...env, JEV_ROUTER_MODEL: 'clef-flash' });
 
     if (!binding) return json({ error: 'router binding unavailable' }, 503);
-    const result = await routeWithJev(input, binding, 5000);
+
+    const result = await routeWithJev(
+      input,
+      binding,
+      5000,
+      !typesafeKey && image ? [image] : undefined,
+    );
     return json(result, result.telemetry.failed ? 502 : 200);
   },
 };
