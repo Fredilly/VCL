@@ -5,14 +5,19 @@ on:
     branches: [experiment/clef-vision-vs-gemini]
     paths:
       - '.github/workflows/clef-verifier-replacement-ab.yml'
-      - 'apps/api/src/candidate-images.ts'
-      - 'apps/api/src/server.ts'
+      - 'apps/api/src/clef-verification-benchmark-worker.ts'
+      - 'tests/benchmark/clef-verification/replacement-from-frozen.mjs'
+      - 'tests/cost/run-prepared-commerce.mjs'
   workflow_dispatch:
     inputs:
       case_limit:
         description: Number of frozen cases to run (1-8)
         required: false
         default: '8'
+      candidate_limit:
+        description: Max returned candidates to re-verify per case (1-8)
+        required: false
+        default: '5'
 
 permissions:
   contents: read
@@ -29,6 +34,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CASE_LIMIT: ${{ inputs.case_limit || '8' }}
+      CANDIDATE_LIMIT: ${{ inputs.candidate_limit || '5' }}
 
     steps:
       - name: Checkout experiment
@@ -103,7 +109,7 @@ jobs:
           writeFileSync('clef-replacement-count.txt', String(count));
           NODE
 
-      - name: Run current production verifier baseline
+      - name: Freeze current production candidates and verifier baseline
         run: |
           VCL_API_ORIGIN="https://api.vcl.article6.org" \
           VCL_PREPARED_INPUT="$GITHUB_WORKSPACE/clef-replacement-prepared.json" \
@@ -111,135 +117,43 @@ jobs:
           VCL_COST_OUTPUT="$GITHUB_WORKSPACE/clef-replacement-baseline.json" \
           node tests/cost/run-prepared-commerce.mjs
 
-      - name: Verify Preview Base secrets mirror production
+      - name: Create isolated Clef verifier preview
         run: |
-          set -euo pipefail
-          PROD="$(pnpm dlx wrangler@4.135.0 secret list --config apps/api/wrangler.jsonc --format json)"
-          BASE="$(pnpm dlx wrangler@4.135.0 preview base-config secret list --worker-name vcl-api --json)"
-          PROD="$PROD" BASE="$BASE" node --input-type=module <<'NODE'
-          const names = (raw) => {
-            const out = new Set();
-            const walk = (v) => {
-              if (Array.isArray(v)) return v.forEach(walk);
-              if (!v || typeof v !== 'object') return;
-              if (typeof v.name === 'string') out.add(v.name);
-              if (typeof v.key === 'string') out.add(v.key);
-              Object.values(v).forEach(walk);
-            };
-            walk(JSON.parse(raw || '[]'));
-            return out;
-          };
-          const prod = names(process.env.PROD);
-          const base = names(process.env.BASE);
-          const required = [...prod].filter((name) => !name.startsWith('ALPHA_'));
-          const missing = required.filter((name) => !base.has(name));
-          if (missing.length) {
-            console.error('Preview Base is missing production provider secrets: ' + missing.join(', '));
-            process.exit(1);
+          cat > clef-verifier-wrangler.jsonc <<'JSON'
+          {
+            "$schema": "./node_modules/wrangler/config-schema.json",
+            "name": "vcl-clef-verifier-benchmark",
+            "main": "apps/api/src/clef-verification-benchmark-worker.ts",
+            "compatibility_date": "2026-09-11",
+            "workers_dev": true,
+            "ai": { "binding": "AI" },
+            "previews": {
+              "ai": { "binding": "AI" }
+            }
           }
-          console.log('Preview Base provider secrets mirror production names.');
-          NODE
-
-      - name: Create full Scoop preview with Clef verifier
-        run: |
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs';
-          const input = readFileSync('apps/api/wrangler.jsonc', 'utf8');
-          const previews = {
-            vars: {
-              VISION_PROVIDER: 'openrouter',
-              OPENROUTER_MODEL: 'google/gemini-2.5-flash-lite',
-              GEMINI_MODEL: 'gemini-3.5-flash-lite',
-              COMMERCE_ELIGIBILITY_GATE: '1',
-              EBAY_ENVIRONMENT: 'production',
-              JEV_DECISION_ROUTER: 'true',
-              BENCHMARK_MODE: 'true',
-              VERIFIED_PRODUCT_TEST_MODE: 'false',
-              CLEF_VERIFICATION_BENCHMARK: 'true'
-            },
-            ai: { binding: 'AI' }
-          };
-          writeFileSync(
-            'apps/api/wrangler.clef-preview.jsonc',
-            input.replace(/\n}\s*$/, `,\n  "previews": ${JSON.stringify(previews, null, 2)}\n}\n`)
-          );
-          NODE
+          JSON
           set -euo pipefail
-          output="$(pnpm dlx wrangler@4.135.0 preview --config apps/api/wrangler.clef-preview.jsonc --worker-name vcl-api --name "clef-verifier-$GITHUB_RUN_ID" --json)"
+          output="$(pnpm dlx wrangler@4.135.0 preview --config clef-verifier-wrangler.jsonc --worker-name vcl-api --name "clef-frozen-verifier-$GITHUB_RUN_ID" --json)"
           printf '%s\n' "$output" | tee clef-replacement-preview.log
           printf '%s' "$output" | jq -er '.preview_urls[0] // .preview.urls[0]' > clef-replacement-origin.txt
 
-      - name: Run Clef replacement verifier
+      - name: Run Clef on frozen production candidates
         run: |
-          VCL_API_ORIGIN="$(cat clef-replacement-origin.txt)" \
-          VCL_PREPARED_INPUT="$GITHUB_WORKSPACE/clef-replacement-prepared.json" \
-          VCL_PREPARED_CASE_COUNT="$(cat clef-replacement-count.txt)" \
-          VCL_COST_OUTPUT="$GITHUB_WORKSPACE/clef-replacement-experiment.json" \
-          node tests/cost/run-prepared-commerce.mjs
+          VCL_CLEF_PREPARED_INPUT="$GITHUB_WORKSPACE/clef-replacement-prepared.json" \
+          VCL_CLEF_BASELINE_INPUT="$GITHUB_WORKSPACE/clef-replacement-baseline.json" \
+          VCL_CLEF_REPLACEMENT_OUTPUT="$GITHUB_WORKSPACE/clef-replacement-report.json" \
+          CLEF_VERIFY_ORIGIN="$(cat clef-replacement-origin.txt)" \
+          CLEF_VERIFY_CANDIDATE_LIMIT="$CANDIDATE_LIMIT" \
+          node tests/benchmark/clef-verification/replacement-from-frozen.mjs
 
-      - name: Compare
+      - name: Print benchmark summary
+        run: jq '.summary' clef-replacement-report.json
+
+      - name: Delete isolated Clef preview
+        if: always()
+        continue-on-error: true
         run: |
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs';
-          const load=p=>JSON.parse(readFileSync(p,'utf8'));
-          const B=load('clef-replacement-baseline.json'), E=load('clef-replacement-experiment.json');
-          const expected={
-            's5-01':{brand:'Patagonia',model:'Better Sweater'},'s5-02':{brand:'Patagonia',model:'Better Sweater'},
-            's5-03':{brand:'Seiko',model:'SKX007'},'s5-04':{brand:'Seiko',model:'SKX007'},
-            's5-05':{brand:'Coach',model:null},'s5-06':{brand:'Coach',model:null},
-            's5-07':{brand:'Adidas',model:'Samba OG'},'s5-08':{brand:'Adidas',model:'Samba OG'}
-          };
-          const norm=v=>String(v??'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-          const supports=(p,x)=>{
-            if(!p||!x)return false;
-            const t=norm([p.title,p.brand,p.model].filter(Boolean).join(' '));
-            const b=norm(x.brand),m=norm(x.model);
-            return (!b||t.includes(b))&&(!m||m.split(' ').filter(Boolean).every(k=>t.includes(k)));
-          };
-          const pctl=(v,q)=>{v=v.filter(Number.isFinite).sort((a,b)=>a-b);return v.length?v[Math.min(v.length-1,Math.ceil(v.length*q)-1)]:null};
-          const metrics=d=>{
-            const r=d.runs??[];
-            const req=r.reduce((n,x)=>n+Number(x.verification_usage?.requests??0),0);
-            const cost=r.reduce((n,x)=>n+Number(x.verification_usage?.cost_usd??0),0);
-            return {
-              cases:r.length,
-              useful_rate:r.length?r.filter(x=>x.notes?.includes('state=RESULTS')).length/r.length:null,
-              top1_expected_identity_rate:r.length?r.filter(x=>supports(x.product_identities?.[0],expected[x.case_id])).length/r.length:null,
-              false_exact:r.reduce((n,x)=>n+Number(x.false_exact??0),0),
-              unsupported_likely:r.reduce((n,x)=>n+Number(x.unsupported_likely??0),0),
-              verification_calls:req,
-              verification_cost_usd:cost,
-              verification_provider:[...new Set(r.map(x=>x.verification_usage?.provider).filter(Boolean))],
-              p50_ms:pctl(r.map(x=>x.latency_ms),.5),
-              p95_ms:pctl(r.map(x=>x.latency_ms),.95),
-              p50_commerce_ms:pctl(r.map(x=>x.commerce_latency_ms),.5),
-              p95_commerce_ms:pctl(r.map(x=>x.commerce_latency_ms),.95),
-              p50_model_verification_ms:pctl(r.map(x=>x.timing?.candidate_model_verification_ms),.5),
-              p95_model_verification_ms:pctl(r.map(x=>x.timing?.candidate_model_verification_ms),.95)
-            };
-          };
-          const pct=(a,b)=>a?((b-a)/a*100):null;
-          const baseline=metrics(B),clef=metrics(E);
-          const report={
-            commit:readFileSync('clef-replacement-commit.txt','utf8').trim(),
-            baseline,clef,
-            delta:{
-              useful_rate:clef.useful_rate-baseline.useful_rate,
-              top1_expected_identity_rate:clef.top1_expected_identity_rate-baseline.top1_expected_identity_rate,
-              p50_ms_pct:pct(baseline.p50_ms,clef.p50_ms),
-              p95_ms_pct:pct(baseline.p95_ms,clef.p95_ms),
-              p50_model_verification_ms_pct:pct(baseline.p50_model_verification_ms,clef.p50_model_verification_ms),
-              verification_calls_pct:pct(baseline.verification_calls,clef.verification_calls),
-              verification_cost_usd:clef.verification_cost_usd-baseline.verification_cost_usd
-            },
-            valid_clef_execution:clef.verification_provider.includes('clef')&&clef.verification_calls>0,
-            trust_gate:clef.false_exact===0&&clef.unsupported_likely===0
-          };
-          writeFileSync('clef-replacement-report.json',JSON.stringify(report,null,2)+'\n');
-          console.log(JSON.stringify(report,null,2));
-          if(!report.valid_clef_execution) throw new Error('Clef did not actually replace verification calls');
-          if(!report.trust_gate) throw new Error('Clef replacement introduced false EXACT/unsupported LIKELY');
-          NODE
+          pnpm dlx wrangler@4.135.0 preview delete --worker-name vcl-api --name "clef-frozen-verifier-$GITHUB_RUN_ID" --skip-confirmation || true
 
       - name: Upload artifacts
         if: always()
@@ -251,5 +165,4 @@ jobs:
             clef-replacement-preview.log
             clef-replacement-prepared.json
             clef-replacement-baseline.json
-            clef-replacement-experiment.json
             clef-replacement-report.json
