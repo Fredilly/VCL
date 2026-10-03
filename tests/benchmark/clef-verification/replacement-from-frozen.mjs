@@ -15,10 +15,16 @@ const norm = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').tr
 function supportsExpectedIdentity(product, expected) {
   if (!product || !expected) return false;
   const text = norm([product.title, product.brand, product.model].filter(Boolean).join(' '));
+  const compactText = text.replace(/[^a-z0-9]/g, '');
   const brand = norm(expected.brand);
   const model = norm(expected.model);
   if (brand && !text.includes(brand)) return false;
-  if (model && !model.split(' ').filter(Boolean).every((token) => text.includes(token))) return false;
+  if (model) {
+    const compactModel = model.replace(/[^a-z0-9]/g, '');
+    const tokenMatch = model.split(' ').filter(Boolean).every((token) => text.includes(token));
+    const compactMatch = compactModel.length >= 4 && compactText.includes(compactModel);
+    if (!tokenMatch && !compactMatch) return false;
+  }
   return true;
 }
 
@@ -166,11 +172,12 @@ const summary = {
   methodology: {
     source: 'Production Scoop retrieves and verifies once. Returned candidate snapshots are frozen, including image URLs.',
     replacement: 'An isolated Workers AI Clef verifier re-checks those frozen candidates and sends Clef evidence through Scoop verifyCandidate trust logic.',
-    limitation: 'Production does not expose candidates rejected before response, so this tests verifier replacement on the exact returned candidate set only. It cannot measure recovery of candidates the current verifier rejected.',
+    limitation: 'Production does not expose candidates rejected before response, so this tests verifier replacement on the exact returned candidate set only. It cannot measure recovery of candidates the current verifier rejected. returned_product_rate is not treated as quality because a returned product may be the wrong identity.',
   },
   baseline: {
-    useful_rate: rows.length ? count((r) => r.baseline.useful) / rows.length : null,
+    returned_product_rate: rows.length ? count((r) => r.baseline.useful) / rows.length : null,
     top1_expected_identity_rate: rows.length ? count((r) => r.baseline.top1_expected_identity) / rows.length : null,
+    expected_identity_present_rate: rows.length ? count((r) => r.baseline.products.some((p) => supportsExpectedIdentity(p, r.expected_identity))) / rows.length : null,
     false_exact: sum((r) => r.baseline.false_exact),
     unsupported_likely: sum((r) => r.baseline.unsupported_likely),
     verification_requests: baselineVerificationRequests,
@@ -181,8 +188,9 @@ const summary = {
     p95_model_verification_ms: percentile(baselineModelMs, 0.95),
   },
   clef_replacement: {
-    useful_rate: rows.length ? count((r) => r.clef_replacement.useful) / rows.length : null,
+    returned_product_rate: rows.length ? count((r) => r.clef_replacement.useful) / rows.length : null,
     top1_expected_identity_rate: rows.length ? count((r) => r.clef_replacement.top1_expected_identity) / rows.length : null,
+    expected_identity_present_rate: rows.length ? count((r) => r.clef_replacement.products.some((p) => supportsExpectedIdentity(p, r.expected_identity))) / rows.length : null,
     false_exact: sum((r) => r.clef_replacement.false_exact),
     unsupported_likely: sum((r) => r.clef_replacement.unsupported_likely),
     clef_calls: totalCalls,
