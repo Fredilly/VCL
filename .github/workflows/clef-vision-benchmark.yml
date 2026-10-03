@@ -71,57 +71,6 @@ jobs:
           pnpm check
           pnpm build
 
-      - name: Verify preview provider secrets
-        run: |
-          set -euo pipefail
-          BASE="$(pnpm dlx wrangler@4.135.0 preview base-config secret list --worker-name vcl-api --json)"
-          BASE="$BASE" node --input-type=module <<'NODE'
-          const doc = JSON.parse(process.env.BASE || '[]');
-          const names = new Set();
-          const walk = (v) => {
-            if (Array.isArray(v)) return v.forEach(walk);
-            if (!v || typeof v !== 'object') return;
-            if (typeof v.name === 'string') names.add(v.name);
-            if (typeof v.key === 'string') names.add(v.key);
-            Object.values(v).forEach(walk);
-          };
-          walk(doc);
-          if (!names.has('OPENROUTER_API_KEY')) {
-            throw new Error('Preview Base is missing OPENROUTER_API_KEY required for the current Gemini baseline.');
-          }
-          NODE
-
-      - name: Build isolated Gemini baseline preview config
-        run: |
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs';
-          const input = readFileSync('apps/api/wrangler.jsonc', 'utf8');
-          const previews = {
-            vars: {
-              VISION_PROVIDER: 'openrouter',
-              OPENROUTER_MODEL: 'google/gemini-2.5-flash-lite',
-              GEMINI_MODEL: 'gemini-3.5-flash-lite',
-              COMMERCE_ELIGIBILITY_GATE: '1',
-              EBAY_ENVIRONMENT: 'production',
-              JEV_DECISION_ROUTER: 'true',
-              BENCHMARK_MODE: 'true',
-              VERIFIED_PRODUCT_TEST_MODE: 'false'
-            },
-            ai: { binding: 'AI' }
-          };
-          writeFileSync(
-            'apps/api/.clef-gemini-preview-wrangler.jsonc',
-            input.replace(/\n}\s*$/, `,\n  "previews": ${JSON.stringify(previews, null, 2)}\n}\n`)
-          );
-          NODE
-
-      - name: Create isolated Gemini baseline Worker Preview
-        run: |
-          set -euo pipefail
-          output="$(pnpm dlx wrangler@4.135.0 preview --config apps/api/.clef-gemini-preview-wrangler.jsonc --worker-name vcl-api --name "clef-gemini-$GITHUB_RUN_ID" --json)"
-          printf '%s\n' "$output" | tee clef-gemini-preview.log
-          printf '%s' "$output" | jq -er '.preview_urls[0] // .preview.urls[0]' > clef-gemini-origin.txt
-
       - name: Freeze valid benchmark cases
         run: |
           node --input-type=module <<'NODE'
@@ -154,7 +103,7 @@ jobs:
           export VCL_PREPARED_OUTPUT="$GITHUB_WORKSPACE/clef-gemini-prepared.json"
           export VCL_CDP_PORT=9334
           export VCL_COST_PROFILE="$RUNNER_TEMP/clef-browser"
-          export VCL_API_ORIGIN="$(cat clef-gemini-origin.txt)"
+          export VCL_API_ORIGIN="https://api.vcl.article6.org"
           node tests/cost/run-live.mjs
 
       - name: Run Clef on the exact same localized crops
@@ -175,6 +124,5 @@ jobs:
           name: clef-vision-vs-gemini-${{ github.run_id }}
           path: |
             clef-benchmark-commit.txt
-            clef-gemini-preview.log
             clef-gemini-prepared.json
             clef-vision-report.json
