@@ -1,0 +1,175 @@
+name: Clef Vision vs Gemini benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      case_limit:
+        description: Number of frozen cases to run (1-8)
+        required: false
+        default: '8'
+      clef_model:
+        description: Clef model (clef or clef-flash)
+        required: false
+        default: 'clef'
+      benchmark_ref:
+        description: Experimental ref to benchmark
+        required: false
+        default: 'experiment/clef-vision-vs-gemini'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clef-vision-vs-gemini
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CASE_LIMIT: ${{ inputs.case_limit || '8' }}
+      CLEF_MODEL: ${{ inputs.clef_model || 'clef' }}
+      BENCHMARK_REF: ${{ inputs.benchmark_ref || 'experiment/clef-vision-vs-gemini' }}
+
+    steps:
+      - name: Checkout experiment
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BENCHMARK_REF }}
+
+      - name: Record commit
+        run: git rev-parse HEAD | tee clef-benchmark-commit.txt
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install headless Chromium
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes chromium-browser || sudo apt-get install --yes chromium
+
+      - name: Prepare extension types and verify
+        run: |
+          pnpm --filter @vcl/extension exec wxt prepare
+          pnpm check
+          pnpm build
+
+      - name: Verify preview provider secrets
+        run: |
+          set -euo pipefail
+          BASE="$(pnpm dlx wrangler@4.135.0 preview base-config secret list --worker-name vcl-api --json)"
+          BASE="$BASE" node --input-type=module <<'NODE'
+          const doc = JSON.parse(process.env.BASE || '[]');
+          const names = new Set();
+          const walk = (v) => {
+            if (Array.isArray(v)) return v.forEach(walk);
+            if (!v || typeof v !== 'object') return;
+            if (typeof v.name === 'string') names.add(v.name);
+            if (typeof v.key === 'string') names.add(v.key);
+            Object.values(v).forEach(walk);
+          };
+          walk(doc);
+          if (!names.has('OPENROUTER_API_KEY')) {
+            throw new Error('Preview Base is missing OPENROUTER_API_KEY required for the current Gemini baseline.');
+          }
+          NODE
+
+      - name: Build isolated Gemini baseline preview config
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const input = readFileSync('apps/api/wrangler.jsonc', 'utf8');
+          const previews = {
+            vars: {
+              VISION_PROVIDER: 'openrouter',
+              OPENROUTER_MODEL: 'google/gemini-2.5-flash-lite',
+              GEMINI_MODEL: 'gemini-3.5-flash-lite',
+              COMMERCE_ELIGIBILITY_GATE: '1',
+              EBAY_ENVIRONMENT: 'production',
+              JEV_DECISION_ROUTER: 'true',
+              BENCHMARK_MODE: 'true',
+              VERIFIED_PRODUCT_TEST_MODE: 'false'
+            },
+            ai: { binding: 'AI' }
+          };
+          writeFileSync(
+            'apps/api/.clef-gemini-preview-wrangler.jsonc',
+            input.replace(/\n}\s*$/, `,\n  "previews": ${JSON.stringify(previews, null, 2)}\n}\n`)
+          );
+          NODE
+
+      - name: Create isolated Gemini baseline Worker Preview
+        run: |
+          set -euo pipefail
+          output="$(pnpm dlx wrangler@4.135.0 preview --config apps/api/.clef-gemini-preview-wrangler.jsonc --worker-name vcl-api --name "clef-gemini-$GITHUB_RUN_ID" --json)"
+          printf '%s\n' "$output" | tee clef-gemini-preview.log
+          printf '%s' "$output" | jq -er '.preview_urls[0] // .preview.urls[0]' > clef-gemini-origin.txt
+
+      - name: Freeze valid benchmark cases
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const f = JSON.parse(readFileSync('tests/manual/spike-5/cases-v2.json', 'utf8'));
+          const identities = {
+            's5-01': { brand: 'Patagonia', model: 'Better Sweater' },
+            's5-02': { brand: 'Patagonia', model: 'Better Sweater' },
+            's5-03': { brand: 'Seiko', model: 'SKX007' },
+            's5-04': { brand: 'Seiko', model: 'SKX007' },
+            's5-05': { brand: 'Coach', model: null },
+            's5-06': { brand: 'Coach', model: null },
+            's5-07': { brand: 'Adidas', model: 'Samba OG' },
+            's5-08': { brand: 'Adidas', model: 'Samba OG' }
+          };
+          f.cases = f.cases
+            .filter((c) => c.valid !== false)
+            .slice(0, Number(process.env.CASE_LIMIT || 8))
+            .map((c) => ({ ...c, expected_identity: identities[c.id] }));
+          writeFileSync(process.env.RUNNER_TEMP + '/clef-cases.json', JSON.stringify(f));
+          NODE
+
+      - name: Prepare identical localized crops with current Gemini pipeline
+        run: |
+          export VCL_COST_CASES="$RUNNER_TEMP/clef-cases.json"
+          export VCL_COST_LIMIT="$CASE_LIMIT"
+          export VCL_HEADLESS=1
+          export VCL_FROZEN_FRAME_DIR="$GITHUB_WORKSPACE/tests/benchmark/jev/frames"
+          export VCL_PREPARE_ONLY=1
+          export VCL_PREPARED_OUTPUT="$GITHUB_WORKSPACE/clef-gemini-prepared.json"
+          export VCL_CDP_PORT=9334
+          export VCL_COST_PROFILE="$RUNNER_TEMP/clef-browser"
+          export VCL_API_ORIGIN="$(cat clef-gemini-origin.txt)"
+          node tests/cost/run-live.mjs
+
+      - name: Run Clef on the exact same localized crops
+        run: |
+          VCL_CLEF_PREPARED_INPUT="$GITHUB_WORKSPACE/clef-gemini-prepared.json" \
+          VCL_CLEF_OUTPUT="$GITHUB_WORKSPACE/clef-vision-report.json" \
+          CLEF_MODEL="$CLEF_MODEL" \
+          node tests/benchmark/clef-vision/run.mjs
+
+      - name: Print benchmark summary
+        run: |
+          jq '.summary' clef-vision-report.json
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clef-vision-vs-gemini-${{ github.run_id }}
+          path: |
+            clef-benchmark-commit.txt
+            clef-gemini-preview.log
+            clef-gemini-prepared.json
+            clef-vision-report.json
