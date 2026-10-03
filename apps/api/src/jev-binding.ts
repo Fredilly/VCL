@@ -1,14 +1,21 @@
 import type { WorkersAiBinding } from './jev.js';
-import { VercelJevBinding } from './vercel-jev.js';
 
 export type JevBindingEnv = {
   AI?: WorkersAiBinding;
-  AI_GATEWAY_API_KEY?: string;
   JEV_ROUTER_MODEL?: string;
+  CLOUDFLARE_AI_GATEWAY_ID?: string;
 };
 
 const CLEF_FLASH_MODEL = '@cf/cloudflare/clef-flash';
 const CLEF_FLASH_SELECTOR = 'clef-flash';
+const CLOUDFLARE_JEV_MODEL = 'typesafe/jev';
+const CLOUDFLARE_JEV_SELECTOR = 'jev-cloudflare';
+
+type CloudflareAiRun = (
+  model: string,
+  input: Parameters<WorkersAiBinding['run']>[1],
+  options?: { gateway?: { id: string } },
+) => Promise<unknown>;
 
 function clefFlashBinding(ai: WorkersAiBinding): WorkersAiBinding {
   return {
@@ -20,15 +27,36 @@ function clefFlashBinding(ai: WorkersAiBinding): WorkersAiBinding {
   };
 }
 
+function cloudflareJevBinding(ai: WorkersAiBinding, gatewayId: string): WorkersAiBinding {
+  const run = ai.run.bind(ai) as CloudflareAiRun;
+  return {
+    modelId: CLOUDFLARE_JEV_MODEL,
+    run(_model, input) {
+      // Jev is a third-party model on Cloudflare. Route it explicitly through
+      // AI Gateway so billing/observability are deterministic instead of relying
+      // on account defaults.
+      return run(CLOUDFLARE_JEV_MODEL, input, {
+        gateway: { id: gatewayId },
+      });
+    },
+  };
+}
+
 export function resolveJevBinding(env: JevBindingEnv): WorkersAiBinding | undefined {
-  // Experiment-only selector. Default behavior remains unchanged so ordinary
-  // runtime and tests still prefer the existing Jev route.
-  if (env.JEV_ROUTER_MODEL === CLEF_FLASH_SELECTOR && env.AI) {
+  if (!env.AI) return undefined;
+
+  if (env.JEV_ROUTER_MODEL === CLEF_FLASH_SELECTOR) {
     return clefFlashBinding(env.AI);
   }
 
-  // Existing production behavior: prefer Vercel Jev, then native Workers AI.
-  if (env.AI_GATEWAY_API_KEY) return new VercelJevBinding(env.AI_GATEWAY_API_KEY);
-  if (env.AI) return env.AI;
+  // Cloudflare-first Jev path. The gateway defaults to Cloudflare's "default"
+  // gateway unless Scoop is configured with a dedicated gateway id.
+  if (!env.JEV_ROUTER_MODEL || env.JEV_ROUTER_MODEL === CLOUDFLARE_JEV_SELECTOR) {
+    return cloudflareJevBinding(
+      env.AI,
+      env.CLOUDFLARE_AI_GATEWAY_ID?.trim() || 'default',
+    );
+  }
+
   return undefined;
 }
