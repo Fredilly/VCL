@@ -117,33 +117,45 @@ test('Vercel Jev binding uses only the evaluation-model endpoint and expected he
 });
 
 
-test('Jev binding prefers Vercel when both providers are configured', () => {
-  const cloudflare = ai({
-    answers: {
-      commerce_action: { type: 'choice', choice: 'SEARCH_NORMAL' },
-      verification_action: { type: 'choice', choice: 'LIGHT' },
-      multiframe_action: { type: 'choice', choice: 'NO' },
+test('Jev binding uses Cloudflare AI Gateway explicitly by default', async () => {
+  let seen;
+  const cloudflare = {
+    async run(model, input, options) {
+      seen = { model, input, options };
+      return {
+        answers: {
+          commerce_action: { type: 'choice', choice: 'SEARCH_NORMAL' },
+          verification_action: { type: 'choice', choice: 'FULL' },
+          multiframe_action: { type: 'choice', choice: 'NO' },
+        },
+      };
     },
-  });
-  const binding = resolveJevBinding({ AI: cloudflare, AI_GATEWAY_API_KEY: 'vercel-key' });
+  };
+  const binding = resolveJevBinding({ AI: cloudflare, CLOUDFLARE_AI_GATEWAY_ID: 'scoop' });
   assert.ok(binding);
-  assert.equal(binding.modelId, 'typesafe-ai/jev');
-  assert.equal(typeof binding.run, 'function');
+  assert.equal(binding.modelId, 'typesafe/jev');
+  await binding.run('ignored', { state: {}, questions: {} });
+  assert.equal(seen.model, 'typesafe/jev');
+  assert.deepEqual(seen.options, { gateway: { id: 'scoop' } });
 });
 
-test('Jev binding falls back to native Cloudflare Workers AI when Vercel is unavailable', () => {
-  const cloudflare = ai({
-    answers: {
-      commerce_action: { type: 'choice', choice: 'SEARCH_NORMAL' },
-      verification_action: { type: 'choice', choice: 'LIGHT' },
-      multiframe_action: { type: 'choice', choice: 'NO' },
+test('Clef selector stays on Cloudflare Workers AI', async () => {
+  let seen;
+  const cloudflare = {
+    async run(model, input) {
+      seen = { model, input };
+      return {};
     },
-  });
-  const binding = resolveJevBinding({ AI: cloudflare });
-  assert.equal(binding, cloudflare);
+  };
+  const binding = resolveJevBinding({ AI: cloudflare, JEV_ROUTER_MODEL: 'clef-flash' });
+  assert.ok(binding);
+  assert.equal(binding.modelId, '@cf/cloudflare/clef-flash');
+  await binding.run('ignored', { state: {}, questions: {} });
+  assert.equal(seen.model, '@cf/cloudflare/clef-flash');
+  assert.equal(seen.input.model, 'clef-flash');
 });
 
-test('Jev binding is disabled when no provider is configured', () => {
+test('Jev binding is disabled when no Cloudflare AI binding is configured', () => {
   assert.equal(resolveJevBinding({}), undefined);
 });
 
