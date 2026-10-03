@@ -1,6 +1,6 @@
 import { routeWithJev, type JevRouterInput } from './jev-router.js';
 import { resolveJevBinding } from './jev-binding.js';
-import { VercelJevBinding } from './vercel-jev.js';
+import { TypeSafeJevBinding } from './typesafe-jev.js';
 import type { WorkersAiBinding } from './jev.js';
 
 interface Env {
@@ -21,9 +21,9 @@ export default {
       return json({ error: 'invalid json' }, 400);
     }
 
-    const vercelKey = request.headers.get('x-benchmark-vercel-key');
-    const binding = vercelKey
-      ? new VercelJevBinding(vercelKey)
+    const typesafeKey = request.headers.get('x-benchmark-typesafe-key');
+    const binding = typesafeKey
+      ? new TypeSafeJevBinding(typesafeKey)
       : resolveJevBinding({ ...env, JEV_ROUTER_MODEL: 'clef-flash' });
 
     if (!binding) return json({ error: 'router binding unavailable' }, 503);
