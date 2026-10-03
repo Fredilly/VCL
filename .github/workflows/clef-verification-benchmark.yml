@@ -1,0 +1,140 @@
+name: Clef verification A/B benchmark
+
+on:
+  pull_request:
+    branches: [experiment/clef-vision-vs-gemini]
+    paths:
+      - '.github/workflows/clef-verification-benchmark.yml'
+      - 'tests/benchmark/clef-verification/**'
+      - 'apps/api/src/clef-verification-benchmark-worker.ts'
+  workflow_dispatch:
+    inputs:
+      case_limit:
+        description: Number of frozen cases to run (1-8)
+        required: false
+        default: '8'
+      candidate_limit:
+        description: Max high-confidence candidates to check per case (1-5)
+        required: false
+        default: '5'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clef-verification-ab
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CASE_LIMIT: ${{ inputs.case_limit || '8' }}
+      CANDIDATE_LIMIT: ${{ inputs.candidate_limit || '5' }}
+
+    steps:
+      - name: Checkout experiment
+        uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install headless Chromium
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes chromium-browser || sudo apt-get install --yes chromium
+
+      - name: Verify branch
+        run: |
+          pnpm --filter @vcl/extension exec wxt prepare
+          pnpm check
+          pnpm build
+
+      - name: Create isolated Clef verification preview
+        run: |
+          cat > clef-verification-wrangler.jsonc <<'JSON'
+          {
+            "$schema": "../../node_modules/wrangler/config-schema.json",
+            "name": "vcl-clef-verification-benchmark",
+            "main": "apps/api/src/clef-verification-benchmark-worker.ts",
+            "compatibility_date": "2026-09-11",
+            "workers_dev": true,
+            "ai": { "binding": "AI" },
+            "previews": {
+              "ai": { "binding": "AI" }
+            }
+          }
+          JSON
+          set -euo pipefail
+          output="$(pnpm dlx wrangler@4.135.0 preview --config clef-verification-wrangler.jsonc --worker-name vcl-api --name "clef-verify-$GITHUB_RUN_ID" --json)"
+          printf '%s\n' "$output" | tee clef-verification-preview.log
+          printf '%s' "$output" | jq -er '.preview_urls[0] // .preview.urls[0]' > clef-verification-origin.txt
+
+      - name: Freeze benchmark cases
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const f = JSON.parse(readFileSync('tests/manual/spike-5/cases-v2.json', 'utf8'));
+          const identities = {
+            's5-01': { brand: 'Patagonia', model: 'Better Sweater' },
+            's5-02': { brand: 'Patagonia', model: 'Better Sweater' },
+            's5-03': { brand: 'Seiko', model: 'SKX007' },
+            's5-04': { brand: 'Seiko', model: 'SKX007' },
+            's5-05': { brand: 'Coach', model: null },
+            's5-06': { brand: 'Coach', model: null },
+            's5-07': { brand: 'Adidas', model: 'Samba OG' },
+            's5-08': { brand: 'Adidas', model: 'Samba OG' }
+          };
+          f.cases = f.cases
+            .filter((c) => c.valid !== false)
+            .slice(0, Number(process.env.CASE_LIMIT || 8))
+            .map((c) => ({ ...c, expected_identity: identities[c.id] }));
+          writeFileSync(process.env.RUNNER_TEMP + '/clef-verification-cases.json', JSON.stringify(f));
+          NODE
+
+      - name: Prepare identical localized crops with current Scoop
+        run: |
+          export VCL_COST_CASES="$RUNNER_TEMP/clef-verification-cases.json"
+          export VCL_COST_LIMIT="$CASE_LIMIT"
+          export VCL_HEADLESS=1
+          export VCL_FROZEN_FRAME_DIR="$GITHUB_WORKSPACE/tests/benchmark/jev/frames"
+          export VCL_PREPARE_ONLY=1
+          export VCL_PREPARED_OUTPUT="$GITHUB_WORKSPACE/clef-verification-prepared.json"
+          export VCL_CDP_PORT=9334
+          export VCL_COST_PROFILE="$RUNNER_TEMP/clef-verification-browser"
+          export VCL_API_ORIGIN="https://api.vcl.article6.org"
+          node tests/cost/run-live.mjs
+
+      - name: Compare current verification with Clef-assisted veto
+        run: |
+          VCL_CLEF_VERIFY_PREPARED_INPUT="$GITHUB_WORKSPACE/clef-verification-prepared.json" \
+          VCL_CLEF_VERIFY_OUTPUT="$GITHUB_WORKSPACE/clef-verification-report.json" \
+          VCL_API_ORIGIN="https://api.vcl.article6.org" \
+          CLEF_VERIFY_ORIGIN="$(cat clef-verification-origin.txt)" \
+          CLEF_VERIFY_CANDIDATE_LIMIT="$CANDIDATE_LIMIT" \
+          node tests/benchmark/clef-verification/run.mjs
+
+      - name: Print summary
+        run: jq '.summary' clef-verification-report.json
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clef-verification-ab-${{ github.run_id }}
+          path: |
+            clef-verification-preview.log
+            clef-verification-prepared.json
+            clef-verification-report.json
