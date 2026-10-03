@@ -2,12 +2,11 @@ import { readFile, writeFile } from 'node:fs/promises';
 
 const preparedPath = process.env.VCL_CLEF_PREPARED_INPUT;
 const outputPath = process.env.VCL_CLEF_OUTPUT ?? 'clef-vision-report.json';
-const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+const clefOrigin = process.env.CLEF_ORIGIN;
 const model = process.env.CLEF_MODEL ?? 'clef';
 
 if (!preparedPath) throw new Error('VCL_CLEF_PREPARED_INPUT is required');
-if (!accountId || !apiToken) throw new Error('Cloudflare credentials are required');
+if (!clefOrigin) throw new Error('CLEF_ORIGIN is required');
 if (!['clef', 'clef-flash'].includes(model)) throw new Error('CLEF_MODEL must be clef or clef-flash');
 
 const MODEL_ID = model === 'clef' ? '@cf/cloudflare/clef' : '@cf/cloudflare/clef-flash';
@@ -103,20 +102,16 @@ function probability(answer, key) {
 
 async function runClef(row) {
   const started = Date.now();
-  const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${MODEL_ID}`, {
+  const response = await fetch(clefOrigin, {
     method: 'POST',
-    headers: {
-      authorization: `Bearer ${apiToken}`,
-      'content-type': 'application/json',
-    },
+    headers: { 'content-type': 'application/json' },
     signal: AbortSignal.timeout(30000),
     body: JSON.stringify({
-      model,
       state: {
         task: 'Inspect only the selected product crop. Use visible pixels as evidence. Do not infer a famous brand or model from style alone. Choose unknown when identity evidence is insufficient.',
         selected_item_hint: row.selected_item ?? null,
       },
-      images: [imageFromDataUrl(row.source_image)],
+      images: [row.source_image],
       questions: {
         category: {
           type: 'choice',
@@ -144,7 +139,7 @@ async function runClef(row) {
   if (!response.ok || payload?.success === false) {
     throw new Error(payload?.errors?.[0]?.message ?? payload?.error ?? `Clef HTTP ${response.status}`);
   }
-  const result = payload?.result ?? payload;
+  const result = payload?.result?.result ?? payload?.result ?? payload;
   return { result, latency_ms: Date.now() - started };
 }
 
