@@ -67,6 +67,22 @@ jobs:
           pnpm build
           pnpm test
 
+      - name: Check CI commerce secret availability
+        run: |
+          node --input-type=module <<'NODE'
+          const names = ['OPENROUTER_API_KEY','BRAVE_SEARCH_API_KEY','ETSY_KEYSTRING','ETSY_SHARED_SECRET','SERPAPI_API_KEY','EBAY_PRODUCTION_CLIENT_ID','EBAY_PRODUCTION_CLIENT_SECRET'];
+          const present = Object.fromEntries(names.map((name) => [name, Boolean(process.env[name])]));
+          console.log(JSON.stringify(present));
+          NODE
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+          ETSY_KEYSTRING: ${{ secrets.ETSY_KEYSTRING }}
+          ETSY_SHARED_SECRET: ${{ secrets.ETSY_SHARED_SECRET }}
+          SERPAPI_API_KEY: ${{ secrets.SERPAPI_API_KEY }}
+          EBAY_PRODUCTION_CLIENT_ID: ${{ secrets.EBAY_PRODUCTION_CLIENT_ID }}
+          EBAY_PRODUCTION_CLIENT_SECRET: ${{ secrets.EBAY_PRODUCTION_CLIENT_SECRET }}
+
       - name: Freeze benchmark cases
         run: |
           node --input-type=module <<'NODE'
