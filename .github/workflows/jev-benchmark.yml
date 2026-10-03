@@ -1,4 +1,4 @@
-name: Jev vs Clef-Flash router benchmark
+name: Cloudflare Jev vs Clef-Flash router benchmark
 
 on:
   workflow_dispatch:
@@ -22,7 +22,6 @@ jobs:
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
       REPS: ${{ inputs.repetitions || '3' }}
 
     steps:
@@ -55,7 +54,7 @@ jobs:
             "main": "src/clef-benchmark-worker.ts",
             "compatibility_date": "2026-09-11",
             "previews": {
-              "vars": { "JEV_ROUTER_MODEL": "clef-flash" },
+              "vars": { "CLOUDFLARE_AI_GATEWAY_ID": "default" },
               "ai": { "binding": "AI" }
             }
           }
@@ -76,8 +75,6 @@ jobs:
           const cases = JSON.parse(readFileSync('tests/benchmark/clef/router-cases.json','utf8')).cases;
           const reps = Number(process.env.REPS || 3);
           const origin = readFileSync('clef-origin.txt','utf8').trim();
-          if (!process.env.AI_GATEWAY_API_KEY) throw new Error('Missing GitHub Actions secret: AI_GATEWAY_API_KEY');
-
           const rows = [];
           for (const c of cases) {
             for (const provider of ['jev','clef']) {
@@ -91,7 +88,7 @@ jobs:
                     method: 'POST',
                     headers: {
                       'content-type':'application/json',
-                      ...(provider === 'jev' ? { 'x-benchmark-vercel-key': process.env.AI_GATEWAY_API_KEY } : {}),
+                      'x-benchmark-router': provider === 'clef' ? 'clef' : 'jev',
                     },
                     body: JSON.stringify(c.input),
                   });
