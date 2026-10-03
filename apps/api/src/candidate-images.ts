@@ -358,12 +358,7 @@ export async function compareCandidateImages(
 
 
 export type ClefVerificationBinding = {
-  run(model: string, input: {
-    model: string;
-    state: unknown;
-    questions: Record<string, unknown>;
-    images?: string[];
-  }): Promise<unknown>;
+  run(model: string, input: unknown): Promise<unknown>;
 };
 
 function clefAnswerRoot(value: unknown): Record<string, unknown> {
