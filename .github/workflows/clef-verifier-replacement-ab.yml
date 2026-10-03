@@ -100,7 +100,25 @@ jobs:
           export VCL_CDP_PORT=9334
           export VCL_COST_PROFILE="$RUNNER_TEMP/clef-replacement-browser"
           export VCL_API_ORIGIN="https://api.vcl.article6.org"
-          node tests/cost/run-live.mjs
+
+          prep_ok=0
+          for attempt in 1 2 3; do
+            echo "Preparing shared vision, attempt $attempt/3"
+            pkill -f "remote-debugging-port=$VCL_CDP_PORT" 2>/dev/null || true
+            rm -rf "$VCL_COST_PROFILE" "$VCL_PREPARED_OUTPUT" || true
+            mkdir -p "$VCL_COST_PROFILE"
+            sleep 1
+            if node tests/cost/run-live.mjs; then
+              prep_ok=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$prep_ok" != "1" ]; then
+            echo "Shared vision preparation failed after 3 attempts."
+            exit 1
+          fi
+
           node --input-type=module <<'NODE'
           import { readFileSync, writeFileSync } from 'node:fs';
           const prepared = JSON.parse(readFileSync('clef-replacement-prepared.json', 'utf8'));
