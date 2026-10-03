@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/clef-vision-benchmark.yml'
       - 'tests/benchmark/clef-vision/**'
+      - 'apps/api/src/clef-vision-benchmark-worker.ts'
   workflow_dispatch:
     inputs:
       case_limit:
@@ -71,6 +72,23 @@ jobs:
           pnpm check
           pnpm build
 
+      - name: Create isolated Clef Workers AI preview
+        run: |
+          cat > "$RUNNER_TEMP/clef-benchmark-wrangler.jsonc" <<'JSON'
+          {
+            "$schema": "../../node_modules/wrangler/config-schema.json",
+            "name": "vcl-clef-benchmark",
+            "main": "apps/api/src/clef-vision-benchmark-worker.ts",
+            "compatibility_date": "2026-09-11",
+            "workers_dev": true,
+            "ai": { "binding": "AI" }
+          }
+          JSON
+          set -euo pipefail
+          output="$(pnpm dlx wrangler@4.135.0 preview --config "$RUNNER_TEMP/clef-benchmark-wrangler.jsonc" --worker-name vcl-api --name "clef-vision-$GITHUB_RUN_ID" --json)"
+          printf '%s\n' "$output" | tee clef-preview.log
+          printf '%s' "$output" | jq -er '.preview_urls[0] // .preview.urls[0]' > clef-origin.txt
+
       - name: Freeze valid benchmark cases
         run: |
           node --input-type=module <<'NODE'
@@ -111,11 +129,18 @@ jobs:
           VCL_CLEF_PREPARED_INPUT="$GITHUB_WORKSPACE/clef-gemini-prepared.json" \
           VCL_CLEF_OUTPUT="$GITHUB_WORKSPACE/clef-vision-report.json" \
           CLEF_MODEL="$CLEF_MODEL" \
+          CLEF_ORIGIN="$(cat clef-origin.txt)" \
           node tests/benchmark/clef-vision/run.mjs
 
-      - name: Print benchmark summary
+      - name: Print benchmark summary and enforce real Clef execution
         run: |
           jq '.summary' clef-vision-report.json
+          failed="$(jq -r '.summary.clef.failed_cases' clef-vision-report.json)"
+          if [ "$failed" != "0" ]; then
+            echo "Clef failed $failed benchmark cases. This run is invalid."
+            jq -r '.rows[] | select(.clef.error) | "\(.case_id): \(.clef.error)"' clef-vision-report.json
+            exit 1
+          fi
 
       - name: Upload benchmark artifacts
         if: always()
@@ -124,5 +149,6 @@ jobs:
           name: clef-vision-vs-gemini-${{ github.run_id }}
           path: |
             clef-benchmark-commit.txt
+            clef-preview.log
             clef-gemini-prepared.json
             clef-vision-report.json
