@@ -195,6 +195,10 @@ export default {
             type: 'noul',
             instructions: 'Is the candidate model/product-family identity supported by IMAGE 2 and supplied commerce metadata?'
           },
+          exact_model_variant_supported: {
+            type: 'noul',
+            instructions: 'Does the candidate support the exact same model/variant/version as the source hypothesis, including distinctions such as OG vs Classic, Pro, generation numbers, size/model codes, or named sub-variants? Answer low when only the broader family matches.'
+          },
           critical_contradiction: {
             type: 'noul',
             instructions: 'Is there a critical contradiction in product type, dominant color family, sleeve/form, visible branding, model markings, silhouette, or distinctive construction?'
@@ -223,6 +227,7 @@ export default {
       const sourceModelVisible = noul(answers.source_model_visible) ?? 0;
       const candidateBrandSupported = noul(answers.candidate_brand_supported) ?? 0;
       const candidateModelSupported = noul(answers.candidate_model_supported) ?? 0;
+      const exactModelVariantSupported = noul(answers.exact_model_variant_supported) ?? 0;
       const sourceBrand = body.source_description.brand_candidate ?? null;
       const sourceModel = body.source_description.model_candidate ?? null;
 
@@ -237,7 +242,8 @@ export default {
         && Boolean(sourceBrand && sourceModel)
         && titleSupportsIdentity(body.candidate.title, sourceBrand!, sourceModel!)
         && candidateBrandSupported >= 0.7
-        && candidateModelSupported >= 0.7;
+        && candidateModelSupported >= 0.7
+        && exactModelVariantSupported >= 0.8;
 
       if (source.brand && (sourceBrandVisible >= 0.7 || clefGroundedIdentity)) {
         source.brand = { ...source.brand, basis: 'image', confidence: Math.max(source.brand.confidence, clefGroundedIdentity ? 0.95 : 0.9) };
@@ -279,6 +285,7 @@ export default {
           source_model_visible: sourceModelVisible,
           candidate_brand_supported: candidateBrandSupported,
           candidate_model_supported: candidateModelSupported,
+          exact_model_variant_supported: exactModelVariantSupported,
           critical_contradiction: contradiction,
         },
         comparison,
