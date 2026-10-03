@@ -53,7 +53,10 @@ jobs:
             "name": "vcl-api",
             "main": "src/clef-benchmark-worker.ts",
             "compatibility_date": "2026-09-11",
-            "ai": { "binding": "AI" }
+            "previews": {
+              "vars": {},
+              "ai": { "binding": "AI" }
+            }
           }
           EOF
           cat > apps/api/.clef-router-only-wrangler.jsonc <<'EOF'
@@ -61,8 +64,10 @@ jobs:
             "name": "vcl-api",
             "main": "src/clef-benchmark-worker.ts",
             "compatibility_date": "2026-09-11",
-            "vars": { "JEV_ROUTER_MODEL": "clef-flash" },
-            "ai": { "binding": "AI" }
+            "previews": {
+              "vars": { "JEV_ROUTER_MODEL": "clef-flash" },
+              "ai": { "binding": "AI" }
+            }
           }
           EOF
 
