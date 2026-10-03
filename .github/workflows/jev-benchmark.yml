@@ -125,6 +125,7 @@ jobs:
                 ...shared,
                 JEV_MODE: mode,
                 JEV_DECISION_ROUTER: mode === 'off' ? 'false' : 'true',
+                JEV_ROUTER_MODEL: mode === 'off' ? '' : 'clef-flash',
               },
               ai: { binding: 'AI' },
             };
