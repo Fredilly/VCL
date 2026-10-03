@@ -1,0 +1,213 @@
+name: Clef verifier replacement A/B
+
+on:
+  pull_request:
+    branches: [experiment/clef-vision-vs-gemini]
+    paths:
+      - '.github/workflows/clef-verifier-replacement-ab.yml'
+      - 'apps/api/src/candidate-images.ts'
+      - 'apps/api/src/server.ts'
+  workflow_dispatch:
+    inputs:
+      case_limit:
+        description: Number of frozen cases to run (1-8)
+        required: false
+        default: '8'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clef-verifier-replacement-ab
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CASE_LIMIT: ${{ inputs.case_limit || '8' }}
+
+    steps:
+      - name: Checkout experiment
+        uses: actions/checkout@v4
+
+      - name: Record commit
+        run: git rev-parse HEAD | tee clef-replacement-commit.txt
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install headless Chromium
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes chromium-browser || sudo apt-get install --yes chromium
+
+      - name: Verify branch
+        run: |
+          pnpm --filter @vcl/extension exec wxt prepare
+          pnpm check
+          pnpm build
+          pnpm test
+
+      - name: Freeze benchmark cases
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const f = JSON.parse(readFileSync('tests/manual/spike-5/cases-v2.json', 'utf8'));
+          const identities = {
+            's5-01': { brand: 'Patagonia', model: 'Better Sweater' },
+            's5-02': { brand: 'Patagonia', model: 'Better Sweater' },
+            's5-03': { brand: 'Seiko', model: 'SKX007' },
+            's5-04': { brand: 'Seiko', model: 'SKX007' },
+            's5-05': { brand: 'Coach', model: null },
+            's5-06': { brand: 'Coach', model: null },
+            's5-07': { brand: 'Adidas', model: 'Samba OG' },
+            's5-08': { brand: 'Adidas', model: 'Samba OG' }
+          };
+          f.cases = f.cases
+            .filter((c) => c.valid !== false)
+            .slice(0, Number(process.env.CASE_LIMIT || 8))
+            .map((c) => ({ ...c, expected_identity: identities[c.id] }));
+          writeFileSync(process.env.RUNNER_TEMP + '/clef-replacement-cases.json', JSON.stringify(f));
+          NODE
+
+      - name: Prepare shared production vision once
+        run: |
+          export VCL_COST_CASES="$RUNNER_TEMP/clef-replacement-cases.json"
+          export VCL_COST_LIMIT="$CASE_LIMIT"
+          export VCL_HEADLESS=1
+          export VCL_FROZEN_FRAME_DIR="$GITHUB_WORKSPACE/tests/benchmark/jev/frames"
+          export VCL_PREPARE_ONLY=1
+          export VCL_PREPARED_OUTPUT="$GITHUB_WORKSPACE/clef-replacement-prepared.json"
+          export VCL_CDP_PORT=9334
+          export VCL_COST_PROFILE="$RUNNER_TEMP/clef-replacement-browser"
+          export VCL_API_ORIGIN="https://api.vcl.article6.org"
+          node tests/cost/run-live.mjs
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const prepared = JSON.parse(readFileSync('clef-replacement-prepared.json', 'utf8'));
+          const count = prepared.rows?.length ?? 0;
+          if (!count) throw new Error('No prepared rows');
+          writeFileSync('clef-replacement-count.txt', String(count));
+          NODE
+
+      - name: Run current production verifier baseline
+        run: |
+          VCL_API_ORIGIN="https://api.vcl.article6.org" \
+          VCL_PREPARED_INPUT="$GITHUB_WORKSPACE/clef-replacement-prepared.json" \
+          VCL_PREPARED_CASE_COUNT="$(cat clef-replacement-count.txt)" \
+          VCL_COST_OUTPUT="$GITHUB_WORKSPACE/clef-replacement-baseline.json" \
+          node tests/cost/run-prepared-commerce.mjs
+
+      - name: Create full Scoop preview with Clef verifier
+        run: |
+          cp apps/api/wrangler.jsonc apps/api/wrangler.clef-preview.jsonc
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('apps/api/wrangler.clef-preview.jsonc')
+          s=p.read_text()
+          s=s.replace('"VERIFIED_PRODUCT_TEST_MODE": "false"', '"VERIFIED_PRODUCT_TEST_MODE": "false",\n    "CLEF_VERIFICATION_BENCHMARK": "true"')
+          s=s.replace('"ai": {\n    "binding": "AI"\n  },', '"ai": {\n    "binding": "AI"\n  },\n  "previews": {\n    "ai": { "binding": "AI" }\n  },')
+          p.write_text(s)
+          PY
+          set -euo pipefail
+          output="$(pnpm dlx wrangler@4.135.0 preview --config apps/api/wrangler.clef-preview.jsonc --worker-name vcl-api --name "clef-verifier-$GITHUB_RUN_ID" --json)"
+          printf '%s\n' "$output" | tee clef-replacement-preview.log
+          printf '%s' "$output" | jq -er '.preview_urls[0] // .preview.urls[0]' > clef-replacement-origin.txt
+
+      - name: Run Clef replacement verifier
+        run: |
+          VCL_API_ORIGIN="$(cat clef-replacement-origin.txt)" \
+          VCL_PREPARED_INPUT="$GITHUB_WORKSPACE/clef-replacement-prepared.json" \
+          VCL_PREPARED_CASE_COUNT="$(cat clef-replacement-count.txt)" \
+          VCL_COST_OUTPUT="$GITHUB_WORKSPACE/clef-replacement-experiment.json" \
+          node tests/cost/run-prepared-commerce.mjs
+
+      - name: Compare
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const load=p=>JSON.parse(readFileSync(p,'utf8'));
+          const B=load('clef-replacement-baseline.json'), E=load('clef-replacement-experiment.json');
+          const expected={
+            's5-01':{brand:'Patagonia',model:'Better Sweater'},'s5-02':{brand:'Patagonia',model:'Better Sweater'},
+            's5-03':{brand:'Seiko',model:'SKX007'},'s5-04':{brand:'Seiko',model:'SKX007'},
+            's5-05':{brand:'Coach',model:null},'s5-06':{brand:'Coach',model:null},
+            's5-07':{brand:'Adidas',model:'Samba OG'},'s5-08':{brand:'Adidas',model:'Samba OG'}
+          };
+          const norm=v=>String(v??'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+          const supports=(p,x)=>{
+            if(!p||!x)return false;
+            const t=norm([p.title,p.brand,p.model].filter(Boolean).join(' '));
+            const b=norm(x.brand),m=norm(x.model);
+            return (!b||t.includes(b))&&(!m||m.split(' ').filter(Boolean).every(k=>t.includes(k)));
+          };
+          const pctl=(v,q)=>{v=v.filter(Number.isFinite).sort((a,b)=>a-b);return v.length?v[Math.min(v.length-1,Math.ceil(v.length*q)-1)]:null};
+          const metrics=d=>{
+            const r=d.runs??[];
+            const req=r.reduce((n,x)=>n+Number(x.verification_usage?.requests??0),0);
+            const cost=r.reduce((n,x)=>n+Number(x.verification_usage?.cost_usd??0),0);
+            return {
+              cases:r.length,
+              useful_rate:r.length?r.filter(x=>x.notes?.includes('state=RESULTS')).length/r.length:null,
+              top1_expected_identity_rate:r.length?r.filter(x=>supports(x.product_identities?.[0],expected[x.case_id])).length/r.length:null,
+              false_exact:r.reduce((n,x)=>n+Number(x.false_exact??0),0),
+              unsupported_likely:r.reduce((n,x)=>n+Number(x.unsupported_likely??0),0),
+              verification_calls:req,
+              verification_cost_usd:cost,
+              verification_provider:[...new Set(r.map(x=>x.verification_usage?.provider).filter(Boolean))],
+              p50_ms:pctl(r.map(x=>x.latency_ms),.5),
+              p95_ms:pctl(r.map(x=>x.latency_ms),.95),
+              p50_commerce_ms:pctl(r.map(x=>x.commerce_latency_ms),.5),
+              p95_commerce_ms:pctl(r.map(x=>x.commerce_latency_ms),.95),
+              p50_model_verification_ms:pctl(r.map(x=>x.timing?.candidate_model_verification_ms),.5),
+              p95_model_verification_ms:pctl(r.map(x=>x.timing?.candidate_model_verification_ms),.95)
+            };
+          };
+          const pct=(a,b)=>a?((b-a)/a*100):null;
+          const baseline=metrics(B),clef=metrics(E);
+          const report={
+            commit:readFileSync('clef-replacement-commit.txt','utf8').trim(),
+            baseline,clef,
+            delta:{
+              useful_rate:clef.useful_rate-baseline.useful_rate,
+              top1_expected_identity_rate:clef.top1_expected_identity_rate-baseline.top1_expected_identity_rate,
+              p50_ms_pct:pct(baseline.p50_ms,clef.p50_ms),
+              p95_ms_pct:pct(baseline.p95_ms,clef.p95_ms),
+              p50_model_verification_ms_pct:pct(baseline.p50_model_verification_ms,clef.p50_model_verification_ms),
+              verification_calls_pct:pct(baseline.verification_calls,clef.verification_calls),
+              verification_cost_usd:clef.verification_cost_usd-baseline.verification_cost_usd
+            },
+            valid_clef_execution:clef.verification_provider.includes('clef')&&clef.verification_calls>0,
+            trust_gate:clef.false_exact===0&&clef.unsupported_likely===0
+          };
+          writeFileSync('clef-replacement-report.json',JSON.stringify(report,null,2)+'\n');
+          console.log(JSON.stringify(report,null,2));
+          if(!report.valid_clef_execution) throw new Error('Clef did not actually replace verification calls');
+          if(!report.trust_gate) throw new Error('Clef replacement introduced false EXACT/unsupported LIKELY');
+          NODE
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clef-verifier-replacement-ab-${{ github.run_id }}
+          path: |
+            clef-replacement-commit.txt
+            clef-replacement-preview.log
+            clef-replacement-prepared.json
+            clef-replacement-baseline.json
+            clef-replacement-experiment.json
+            clef-replacement-report.json
