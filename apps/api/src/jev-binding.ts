@@ -4,6 +4,7 @@ import { VercelJevBinding } from './vercel-jev.js';
 export type JevBindingEnv = {
   AI?: WorkersAiBinding;
   AI_GATEWAY_API_KEY?: string;
+  JEV_ROUTER_MODEL?: string;
 };
 
 const CLEF_FLASH_MODEL = '@cf/cloudflare/clef-flash';
@@ -13,8 +14,6 @@ function clefFlashBinding(ai: WorkersAiBinding): WorkersAiBinding {
   return {
     modelId: CLEF_FLASH_MODEL,
     run(_model, input) {
-      // Clef is System One / Jev API compatible, but Workers AI also expects
-      // the Clef model selector in the request payload.
       const payload = { ...input, model: CLEF_FLASH_SELECTOR };
       return ai.run(CLEF_FLASH_MODEL, payload);
     },
@@ -22,12 +21,14 @@ function clefFlashBinding(ai: WorkersAiBinding): WorkersAiBinding {
 }
 
 export function resolveJevBinding(env: JevBindingEnv): WorkersAiBinding | undefined {
-  // EXPERIMENT BRANCH ONLY (#327): route the existing Jev decision schema to
-  // Clef-Flash through the Workers AI binding. This branch is benchmark-only
-  // and must not be merged until frozen-case results satisfy the trust gates.
-  if (env.AI) return clefFlashBinding(env.AI);
+  // Experiment-only selector. Default behavior remains unchanged so ordinary
+  // runtime and tests still prefer the existing Jev route.
+  if (env.JEV_ROUTER_MODEL === CLEF_FLASH_SELECTOR && env.AI) {
+    return clefFlashBinding(env.AI);
+  }
 
-  // Preserve a fail-open fallback for environments without Workers AI.
+  // Existing production behavior: prefer Vercel Jev, then native Workers AI.
   if (env.AI_GATEWAY_API_KEY) return new VercelJevBinding(env.AI_GATEWAY_API_KEY);
+  if (env.AI) return env.AI;
   return undefined;
 }
