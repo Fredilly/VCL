@@ -1,5 +1,6 @@
 import { routeWithJev, type JevRouterInput } from './jev-router.js';
 import { resolveJevBinding } from './jev-binding.js';
+import { VercelJevBinding } from './vercel-jev.js';
 import type { WorkersAiBinding } from './jev.js';
 
 interface Env {
@@ -19,7 +20,12 @@ export default {
     } catch {
       return json({ error: 'invalid json' }, 400);
     }
-    const binding = resolveJevBinding(env);
+
+    const vercelKey = request.headers.get('x-benchmark-vercel-key');
+    const binding = vercelKey
+      ? new VercelJevBinding(vercelKey)
+      : resolveJevBinding(env);
+
     if (!binding) return json({ error: 'router binding unavailable' }, 503);
     const result = await routeWithJev(input, binding, 5000);
     return json(result, result.telemetry.failed ? 502 : 200);
