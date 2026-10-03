@@ -9,7 +9,7 @@ import { parseSelectionPoint, TargetLocalizationError, type SelectionPoint } fro
 import { CommerceNoResultsError, buildProductQueryVariants, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
 import { classifyCanonicalRelationship, highConfidenceMetadataContradiction, verifyCandidate, rankVerified } from './candidate-verification.js';
 import { canonical } from './verification-evidence.js';
-import { candidateKey, compareCandidateImages, parseSourceImage, imageRequestBudget } from './candidate-images.js';
+import { candidateKey, compareCandidateImages, compareCandidateImagesWithClef, parseSourceImage, imageRequestBudget } from './candidate-images.js';
 import type { ImageComparison } from './verification-evidence.js';
 import { EbayAuth } from './ebay-auth.js';
 import { EbayCommerceProvider, ebayItemIdForLiveLookup } from './ebay-commerce.js';
@@ -74,6 +74,7 @@ export interface Env {
   ALPHA_CREATOR_CONTENT_MAP?: string;
   VERIFIED_PRODUCT_MAPPINGS_JSON?: string;
   VERIFIED_PRODUCT_TEST_MODE?: string;
+  CLEF_VERIFICATION_BENCHMARK?: string;
   ALPHA_INSTALL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
   ALPHA_GLOBAL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
   AI?: WorkersAiBinding & CloudflareVisionBinding;
@@ -86,6 +87,14 @@ export interface Env {
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
+
+function imageVerifierForEnv(env: Env): typeof compareCandidateImages {
+  if (env.CLEF_VERIFICATION_BENCHMARK === 'true' && env.AI) {
+    return ((apiKey, model, source, description, products, context, budget) =>
+      compareCandidateImagesWithClef(env.AI!, apiKey, model, source, description, products, context, budget)) as typeof compareCandidateImages;
+  }
+  return compareCandidateImages;
+}
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type,x-scoop-install-id,x-scoop-admin-session,x-scoop-alpha-token', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
 
 type VisionProviderName = 'openrouter' | 'gemini' | 'groq-3.8' | 'groq-3.6' | 'cloudflare';
@@ -526,7 +535,7 @@ export async function refreshVerifiedOffers(
       const model = useOpenRouter
         ? (visual.env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL)
         : (visual.env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
-      const images = await compareCandidateImages(
+      const images = await imageVerifierForEnv(visual.env)(
         key,
         model,
         visual.sourceImage,
@@ -825,7 +834,7 @@ async function confirmSameVideoReuseWithImage(
 
   if (!rows.length) return { ...empty, decision: { ...noDecision, reason: 'visual_unavailable' } };
 
-  const images = await compareCandidateImages(
+  const images = await imageVerifierForEnv(env)(
     key,
     model,
     sourceImage,
@@ -960,7 +969,7 @@ async function confirmCrossVideoReuseWithImage(
   const model = useOpenRouter
     ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL)
     : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
-  const images = await compareCandidateImages(
+  const images = await imageVerifierForEnv(env)(
     key,
     model,
     sourceImage,
@@ -2174,7 +2183,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           : queries;
       const started = Date.now();
       const markingVerifyV1 = record.benchmark_marking_verify_v1 === true;
-      const resolved = await resolveProducts(routedProviders, routedQueries, description, env, context, sourceImage, compareCandidateImages, routing, markingVerifyV1);
+      const resolved = await resolveProducts(routedProviders, routedQueries, description, env, context, sourceImage, imageVerifierForEnv(env), routing, markingVerifyV1);
       if (sameVideoVisualCheck.usage) {
         const usage = resolved.cost_usage.verification_usage;
         usage.requests += sameVideoVisualCheck.usage.requests ?? 0;
