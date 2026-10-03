@@ -126,8 +126,14 @@ jobs:
           CLEF_VERIFY_CANDIDATE_LIMIT="$CANDIDATE_LIMIT" \
           node tests/benchmark/clef-verification/run.mjs
 
-      - name: Print summary
-        run: jq '.summary' clef-verification-report.json
+      - name: Print summary and enforce real Clef execution
+        run: |
+          jq '.summary' clef-verification-report.json
+          calls="$(jq -r '.summary.clef_assisted.clef_calls' clef-verification-report.json)"
+          if [ "$calls" = "0" ]; then
+            echo "Clef received zero candidate verification calls. Benchmark is invalid."
+            exit 1
+          fi
 
       - name: Upload artifacts
         if: always()
