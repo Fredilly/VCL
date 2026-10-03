@@ -1,11 +1,11 @@
 import { routeWithJev, type JevRouterInput } from './jev-router.js';
 import { resolveJevBinding } from './jev-binding.js';
-import { VercelJevBinding } from './vercel-jev.js';
 import type { WorkersAiBinding } from './jev.js';
 
 interface Env {
   AI?: WorkersAiBinding;
   JEV_ROUTER_MODEL?: string;
+  CLOUDFLARE_AI_GATEWAY_ID?: string;
 }
 
 const json = (body: unknown, status = 200) =>
@@ -21,10 +21,10 @@ export default {
       return json({ error: 'invalid json' }, 400);
     }
 
-    const vercelKey = request.headers.get('x-benchmark-vercel-key');
-    const binding = vercelKey
-      ? new VercelJevBinding(vercelKey)
-      : resolveJevBinding(env);
+    const selector = request.headers.get('x-benchmark-router') === 'clef'
+      ? 'clef-flash'
+      : 'jev-cloudflare';
+    const binding = resolveJevBinding({ ...env, JEV_ROUTER_MODEL: selector });
 
     if (!binding) return json({ error: 'router binding unavailable' }, 503);
     const result = await routeWithJev(input, binding, 5000);
