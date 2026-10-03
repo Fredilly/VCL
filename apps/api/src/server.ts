@@ -1058,10 +1058,11 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     }>,
   };
   const commerceCalls: Record<string, number> = {};
-  const useOpenRouterVerification = env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
+  const useClefVerification = env.CLEF_VERIFICATION_BENCHMARK === 'true' && Boolean(env.AI);
+  const useOpenRouterVerification = !useClefVerification && env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
   const verificationUsage = {
-    provider: useOpenRouterVerification ? 'openrouter' : 'gemini',
-    model: useOpenRouterVerification ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite'),
+    provider: useClefVerification ? 'clef' : useOpenRouterVerification ? 'openrouter' : 'gemini',
+    model: useClefVerification ? '@cf/cloudflare/clef' : useOpenRouterVerification ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite'),
     requests: 0,
     prompt_tokens: 0,
     completion_tokens: 0,
@@ -1128,9 +1129,9 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     });
 
     const runImageVerification = async () => {
-      const verificationKey = useOpenRouterVerification ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY;
+      const verificationKey = useClefVerification ? 'workers-ai-binding' : useOpenRouterVerification ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY;
       if (!sourceImage || !verificationKey || !viable.length) return;
-      const verificationModel = useOpenRouterVerification ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
+      const verificationModel = useClefVerification ? '@cf/cloudflare/clef' : useOpenRouterVerification ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
       const images = await imageVerifier(
         verificationKey,
         verificationModel,
@@ -1159,7 +1160,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     if (!lightMode) await runImageVerification();
 
     let decisions = viable.map((product) => ({ product, decision: verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context, useMarkingEvidence) }));
-    if (lightMode && viable.length && !decisions.some(({ decision }) => decision.product) && sourceImage && (useOpenRouterVerification ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY)) {
+    if (lightMode && viable.length && !decisions.some(({ decision }) => decision.product) && sourceImage && (useClefVerification || (useOpenRouterVerification ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY))) {
       verification.light_escalations++;
       await runImageVerification();
       decisions = viable.map((product) => ({ product, decision: verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context, useMarkingEvidence) }));
