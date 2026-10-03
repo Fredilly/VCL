@@ -1,0 +1,241 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "strong-watch",
+      "input": {
+        "description": {
+          "category": "watch",
+          "subcategory": "digital watch",
+          "confidence": 0.95,
+          "identity_confidence": 0.9,
+          "visible_text": [
+            "CASIO"
+          ],
+          "logos_markings": [
+            "CASIO"
+          ],
+          "distinctive_features": [
+            "black resin band"
+          ]
+        },
+        "multi_frame_available": true,
+        "provider_context": {
+          "commerce_providers_available": 2,
+          "vision_provider_available": true
+        },
+        "retrieval_context": {
+          "has_brand_candidate": true,
+          "has_model_candidate": true,
+          "has_distinctive_text": true,
+          "has_category": true
+        }
+      }
+    },
+    {
+      "id": "weak-watch",
+      "input": {
+        "description": {
+          "category": "watch",
+          "subcategory": "watch",
+          "confidence": 0.72,
+          "identity_confidence": 0.35,
+          "visible_text": [],
+          "logos_markings": [],
+          "distinctive_features": [
+            "black round face"
+          ]
+        },
+        "multi_frame_available": true,
+        "provider_context": {
+          "commerce_providers_available": 2,
+          "vision_provider_available": true
+        },
+        "retrieval_context": {
+          "has_brand_candidate": false,
+          "has_model_candidate": false,
+          "has_distinctive_text": false,
+          "has_category": true
+        }
+      }
+    },
+    {
+      "id": "apparel-sweater",
+      "input": {
+        "description": {
+          "category": "apparel",
+          "subcategory": "sweater",
+          "confidence": 0.96,
+          "identity_confidence": 0.94,
+          "visible_text": [
+            "BOSS"
+          ],
+          "logos_markings": [
+            "BOSS"
+          ],
+          "distinctive_features": [
+            "long sleeve",
+            "crew neck"
+          ]
+        },
+        "multi_frame_available": false,
+        "provider_context": {
+          "commerce_providers_available": 3,
+          "vision_provider_available": true
+        },
+        "retrieval_context": {
+          "has_brand_candidate": true,
+          "has_model_candidate": false,
+          "has_distinctive_text": true,
+          "has_category": true
+        }
+      }
+    },
+    {
+      "id": "shoe-samba",
+      "input": {
+        "description": {
+          "category": "shoes",
+          "subcategory": "sneaker",
+          "confidence": 0.93,
+          "identity_confidence": 0.82,
+          "visible_text": [
+            "SAMBA"
+          ],
+          "logos_markings": [
+            "adidas"
+          ],
+          "distinctive_features": [
+            "three stripes",
+            "gum sole"
+          ]
+        },
+        "multi_frame_available": true,
+        "provider_context": {
+          "commerce_providers_available": 3,
+          "vision_provider_available": true
+        },
+        "retrieval_context": {
+          "has_brand_candidate": true,
+          "has_model_candidate": true,
+          "has_distinctive_text": true,
+          "has_category": true
+        }
+      }
+    },
+    {
+      "id": "bag-weak",
+      "input": {
+        "description": {
+          "category": "bags",
+          "subcategory": "handbag",
+          "confidence": 0.84,
+          "identity_confidence": 0.4,
+          "visible_text": [],
+          "logos_markings": [],
+          "distinctive_features": [
+            "brown leather",
+            "top handle"
+          ]
+        },
+        "multi_frame_available": true,
+        "provider_context": {
+          "commerce_providers_available": 3,
+          "vision_provider_available": true
+        },
+        "retrieval_context": {
+          "has_brand_candidate": false,
+          "has_model_candidate": false,
+          "has_distinctive_text": false,
+          "has_category": true
+        }
+      }
+    },
+    {
+      "id": "fragrance",
+      "input": {
+        "description": {
+          "category": "fragrance",
+          "subcategory": "eau de parfum",
+          "confidence": 0.97,
+          "identity_confidence": 0.91,
+          "visible_text": [
+            "AVENTUS"
+          ],
+          "logos_markings": [
+            "CREED"
+          ],
+          "distinctive_features": [
+            "black label",
+            "clear bottle"
+          ]
+        },
+        "multi_frame_available": false,
+        "provider_context": {
+          "commerce_providers_available": 2,
+          "vision_provider_available": true
+        },
+        "retrieval_context": {
+          "has_brand_candidate": true,
+          "has_model_candidate": true,
+          "has_distinctive_text": true,
+          "has_category": true
+        }
+      }
+    },
+    {
+      "id": "non-commerce-scene",
+      "input": {
+        "description": {
+          "category": "background",
+          "subcategory": "room",
+          "confidence": 0.9,
+          "identity_confidence": 0.1,
+          "visible_text": [],
+          "logos_markings": [],
+          "distinctive_features": []
+        },
+        "multi_frame_available": false,
+        "provider_context": {
+          "commerce_providers_available": 3,
+          "vision_provider_available": true
+        },
+        "retrieval_context": {
+          "has_brand_candidate": false,
+          "has_model_candidate": false,
+          "has_distinctive_text": false,
+          "has_category": true
+        }
+      }
+    },
+    {
+      "id": "ambiguous-shirt",
+      "input": {
+        "description": {
+          "category": "apparel",
+          "subcategory": "t-shirt",
+          "confidence": 0.78,
+          "identity_confidence": 0.28,
+          "visible_text": [
+            "NEW YORK"
+          ],
+          "logos_markings": [],
+          "distinctive_features": [
+            "white graphic tee"
+          ]
+        },
+        "multi_frame_available": true,
+        "provider_context": {
+          "commerce_providers_available": 3,
+          "vision_provider_available": true
+        },
+        "retrieval_context": {
+          "has_brand_candidate": false,
+          "has_model_candidate": false,
+          "has_distinctive_text": true,
+          "has_category": true
+        }
+      }
+    }
+  ]
+}
