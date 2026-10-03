@@ -22,6 +22,7 @@ jobs:
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
       REPS: ${{ inputs.repetitions || '3' }}
 
     steps:
@@ -48,17 +49,6 @@ jobs:
 
       - name: Prepare isolated router preview configs
         run: |
-          cat > apps/api/.jev-router-only-wrangler.jsonc <<'EOF'
-          {
-            "name": "vcl-api",
-            "main": "src/clef-benchmark-worker.ts",
-            "compatibility_date": "2026-09-11",
-            "previews": {
-              "vars": {},
-              "ai": { "binding": "AI" }
-            }
-          }
-          EOF
           cat > apps/api/.clef-router-only-wrangler.jsonc <<'EOF'
           {
             "name": "vcl-api",
@@ -70,13 +60,6 @@ jobs:
             }
           }
           EOF
-
-      - name: Create Jev preview
-        run: |
-          set -euo pipefail
-          output="$(pnpm dlx wrangler@4.135.0 preview --config apps/api/.jev-router-only-wrangler.jsonc --worker-name vcl-api --name "jev-baseline-$GITHUB_RUN_ID" --json)"
-          printf '%s\n' "$output" | tee jev-preview-upload.log
-          printf '%s' "$output" | jq -er '.preview_urls[0] // .preview.urls[0]' > jev-origin.txt
 
       - name: Create Clef-Flash preview
         run: |
@@ -92,14 +75,12 @@ jobs:
 
           const cases = JSON.parse(readFileSync('tests/benchmark/clef/router-cases.json','utf8')).cases;
           const reps = Number(process.env.REPS || 3);
-          const origins = {
-            jev: readFileSync('jev-origin.txt','utf8').trim(),
-            clef: readFileSync('clef-origin.txt','utf8').trim(),
-          };
+          const origin = readFileSync('clef-origin.txt','utf8').trim();
+          if (!process.env.AI_GATEWAY_API_KEY) throw new Error('Missing GitHub Actions secret: AI_GATEWAY_API_KEY');
 
           const rows = [];
           for (const c of cases) {
-            for (const [provider, origin] of Object.entries(origins)) {
+            for (const provider of ['jev','clef']) {
               for (let i = 0; i < reps; i++) {
                 const started = Date.now();
                 let status = 0;
@@ -108,7 +89,10 @@ jobs:
                 try {
                   const res = await fetch(origin, {
                     method: 'POST',
-                    headers: { 'content-type':'application/json' },
+                    headers: {
+                      'content-type':'application/json',
+                      ...(provider === 'jev' ? { 'x-benchmark-vercel-key': process.env.AI_GATEWAY_API_KEY } : {}),
+                    },
                     body: JSON.stringify(c.input),
                   });
                   status = res.status;
@@ -186,7 +170,6 @@ jobs:
         if: always()
         continue-on-error: true
         run: |
-          pnpm dlx wrangler@4.135.0 preview delete --worker-name vcl-api --name "jev-baseline-$GITHUB_RUN_ID" --skip-confirmation || true
           pnpm dlx wrangler@4.135.0 preview delete --worker-name vcl-api --name "clef-flash-$GITHUB_RUN_ID" --skip-confirmation || true
 
       - name: Upload benchmark artifacts
@@ -195,9 +178,7 @@ jobs:
         with:
           name: clef-router-benchmark-${{ github.run_id }}
           path: |
-            jev-origin.txt
             clef-origin.txt
-            jev-preview-upload.log
             clef-preview-upload.log
             clef-router-rows.json
             clef-router-report.json
