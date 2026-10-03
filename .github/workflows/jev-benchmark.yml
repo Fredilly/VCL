@@ -42,7 +42,7 @@ jobs:
 
       - name: Verify experiment
         run: |
-          pnpm check
+          pnpm --filter @vcl/api check
           pnpm --filter @vcl/api build
           node --test apps/api/tests/jev-router.test.mjs
 
