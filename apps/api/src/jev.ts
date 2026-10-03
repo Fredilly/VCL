@@ -27,12 +27,14 @@ export interface WorkersAiBinding {
   run(model: string, input: {
     state: unknown;
     questions: JevQuestions;
+    images?: string[];
   }): Promise<unknown>;
 }
 
 export interface JevEvaluationInput {
   state: unknown;
   questions: JevQuestions;
+  images?: string[];
 }
 
 export class JevJudgmentProvider {
