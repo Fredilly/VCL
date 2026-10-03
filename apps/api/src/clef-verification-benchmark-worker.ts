@@ -113,6 +113,20 @@ function choiceConfidence(answer: unknown, selected: string): number {
   return Number.isFinite(confidence) && confidence >= 0 && confidence <= 1 ? confidence : 0.75;
 }
 
+function normalized(value: string | null | undefined): string {
+  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function titleSupportsIdentity(title: string, brand: string, model: string): boolean {
+  const text = ` ${normalized(title)} `;
+  const brandText = normalized(brand);
+  const modelTokens = normalized(model).split(' ').filter(Boolean);
+  return Boolean(brandText)
+    && text.includes(` ${brandText} `)
+    && modelTokens.length > 0
+    && modelTokens.every((token) => text.includes(` ${token} `));
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method !== 'POST') return json({ error: 'POST required' }, 405);
@@ -205,24 +219,50 @@ export default {
       const source = sourceEvidence(body.source_description);
       const candidate = candidateEvidence(body.candidate);
 
-      if (source.brand && (noul(answers.source_brand_visible) ?? 0) >= 0.7) {
-        source.brand = { ...source.brand, basis: 'image', confidence: Math.max(source.brand.confidence, 0.9) };
+      const sourceBrandVisible = noul(answers.source_brand_visible) ?? 0;
+      const sourceModelVisible = noul(answers.source_model_visible) ?? 0;
+      const candidateBrandSupported = noul(answers.candidate_brand_supported) ?? 0;
+      const candidateModelSupported = noul(answers.candidate_model_supported) ?? 0;
+      const sourceBrand = body.source_description.brand_candidate ?? null;
+      const sourceModel = body.source_description.model_candidate ?? null;
+
+      // Experimental Clef adapter: a same-product decision can count as grounded identity
+      // only when the source identity hypothesis is already high-confidence, the candidate
+      // title independently contains both brand and model, Clef supports both candidate
+      // identity fields, and there is no meaningful contradiction. This is deliberately
+      // stricter than merely trusting the same_product label.
+      const clefGroundedIdentity = relation === 'same_product'
+        && contradiction < 0.3
+        && Number(body.source_description.identity_confidence ?? 0) >= 0.85
+        && Boolean(sourceBrand && sourceModel)
+        && titleSupportsIdentity(body.candidate.title, sourceBrand!, sourceModel!)
+        && candidateBrandSupported >= 0.7
+        && candidateModelSupported >= 0.7;
+
+      if (source.brand && (sourceBrandVisible >= 0.7 || clefGroundedIdentity)) {
+        source.brand = { ...source.brand, basis: 'image', confidence: Math.max(source.brand.confidence, clefGroundedIdentity ? 0.95 : 0.9) };
       } else {
         delete source.brand;
       }
-      if (source.model && (noul(answers.source_model_visible) ?? 0) >= 0.7) {
-        source.model = { ...source.model, basis: 'image', confidence: Math.max(source.model.confidence, 0.9) };
+      if (source.model && (sourceModelVisible >= 0.7 || clefGroundedIdentity)) {
+        source.model = { ...source.model, basis: 'image', confidence: Math.max(source.model.confidence, clefGroundedIdentity ? 0.95 : 0.9) };
       } else {
         delete source.model;
       }
-      if ((noul(answers.candidate_brand_supported) ?? 0) < 0.6) delete candidate.brand;
-      if ((noul(answers.candidate_model_supported) ?? 0) < 0.6) delete candidate.model;
+
+      if (clefGroundedIdentity && sourceBrand && sourceModel) {
+        candidate.brand = { value: sourceBrand, confidence: 0.95, basis: 'image' };
+        candidate.model = { value: sourceModel, confidence: 0.95, basis: 'image' };
+      } else {
+        if (candidateBrandSupported < 0.6) delete candidate.brand;
+        if (candidateModelSupported < 0.6) delete candidate.model;
+      }
 
       const comparison: ImageComparison = {
         source,
         candidate,
         similarity,
-        confidence: Math.max(0.65, Math.min(0.99, relationConfidence)),
+        confidence: clefGroundedIdentity ? 0.95 : Math.max(0.65, Math.min(0.99, relationConfidence)),
         matching_details: relation === 'same_product'
           ? ['Clef found strong product-level visual agreement']
           : relation === 'same_family'
@@ -233,6 +273,14 @@ export default {
       const decision = verifyCandidate(body.source_description, body.candidate, comparison);
       return json({
         relationship: relation,
+        adapter: {
+          clef_grounded_identity: clefGroundedIdentity,
+          source_brand_visible: sourceBrandVisible,
+          source_model_visible: sourceModelVisible,
+          candidate_brand_supported: candidateBrandSupported,
+          candidate_model_supported: candidateModelSupported,
+          critical_contradiction: contradiction,
+        },
         comparison,
         decision,
         timing: {
