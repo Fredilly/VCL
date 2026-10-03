@@ -108,7 +108,7 @@ for (const row of rows) {
 
   for (let i = 0; i < Math.min(candidateLimit, baselineProducts.length); i++) {
     const product = baselineProducts[i];
-    if (!product?.image_reference || !['EXACT', 'LIKELY'].includes(product?.result_class)) continue;
+    if (!product?.image_reference) continue;
     const started = Date.now();
     clefCalls++;
     try {
@@ -207,8 +207,8 @@ const report = {
   methodology: {
     baseline: 'Current production Scoop resolve-products including current verification.',
     clef_assisted: 'Same returned candidates, with Clef allowed only to preserve or downgrade existing EXACT/LIKELY labels. Clef never promotes a candidate.',
-    purpose: 'Measure whether Clef can safely act as a fast verification/veto layer before testing replacement of the current verifier.',
-    limitation: 'This run adds Clef after the current verifier, so end-to-end Clef-assisted latency/cost is incremental, not yet a replacement estimate.',
+    purpose: 'Measure whether Clef can safely judge the top retrieved commerce candidates before testing replacement of the current verifier.',
+    limitation: 'This run adds Clef after current retrieval/verification and evaluates top candidates regardless of their current label. It measures candidate-judgment safety and speed, not replacement savings yet.',
   },
   summary: {
     attempted_cases: rows.length,
