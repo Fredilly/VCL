@@ -25,8 +25,11 @@ Each extension install creates one random anonymous UUID in extension local stor
 
 It is not an account ID and is not tied to email, URL, title, browsing history, or frame content.
 
-Current deployed limit:
+Current deployed limits:
 - 6 product-resolution Scoops per install per minute
+- 100 product-resolution Scoops per invite per UTC calendar month, shared across that invite's installs
+
+The monthly cap is enforced in the alpha access ledger and resets on the first day of each UTC month.
 
 ## Global guardrail
 
@@ -37,6 +40,6 @@ This is a runaway-usage brake, not exact billing/accounting. Cloudflare rate-lim
 
 ## Cohort access
 
-For the closed alpha, access is controlled by private extension distribution rather than a new account/invite backend. Expanding the cohort therefore does not require product code changes.
+For the closed alpha, access is controlled by signed personal invites plus the alpha access ledger. Each invite can activate up to two installs, and both installs share the same 100-Scoop monthly allowance.
 
-If the extension is later published publicly, replace distribution-only access with authenticated invites before relying on the cohort cap as an authorization boundary.
+The extension artifact may be distributed separately from the invite credential; possession of the ZIP alone does not authorize paid Scoop requests.

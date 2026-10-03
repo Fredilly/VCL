@@ -138,6 +138,33 @@ export async function authorizeAlphaRequest(env: AlphaAccessEnv, request: Reques
   return Boolean(result?.authorized);
 }
 
+export async function consumeAlphaMonthlyScoop(
+  env: AlphaAccessEnv,
+  request: Request,
+  limit = 100,
+): Promise<{ allowed: boolean; used: number; limit: number; resets_at?: string }> {
+  if (!alphaInviteRequired(env)) return { allowed: true, used: 0, limit };
+  const token = request.headers.get('x-scoop-alpha-token') ?? '';
+  const installId = request.headers.get('x-scoop-install-id') ?? '';
+  const payload = await verifyAlphaInvite(env, token);
+  if (!payload || !/^[a-f0-9-]{36}$/i.test(installId) || !env.ALPHA_ACCESS_LEDGER) {
+    return { allowed: false, used: limit, limit };
+  }
+  const now = new Date();
+  const period = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  const resets = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString();
+  const result = await ledgerPost<{ allowed: boolean; used: number }>(env, '/consume-monthly', {
+    invite_id: payload.invite_id,
+    install_id: installId,
+    expires_at: payload.expires_at,
+    period,
+    limit,
+  });
+  return result
+    ? { allowed: result.allowed, used: result.used, limit, resets_at: resets }
+    : { allowed: false, used: limit, limit, resets_at: resets };
+}
+
 export class AlphaAccessLedger {
   private readonly sql: { exec(query: string, ...bindings: unknown[]): Iterable<Record<string, unknown>> & { toArray?: () => Record<string, unknown>[] } };
 
@@ -152,6 +179,13 @@ export class AlphaAccessLedger {
         PRIMARY KEY (invite_id, install_id)
       );
       CREATE INDEX IF NOT EXISTS idx_alpha_invite ON alpha_install(invite_id);
+      CREATE TABLE IF NOT EXISTS alpha_monthly_usage (
+        invite_id TEXT NOT NULL,
+        period TEXT NOT NULL,
+        count INTEGER NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (invite_id, period)
+      );
     `);
   }
 
@@ -193,6 +227,35 @@ export class AlphaAccessLedger {
         inviteId, installId,
       )[0];
       return Response.json({ authorized: Boolean(found && Number(found.expires_at) > Math.floor(Date.now() / 1000)) });
+    }
+
+    if (path === '/consume-monthly') {
+      const found = this.rows(
+        'SELECT expires_at FROM alpha_install WHERE invite_id = ? AND install_id = ? LIMIT 1',
+        inviteId, installId,
+      )[0];
+      if (!found || Number(found.expires_at) <= Math.floor(Date.now() / 1000)) {
+        return Response.json({ allowed: false, used: 0 });
+      }
+      const period = typeof body.period === 'string' && /^\d{4}-\d{2}$/.test(body.period) ? body.period : '';
+      const limit = Math.max(1, Math.min(10000, Number(body.limit) || 100));
+      if (!period) return Response.json({ allowed: false, used: 0 }, { status: 400 });
+
+      const current = this.rows(
+        'SELECT count FROM alpha_monthly_usage WHERE invite_id = ? AND period = ? LIMIT 1',
+        inviteId, period,
+      )[0];
+      const used = Number(current?.count ?? 0);
+      if (used >= limit) return Response.json({ allowed: false, used });
+
+      const next = used + 1;
+      this.sql.exec(
+        `INSERT INTO alpha_monthly_usage (invite_id, period, count, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(invite_id, period) DO UPDATE SET count = excluded.count, updated_at = excluded.updated_at`,
+        inviteId, period, next, new Date().toISOString(),
+      );
+      return Response.json({ allowed: true, used: next });
     }
 
     return Response.json({ error: 'Not found' }, { status: 404 });

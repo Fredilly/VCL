@@ -28,7 +28,7 @@ import { applyFeedbackPenalties, evidenceFingerprint, feedbackCandidateKey, feed
 export { FeedbackLedger } from './feedback-ledger.js';
 import { persistAlphaLearning } from './alpha-learning.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
-import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
+import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, consumeAlphaMonthlyScoop, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { backfillLegacyAdminCanonicalMappings, consolidateCanonicalProducts, durableCanonicalCandidates, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
 import { distinctiveTextSameVideoReuse, eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, verifiedProductMemoryCandidates, identityWithTrustedVpmObservations, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
@@ -1860,6 +1860,20 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       if (!benchmarkMode && env.ALPHA_GLOBAL_RATE_LIMITER) {
         const { success } = await env.ALPHA_GLOBAL_RATE_LIMITER.limit({ key: 'alpha-global' });
         if (!success) return jsonResponse({ error: 'Scoop alpha is at its temporary usage limit. Try again shortly.', reason: 'ALPHA_GLOBAL_RATE_LIMIT', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: true }, 429);
+      }
+      if (!benchmarkMode && alphaInviteRequired(env)) {
+        const monthly = await consumeAlphaMonthlyScoop(env, request, 100);
+        if (!monthly.allowed) {
+          return jsonResponse({
+            error: 'You have used your 100 Scoops for this month.',
+            reason: 'ALPHA_MONTHLY_LIMIT',
+            failure_state: 'MONTHLY_LIMIT_REACHED',
+            retryable: false,
+            used: monthly.used,
+            limit: monthly.limit,
+            resets_at: monthly.resets_at,
+          }, 429);
+        }
       }
       const parsed: unknown = await request.json();
       const wrapped = Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'description' in parsed);
