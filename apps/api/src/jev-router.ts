@@ -152,7 +152,7 @@ function stringErrorField(error: unknown, keys: string[]): string | undefined {
   return undefined;
 }
 
-export async function routeWithJev(input: JevRouterInput, ai: WorkersAiBinding, timeoutMs = 3000): Promise<{ decision: JevRoutingDecision; telemetry: JevRouterTelemetry }> {
+export async function routeWithJev(input: JevRouterInput, ai: WorkersAiBinding, timeoutMs = 3000, images?: string[]): Promise<{ decision: JevRoutingDecision; telemetry: JevRouterTelemetry }> {
   const provider = new JevJudgmentProvider(ai);
   const telemetry: JevRouterTelemetry = {
     enabled: true,
@@ -171,6 +171,7 @@ export async function routeWithJev(input: JevRouterInput, ai: WorkersAiBinding, 
     const result = await Promise.race([
       provider.evaluate({
         state: { ...input },
+        ...(images?.length ? { images } : {}),
         questions: {
           commerce_action: { type: 'choice', instructions: 'Choose commerce routing conservatively. SKIP only when no useful purchasable object is strongly indicated; SEARCH_BROAD only when normal evidence is insufficient.', criteria: { SKIP: 'No useful purchasable object.', SEARCH_NORMAL: 'Evidence supports a normal commerce search.', SEARCH_BROAD: 'Normal evidence is insufficient and broader search may help.' } },
           verification_action: { type: 'choice', instructions: 'Choose LIGHT only when the evidence is strong enough that full verification is clearly unnecessary.', criteria: { LIGHT: 'Strong evidence; light verification is sufficient.', FULL: 'Full verification is needed.' } },
