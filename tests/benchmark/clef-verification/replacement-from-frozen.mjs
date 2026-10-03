@@ -140,6 +140,7 @@ for (const run of baselineRuns) {
         title: x.candidate.title ?? null,
         original_class: x.candidate.result_class ?? null,
         clef_relationship: x.payload?.relationship ?? null,
+        clef_grounded_identity: x.payload?.adapter?.clef_grounded_identity ?? false,
         clef_class: x.payload?.decision?.product?.result_class ?? null,
         clef_score: x.payload?.decision?.product?.verification_score ?? null,
         model_ms: x.payload?.timing?.model_ms ?? null,
