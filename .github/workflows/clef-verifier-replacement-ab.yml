@@ -35,7 +35,9 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CASE_LIMIT: ${{ inputs.case_limit || '1' }}
-      CANDIDATE_LIMIT: ${{ inputs.candidate_limit || '8' }}
+      # Automatic experiment runs are smoke tests: spend one Clef comparison only.
+      # Use workflow_dispatch candidate_limit=8 only after this passes.
+      CANDIDATE_LIMIT: ${{ inputs.candidate_limit || '1' }}
 
     steps:
       - name: Checkout experiment
