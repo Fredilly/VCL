@@ -11,6 +11,21 @@ function brandTokens(value: string | null | undefined): string[] {
   return [...new Set(normalize(value).split(' ').filter((token) => token.length >= 3))];
 }
 
+export function brandsCompatible(a: string | null | undefined, b: string | null | undefined): boolean {
+  const left = brandTokens(a);
+  const right = brandTokens(b);
+  if (!left.length || !right.length) return true;
+
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+  const shared = left.filter((token) => rightSet.has(token)).length;
+
+  // Allow concise/sub-brand observations such as "Kith" for "Kith & '47",
+  // while requiring an actual shared brand token. Unrelated brands fail closed.
+  return shared >= 1
+    && (shared === leftSet.size || shared === rightSet.size);
+}
+
 export function candidateMatchesBrand(title: string, brand: string | null | undefined): boolean {
   const normalizedBrand = normalize(brand);
   const normalizedTitle = normalize(title);
