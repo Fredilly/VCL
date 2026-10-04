@@ -50,7 +50,12 @@ test('one comparable wrong correction only demotes and never strengthens identit
   const a = candidate('a', 80, 'LIKELY');
   const b = candidate('b', 70, 'SIMILAR');
   const penalties = new Map([
-    [feedbackCandidateKey(a), { candidate_key: feedbackCandidateKey(a), wrong_count: 1, correct_count: 0 }],
+    [feedbackCandidateKey(a), {
+      candidate_key: feedbackCandidateKey(a),
+      exact_wrong_count: 1, exact_correct_count: 0,
+      global_wrong_count: 1, global_correct_count: 0, global_evidence_count: 1,
+      family_wrong_count: 1, family_correct_count: 0, family_context_count: 1,
+    }],
   ]);
 
   const result = applyFeedbackPenalties([a, b], penalties);
@@ -66,7 +71,12 @@ test('one comparable wrong correction only demotes and never strengthens identit
 test('repeated comparable wrong corrections suppress a known-bad mapping', () => {
   const a = candidate('a');
   const penalties = new Map([
-    [feedbackCandidateKey(a), { candidate_key: feedbackCandidateKey(a), wrong_count: 2, correct_count: 0 }],
+    [feedbackCandidateKey(a), {
+      candidate_key: feedbackCandidateKey(a),
+      exact_wrong_count: 2, exact_correct_count: 0,
+      global_wrong_count: 2, global_correct_count: 0, global_evidence_count: 1,
+      family_wrong_count: 2, family_correct_count: 0, family_context_count: 1,
+    }],
   ]);
 
   const result = applyFeedbackPenalties([a], penalties);
@@ -77,7 +87,12 @@ test('repeated comparable wrong corrections suppress a known-bad mapping', () =>
 test('positive feedback can cancel a negative penalty but never boosts the verification score', () => {
   const a = candidate('a', 72, 'SIMILAR');
   const penalties = new Map([
-    [feedbackCandidateKey(a), { candidate_key: feedbackCandidateKey(a), wrong_count: 1, correct_count: 1 }],
+    [feedbackCandidateKey(a), {
+      candidate_key: feedbackCandidateKey(a),
+      exact_wrong_count: 1, exact_correct_count: 1,
+      global_wrong_count: 1, global_correct_count: 1, global_evidence_count: 1,
+      family_wrong_count: 1, family_correct_count: 1, family_context_count: 1,
+    }],
   ]);
 
   const result = applyFeedbackPenalties([a], penalties);
@@ -94,4 +109,60 @@ test('evidence fingerprint is deterministic and changes with derived object evid
   assert.equal(first, second);
   assert.notEqual(first, changed);
   assert.match(first, /^[a-f0-9]{16}$/);
+});
+
+
+test('cross-evidence repeated candidate corrections downrank but never suppress', () => {
+  const a = candidate('a', 80, 'LIKELY');
+  const penalties = new Map([
+    [feedbackCandidateKey(a), {
+      candidate_key: feedbackCandidateKey(a),
+      exact_wrong_count: 0, exact_correct_count: 0,
+      global_wrong_count: 4, global_correct_count: 0, global_evidence_count: 3,
+      family_wrong_count: 0, family_correct_count: 0, family_context_count: 0,
+    }],
+  ]);
+
+  const result = applyFeedbackPenalties([a], penalties);
+  assert.equal(result.suppressed, 0);
+  assert.equal(result.penalized, 1);
+  assert.equal(result.signal_levels.candidate_global, 1);
+  assert.equal(result.products[0].verification_score, 68);
+  assert.equal(result.products[0].result_class, 'LIKELY');
+});
+
+test('comparable family corrections downrank conservatively', () => {
+  const a = candidate('a', 80, 'SIMILAR');
+  const penalties = new Map([
+    [feedbackCandidateKey(a), {
+      candidate_key: feedbackCandidateKey(a),
+      exact_wrong_count: 0, exact_correct_count: 0,
+      global_wrong_count: 1, global_correct_count: 0, global_evidence_count: 1,
+      family_wrong_count: 3, family_correct_count: 0, family_context_count: 2,
+    }],
+  ]);
+
+  const result = applyFeedbackPenalties([a], penalties);
+  assert.equal(result.suppressed, 0);
+  assert.equal(result.penalized, 1);
+  assert.equal(result.signal_levels.family, 1);
+  assert.equal(result.products[0].verification_score, 72);
+  assert.equal(result.products[0].result_class, 'SIMILAR');
+});
+
+test('single unrelated correction cannot trigger broad learning', () => {
+  const a = candidate('a', 80, 'LIKELY');
+  const penalties = new Map([
+    [feedbackCandidateKey(a), {
+      candidate_key: feedbackCandidateKey(a),
+      exact_wrong_count: 0, exact_correct_count: 0,
+      global_wrong_count: 1, global_correct_count: 0, global_evidence_count: 1,
+      family_wrong_count: 1, family_correct_count: 0, family_context_count: 1,
+    }],
+  ]);
+
+  const result = applyFeedbackPenalties([a], penalties);
+  assert.equal(result.penalized, 0);
+  assert.equal(result.suppressed, 0);
+  assert.equal(result.products[0].verification_score, 80);
 });
