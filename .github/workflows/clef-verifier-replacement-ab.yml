@@ -1,0 +1,260 @@
+name: Clef raw-candidate verifier A/B
+
+on:
+  pull_request:
+    branches: [experiment/clef-vision-vs-gemini]
+    paths:
+      - '.github/workflows/clef-verifier-replacement-ab.yml'
+      - 'apps/api/src/clef-raw-verifier-ab-worker.ts'
+      - 'apps/api/src/candidate-images.ts'
+      - 'tests/benchmark/clef-verification/raw-candidate-ab.mjs'
+      - 'tests/cost/run-live.mjs'
+  workflow_dispatch:
+    inputs:
+      case_limit:
+        description: Number of frozen cases to run (1-8)
+        required: false
+        default: '8'
+      candidate_limit:
+        description: Raw candidates per case sent to both verifiers (1-12)
+        required: false
+        default: '8'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clef-raw-candidate-verifier-ab
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CASE_LIMIT: ${{ inputs.case_limit || '1' }}
+      # Automatic experiment runs are smoke tests: spend one Clef comparison only.
+      # Use workflow_dispatch candidate_limit=8 only after this passes.
+      CANDIDATE_LIMIT: ${{ inputs.candidate_limit || '1' }}
+
+    steps:
+      - name: Checkout experiment
+        uses: actions/checkout@v4
+
+      - name: Record commit
+        run: git rev-parse HEAD | tee clef-raw-ab-commit.txt
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install headless Chromium
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes chromium-browser || sudo apt-get install --yes chromium
+
+      - name: Verify branch
+        run: |
+          pnpm --filter @vcl/extension exec wxt prepare
+          pnpm check
+          pnpm build
+          pnpm test
+
+      - name: Freeze benchmark cases
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const f = JSON.parse(readFileSync('tests/manual/spike-5/cases-v2.json', 'utf8'));
+          const identities = {
+            's5-01': { brand: 'Patagonia', model: 'Better Sweater' },
+            's5-02': { brand: 'Patagonia', model: 'Better Sweater' },
+            's5-03': { brand: 'Seiko', model: 'SKX007' },
+            's5-04': { brand: 'Seiko', model: 'SKX007' },
+            's5-05': { brand: 'Coach', model: null },
+            's5-06': { brand: 'Coach', model: null },
+            's5-07': { brand: 'Adidas', model: 'Samba OG' },
+            's5-08': { brand: 'Adidas', model: 'Samba OG' }
+          };
+          f.cases = f.cases
+            .filter((c) => c.valid !== false)
+            .slice(0, Number(process.env.CASE_LIMIT || 8))
+            .map((c) => ({ ...c, expected_identity: identities[c.id] }));
+          writeFileSync(process.env.RUNNER_TEMP + '/clef-raw-ab-cases.json', JSON.stringify(f));
+          NODE
+
+      - name: Prepare shared production vision once
+        run: |
+          export VCL_COST_CASES="$RUNNER_TEMP/clef-raw-ab-cases.json"
+          export VCL_COST_LIMIT="$CASE_LIMIT"
+          export VCL_HEADLESS=1
+          export VCL_FROZEN_FRAME_DIR="$GITHUB_WORKSPACE/tests/benchmark/jev/frames"
+          export VCL_PREPARE_ONLY=1
+          export VCL_PREPARED_OUTPUT="$GITHUB_WORKSPACE/clef-raw-ab-prepared.json"
+          export VCL_CDP_PORT=9334
+          export VCL_COST_PROFILE="$RUNNER_TEMP/clef-raw-ab-browser"
+          export VCL_API_ORIGIN="https://api.vcl.article6.org"
+
+          prep_ok=0
+          for attempt in 1 2 3; do
+            echo "Preparing shared vision, attempt $attempt/3"
+            pkill -f "remote-debugging-port=$VCL_CDP_PORT" 2>/dev/null || true
+            rm -rf "$VCL_COST_PROFILE" "$VCL_PREPARED_OUTPUT" || true
+            mkdir -p "$VCL_COST_PROFILE"
+            sleep 1
+            if node tests/cost/run-live.mjs; then
+              prep_ok=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$prep_ok" != "1" ]; then
+            echo "Shared vision preparation failed after 3 attempts."
+            exit 1
+          fi
+
+      - name: Upload benchmark-only Worker version and stage at 0%
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const config = readFileSync('apps/api/wrangler.jsonc', 'utf8');
+          writeFileSync(
+            'clef-raw-ab-wrangler.jsonc',
+            config.replace('"main": "src/server.ts"', '"main": "apps/api/src/clef-raw-verifier-ab-worker.ts"')
+                  .replace(/"routes"\s*:\s*\[[\s\S]*?\]\s*,?/m, '')
+          );
+          NODE
+
+          pnpm dlx wrangler@4.135.0 deployments list \
+            --config clef-raw-ab-wrangler.jsonc \
+            --name vcl-api \
+            --json > clef-raw-ab-deployments-before.json
+
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const raw = JSON.parse(readFileSync('clef-raw-ab-deployments-before.json', 'utf8'));
+          const deployments = Array.isArray(raw) ? raw : Array.isArray(raw?.result) ? raw.result : Array.isArray(raw?.deployments) ? raw.deployments : [];
+          if (!deployments.length) throw new Error('Could not read active vcl-api deployment');
+
+          const sorted = [...deployments].sort((a, b) => {
+            const ta = Date.parse(a.created_on ?? a.created_at ?? a.createdAt ?? 0) || 0;
+            const tb = Date.parse(b.created_on ?? b.created_at ?? b.createdAt ?? 0) || 0;
+            return tb - ta;
+          });
+          const active = sorted[0];
+          const versions = Array.isArray(active.versions) ? active.versions : [];
+          const positive = versions.filter((v) => Number(v.percentage ?? v.traffic_percentage ?? 0) > 0);
+          if (positive.length !== 1 || Number(positive[0].percentage ?? positive[0].traffic_percentage) !== 100) {
+            console.error(JSON.stringify(active, null, 2));
+            throw new Error('Refusing benchmark: active deployment is not exactly one version at 100%');
+          }
+          const oldId = positive[0].version_id ?? positive[0].id;
+          if (!oldId) throw new Error('Could not identify current production version ID');
+          writeFileSync('clef-raw-ab-old-version.txt', String(oldId));
+          NODE
+
+          export WRANGLER_OUTPUT_FILE="$GITHUB_WORKSPACE/clef-raw-ab-wrangler-output.ndjson"
+          rm -f "$WRANGLER_OUTPUT_FILE"
+          pnpm dlx wrangler@4.135.0 versions upload \
+            --config clef-raw-ab-wrangler.jsonc \
+            --keep-vars \
+            --message "Clef raw-candidate verifier A/B $GITHUB_SHA" \
+            | tee clef-raw-ab-version.log
+
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          let versionId = '';
+          try {
+            const lines = readFileSync('clef-raw-ab-wrangler-output.ndjson', 'utf8').trim().split(/\n+/);
+            for (const line of lines) {
+              const row = JSON.parse(line);
+              if (row?.type === 'version-upload' && row.version_id) versionId = row.version_id;
+            }
+          } catch {}
+          if (!versionId) {
+            const log = readFileSync('clef-raw-ab-version.log', 'utf8');
+            versionId = log.match(/Worker Version ID:\s*([0-9a-f-]{36})/i)?.[1] ?? '';
+          }
+          if (!versionId) throw new Error('Could not capture uploaded benchmark version ID');
+          writeFileSync('clef-raw-ab-new-version.txt', versionId);
+          NODE
+
+          old_id="$(cat clef-raw-ab-old-version.txt)"
+          new_id="$(cat clef-raw-ab-new-version.txt)"
+
+          pnpm dlx wrangler@4.135.0 versions deploy \
+            --config clef-raw-ab-wrangler.jsonc \
+            --name vcl-api \
+            "$old_id@100%" "$new_id@0%" -y \
+            --message "Stage Clef benchmark version at zero traffic"
+
+          touch clef-raw-ab-staged-at-zero
+          sleep 10
+
+          origin="https://api.vcl.article6.org"
+          echo "$origin" > clef-raw-ab-origin.txt
+
+          curl --fail --silent --show-error \
+            -H "Cloudflare-Workers-Version-Overrides: vcl-api=\"$new_id\"" \
+            "$origin" > clef-raw-ab-health.json
+          cat clef-raw-ab-health.json
+
+      - name: Run decisive raw-candidate A/B
+        run: |
+          VCL_RAW_AB_PREPARED_INPUT="$GITHUB_WORKSPACE/clef-raw-ab-prepared.json" \
+          VCL_RAW_AB_ORIGIN="$(cat clef-raw-ab-origin.txt)" \
+          VCL_RAW_AB_VERSION_ID="$(cat clef-raw-ab-new-version.txt)" \
+          VCL_RAW_AB_CANDIDATE_LIMIT="$CANDIDATE_LIMIT" \
+          VCL_RAW_AB_OUTPUT="$GITHUB_WORKSPACE/clef-raw-ab-report.json" \
+          node tests/benchmark/clef-verification/raw-candidate-ab.mjs
+
+      - name: Restore production deployment
+        if: always()
+        run: |
+          if [ -f clef-raw-ab-staged-at-zero ] && [ -f clef-raw-ab-old-version.txt ]; then
+            old_id="$(cat clef-raw-ab-old-version.txt)"
+            pnpm dlx wrangler@4.135.0 versions deploy \
+              --config clef-raw-ab-wrangler.jsonc \
+              --name vcl-api \
+              "$old_id@100%" -y \
+              --message "Restore single production version after Clef benchmark"
+            sleep 5
+            pnpm dlx wrangler@4.135.0 deployments list \
+              --config clef-raw-ab-wrangler.jsonc \
+              --name vcl-api \
+              --json > clef-raw-ab-deployments-after.json
+          fi
+
+      - name: Print decisive benchmark summary
+        if: always()
+        run: |
+          if [ -f clef-raw-ab-report.json ]; then
+            jq '.summary' clef-raw-ab-report.json
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clef-raw-candidate-verifier-ab-${{ github.run_id }}
+          path: |
+            clef-raw-ab-commit.txt
+            clef-raw-ab-origin.txt
+            clef-raw-ab-version.log
+            clef-raw-ab-wrangler-output.ndjson
+            clef-raw-ab-old-version.txt
+            clef-raw-ab-new-version.txt
+            clef-raw-ab-deployments-before.json
+            clef-raw-ab-deployments-after.json
+            clef-raw-ab-health.json
+            clef-raw-ab-prepared.json
+            clef-raw-ab-report.json

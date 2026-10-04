@@ -89,9 +89,9 @@ test('image subrequest budget is shared across broadening and leaves room for re
   const first = await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
   const second = await compareCandidateImages('key', 'model', image, description, products.slice(0, 12), undefined, budget);
   const third = await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
-  assert.equal(first.compared, 24); assert.equal(second.compared, 12);
+  assert.equal(first.compared, 24); assert.equal(second.compared, 4);
   assert.equal(third.compared, 0); assert.equal(third.failure_reasons.image_budget, 24);
-  assert.equal(requests, 42); assert.equal(modelCalls, 6); assert.equal(budget.remaining, 0);
+  assert.equal(requests, 42); assert.equal(modelCalls, 14); assert.equal(budget.remaining, 0);
 });
 
 test('verification batches run up to two concurrently for faster processing', async () => {
@@ -113,7 +113,7 @@ test('verification batches run up to two concurrently for faster processing', as
   const products = Array.from({ length: 12 }, (_, i) => ({ ...candidate, id: String(i), destination: `https://shop.example/${i}` }));
   const result = await compareCandidateImages('key', 'model', image, description, products);
   assert.equal(result.compared, 12);
-  assert.equal(modelCalls, 2);
+  assert.equal(modelCalls, 6);
   assert.equal(maxConcurrent, 2);
 });
 
@@ -147,14 +147,15 @@ test('deterministic budget: budget only sufficient for first batch leaves second
     }
     return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
   } });
-  // Budget: 1 model + 6 images = 7 per batch. Two batches need 14. Give exactly 7.
+  // With 2-candidate batches, each full batch needs 3 requests. A 7-slot budget
+  // fully verifies the first two batches and reserves only a model slot for the third.
   const budget = imageRequestBudget();
   budget.remaining = 7;
   const products = Array.from({ length: 12 }, (_, i) => ({ ...candidate, id: String(i) }));
   const result = await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
-  assert.equal(result.compared, 6);
-  assert.equal(modelCalls, 1);
-  assert.equal(result.failure_reasons.image_budget, 6);
+  assert.equal(result.compared, 4);
+  assert.equal(modelCalls, 2);
+  assert.equal(result.failure_reasons.image_budget, 8);
   assert.ok(budget.remaining >= 0);
 });
 
@@ -171,13 +172,14 @@ test('deterministic budget: budget partially sufficient for second batch verifie
     }
     return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
   } });
-  // Budget: 7 for batch1 + 4 for batch2 = 11 (batch2 gets model + 3 images)
+  // With 2-candidate batches, 11 slots verify three full batches plus one
+  // candidate from the fourth batch.
   const budget = imageRequestBudget();
   budget.remaining = 11;
   const products = Array.from({ length: 12 }, (_, i) => ({ ...candidate, id: String(i) }));
   const result = await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
-  assert.equal(modelCalls, 2);
-  assert.equal(result.compared, 9);
+  assert.equal(modelCalls, 4);
+  assert.equal(result.compared, 7);
   assert.ok(totalRequests <= 11, `spent ${totalRequests} requests from an 11-slot budget`);
   assert.equal(budget.remaining, 0);
 });
@@ -284,12 +286,13 @@ test('deterministic budget: first batch always gets priority when budget is tigh
     }
     return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
   } });
-  // Budget for exactly one batch (7 = 1 model + 6 images)
+  // Seven slots fully fund the first two 2-candidate batches and reserve only
+  // a model slot for the third, so candidates 0-3 are the verified priority set.
   const budget = imageRequestBudget();
   budget.remaining = 7;
   const products = Array.from({ length: 12 }, (_, i) => ({ ...candidate, id: String(i), title: `Product ${i}` }));
   await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
-  // First batch (products 0-5) should always be verified, second batch (6-11) never
+  // The earliest fully funded batches should always win when budget is tight.
   const sorted = verifiedTitles.sort();
-  assert.deepEqual(sorted, products.slice(0, 6).map((p) => p.title).sort());
+  assert.deepEqual(sorted, products.slice(0, 4).map((p) => p.title).sort());
 });

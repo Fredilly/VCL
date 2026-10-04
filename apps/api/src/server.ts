@@ -9,7 +9,7 @@ import { parseSelectionPoint, TargetLocalizationError, type SelectionPoint } fro
 import { CommerceNoResultsError, buildProductQueryVariants, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
 import { classifyCanonicalRelationship, highConfidenceMetadataContradiction, verifyCandidate, rankVerified } from './candidate-verification.js';
 import { canonical } from './verification-evidence.js';
-import { candidateKey, compareCandidateImages, parseSourceImage, imageRequestBudget } from './candidate-images.js';
+import { candidateKey, compareCandidateImages, compareCandidateImagesWithClef, parseSourceImage, imageRequestBudget } from './candidate-images.js';
 import type { ImageComparison } from './verification-evidence.js';
 import { EbayAuth } from './ebay-auth.js';
 import { EbayCommerceProvider, ebayItemIdForLiveLookup } from './ebay-commerce.js';
@@ -74,6 +74,7 @@ export interface Env {
   ALPHA_CREATOR_CONTENT_MAP?: string;
   VERIFIED_PRODUCT_MAPPINGS_JSON?: string;
   VERIFIED_PRODUCT_TEST_MODE?: string;
+  CLEF_VERIFICATION_BENCHMARK?: string;
   ALPHA_INSTALL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
   ALPHA_GLOBAL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
   AI?: WorkersAiBinding & CloudflareVisionBinding;
@@ -86,6 +87,14 @@ export interface Env {
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
+
+function imageVerifierForEnv(env: Env): typeof compareCandidateImages {
+  if (env.CLEF_VERIFICATION_BENCHMARK === 'true' && env.AI) {
+    return ((apiKey, model, source, description, products, context, budget) =>
+      compareCandidateImagesWithClef(env.AI!, apiKey, model, source, description, products, context, budget)) as typeof compareCandidateImages;
+  }
+  return compareCandidateImages;
+}
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type,x-scoop-install-id,x-scoop-admin-session,x-scoop-alpha-token', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
 
 type VisionProviderName = 'openrouter' | 'gemini' | 'groq-3.8' | 'groq-3.6' | 'cloudflare';
@@ -526,7 +535,7 @@ export async function refreshVerifiedOffers(
       const model = useOpenRouter
         ? (visual.env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL)
         : (visual.env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
-      const images = await compareCandidateImages(
+      const images = await imageVerifierForEnv(visual.env)(
         key,
         model,
         visual.sourceImage,
@@ -825,7 +834,7 @@ async function confirmSameVideoReuseWithImage(
 
   if (!rows.length) return { ...empty, decision: { ...noDecision, reason: 'visual_unavailable' } };
 
-  const images = await compareCandidateImages(
+  const images = await imageVerifierForEnv(env)(
     key,
     model,
     sourceImage,
@@ -960,7 +969,7 @@ async function confirmCrossVideoReuseWithImage(
   const model = useOpenRouter
     ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL)
     : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
-  const images = await compareCandidateImages(
+  const images = await imageVerifierForEnv(env)(
     key,
     model,
     sourceImage,
@@ -1049,10 +1058,11 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     }>,
   };
   const commerceCalls: Record<string, number> = {};
-  const useOpenRouterVerification = env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
+  const useClefVerification = env.CLEF_VERIFICATION_BENCHMARK === 'true' && Boolean(env.AI);
+  const useOpenRouterVerification = !useClefVerification && env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
   const verificationUsage = {
-    provider: useOpenRouterVerification ? 'openrouter' : 'gemini',
-    model: useOpenRouterVerification ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite'),
+    provider: useClefVerification ? 'clef' : useOpenRouterVerification ? 'openrouter' : 'gemini',
+    model: useClefVerification ? '@cf/cloudflare/clef' : useOpenRouterVerification ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite'),
     requests: 0,
     prompt_tokens: 0,
     completion_tokens: 0,
@@ -1119,9 +1129,9 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     });
 
     const runImageVerification = async () => {
-      const verificationKey = useOpenRouterVerification ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY;
+      const verificationKey = useClefVerification ? 'workers-ai-binding' : useOpenRouterVerification ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY;
       if (!sourceImage || !verificationKey || !viable.length) return;
-      const verificationModel = useOpenRouterVerification ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
+      const verificationModel = useClefVerification ? '@cf/cloudflare/clef' : useOpenRouterVerification ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
       const images = await imageVerifier(
         verificationKey,
         verificationModel,
@@ -1150,7 +1160,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     if (!lightMode) await runImageVerification();
 
     let decisions = viable.map((product) => ({ product, decision: verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context, useMarkingEvidence) }));
-    if (lightMode && viable.length && !decisions.some(({ decision }) => decision.product) && sourceImage && (useOpenRouterVerification ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY)) {
+    if (lightMode && viable.length && !decisions.some(({ decision }) => decision.product) && sourceImage && (useClefVerification || (useOpenRouterVerification ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY))) {
       verification.light_escalations++;
       await runImageVerification();
       decisions = viable.map((product) => ({ product, decision: verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context, useMarkingEvidence) }));
@@ -2174,7 +2184,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           : queries;
       const started = Date.now();
       const markingVerifyV1 = record.benchmark_marking_verify_v1 === true;
-      const resolved = await resolveProducts(routedProviders, routedQueries, description, env, context, sourceImage, compareCandidateImages, routing, markingVerifyV1);
+      const resolved = await resolveProducts(routedProviders, routedQueries, description, env, context, sourceImage, imageVerifierForEnv(env), routing, markingVerifyV1);
       if (sameVideoVisualCheck.usage) {
         const usage = resolved.cost_usage.verification_usage;
         usage.requests += sameVideoVisualCheck.usage.requests ?? 0;
