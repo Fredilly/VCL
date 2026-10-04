@@ -33,8 +33,14 @@ export type FeedbackResultContext = {
 
 export type FeedbackPenalty = {
   candidate_key: string;
-  wrong_count: number;
-  correct_count: number;
+  exact_wrong_count: number;
+  exact_correct_count: number;
+  global_wrong_count: number;
+  global_correct_count: number;
+  global_evidence_count: number;
+  family_wrong_count: number;
+  family_correct_count: number;
+  family_context_count: number;
 };
 
 export type FeedbackReviewAction = 'dismiss' | 'hard_negative' | 'verify_product';
@@ -157,6 +163,27 @@ export function feedbackCandidateKey(product: ProductCandidate): string {
   return stableHash(`${provider}|${id}`);
 }
 
+export type FeedbackFamily = {
+  category: string;
+  subcategory: string;
+  brand: string | null;
+  model: string | null;
+};
+
+export function feedbackFamily(input: {
+  category?: string | null;
+  subcategory?: string | null;
+  brand?: string | null;
+  model?: string | null;
+}): FeedbackFamily {
+  return {
+    category: bounded(input.category, 80).toLowerCase(),
+    subcategory: bounded(input.subcategory, 80).toLowerCase(),
+    brand: bounded(input.brand, 100).toLowerCase() || null,
+    model: bounded(input.model, 120).toLowerCase() || null,
+  };
+}
+
 function ledgerStub(env: FeedbackLedgerEnv): DurableObjectStubLike | null {
   if (!env.FEEDBACK_LEDGER) return null;
   return env.FEEDBACK_LEDGER.get(env.FEEDBACK_LEDGER.idFromName('alpha-feedback-v1'));
@@ -205,33 +232,67 @@ export async function feedbackPenalties(
   env: FeedbackLedgerEnv,
   evidence_key: string,
   products: ProductCandidate[],
+  family?: FeedbackFamily,
 ): Promise<Map<string, FeedbackPenalty>> {
   if (!env.FEEDBACK_LEDGER || !products.length) return new Map();
   const candidate_keys = [...new Set(products.map(feedbackCandidateKey))];
-  const result = await postJson<{ penalties: FeedbackPenalty[] }>(env, '/penalties', { evidence_key, candidate_keys });
+  const result = await postJson<{ penalties: FeedbackPenalty[] }>(env, '/penalties', {
+    evidence_key,
+    candidate_keys,
+    family: family ?? null,
+  });
   return new Map((result?.penalties ?? []).map((penalty) => [penalty.candidate_key, penalty]));
 }
+
+export type FeedbackLearningEffect = {
+  products: ProductCandidate[];
+  penalized: number;
+  suppressed: number;
+  signal_levels: { exact: number; candidate_global: number; family: number };
+};
 
 export function applyFeedbackPenalties(
   products: ProductCandidate[],
   penalties: Map<string, FeedbackPenalty>,
-): { products: ProductCandidate[]; penalized: number; suppressed: number } {
+): FeedbackLearningEffect {
   let penalized = 0;
   let suppressed = 0;
+  const signal_levels = { exact: 0, candidate_global: 0, family: 0 };
   const adjusted: ProductCandidate[] = [];
   for (const product of products) {
     const penalty = penalties.get(feedbackCandidateKey(product));
-    const netWrong = Math.max(0, (penalty?.wrong_count ?? 0) - (penalty?.correct_count ?? 0));
-    if (netWrong >= 2) {
+    const exactNet = Math.max(0, (penalty?.exact_wrong_count ?? 0) - (penalty?.exact_correct_count ?? 0));
+    const globalNet = Math.max(0, (penalty?.global_wrong_count ?? 0) - (penalty?.global_correct_count ?? 0));
+    const familyNet = Math.max(0, (penalty?.family_wrong_count ?? 0) - (penalty?.family_correct_count ?? 0));
+
+    if (exactNet >= 2) {
       suppressed++;
+      signal_levels.exact++;
       continue;
     }
-    if (netWrong === 1) {
+
+    let scorePenalty = 0;
+    const reasons = [...(product.verification_reasons ?? [])];
+    if (exactNet === 1) {
+      scorePenalty = Math.max(scorePenalty, 20);
+      signal_levels.exact++;
+      reasons.push('prior exact-mapping user correction');
+    } else if (globalNet >= 3 && (penalty?.global_evidence_count ?? 0) >= 2) {
+      scorePenalty = Math.max(scorePenalty, 12);
+      signal_levels.candidate_global++;
+      reasons.push('repeated cross-evidence user corrections');
+    } else if (familyNet >= 3 && (penalty?.family_context_count ?? 0) >= 2) {
+      scorePenalty = Math.max(scorePenalty, 8);
+      signal_levels.family++;
+      reasons.push('repeated comparable product-family corrections');
+    }
+
+    if (scorePenalty > 0) {
       penalized++;
       adjusted.push({
         ...product,
-        verification_score: Math.max(0, (product.verification_score ?? 0) - 20),
-        verification_reasons: [...(product.verification_reasons ?? []), 'prior comparable user correction'],
+        verification_score: Math.max(0, (product.verification_score ?? 0) - scorePenalty),
+        verification_reasons: reasons,
       });
       continue;
     }
@@ -240,7 +301,7 @@ export function applyFeedbackPenalties(
   adjusted.sort((a, b) => (b.verification_score ?? 0) - (a.verification_score ?? 0)
     || (a.identity_key ?? a.id).localeCompare(b.identity_key ?? b.id)
     || a.id.localeCompare(b.id));
-  return { products: adjusted, penalized, suppressed };
+  return { products: adjusted, penalized, suppressed, signal_levels };
 }
 
 export class FeedbackLedger {
@@ -520,19 +581,57 @@ export class FeedbackLedger {
     }
 
     if (path === '/penalties') {
-      const body = await request.json() as { evidence_key?: unknown; candidate_keys?: unknown };
+      const body = await request.json() as { evidence_key?: unknown; candidate_keys?: unknown; family?: unknown };
       const evidenceKey = bounded(body.evidence_key, 80);
       const keys = Array.isArray(body.candidate_keys) ? body.candidate_keys.map((v) => bounded(v, 80)).filter(Boolean).slice(0, 12) : [];
+      const rawFamily = body.family && typeof body.family === 'object' && !Array.isArray(body.family)
+        ? body.family as Record<string, unknown>
+        : {};
+      const family = feedbackFamily({
+        category: bounded(rawFamily.category, 80),
+        subcategory: bounded(rawFamily.subcategory, 80),
+        brand: bounded(rawFamily.brand, 100) || null,
+        model: bounded(rawFamily.model, 120) || null,
+      });
       const penalties: FeedbackPenalty[] = [];
       for (const key of keys) {
-        const row = this.rows(
+        const exact = this.rows(
           'SELECT wrong_count, correct_count FROM mapping_signal WHERE evidence_key = ? AND candidate_key = ? LIMIT 1',
           evidenceKey, key,
-        )[0];
-        if (row) penalties.push({
+        )[0] ?? {};
+        const global = this.rows(
+          `SELECT
+             COALESCE(SUM(wrong_count), 0) AS wrong_count,
+             COALESCE(SUM(correct_count), 0) AS correct_count,
+             SUM(CASE WHEN wrong_count > correct_count THEN 1 ELSE 0 END) AS evidence_count
+           FROM mapping_signal
+           WHERE candidate_key = ?`,
+          key,
+        )[0] ?? {};
+        const familyRows = this.rows(
+          `SELECT f.feedback_type, c.evidence_key
+           FROM feedback f
+           JOIN result_context c ON c.event_id = f.event_id AND c.result_id = f.result_id
+           WHERE c.candidate_key = ?
+             AND lower(c.category) = ?
+             AND lower(c.subcategory) = ?
+             AND lower(COALESCE(c.brand, '')) = ?
+             AND lower(COALESCE(c.model, '')) = ?`,
+          key, family.category, family.subcategory, family.brand ?? '', family.model ?? '',
+        );
+        const familyWrong = familyRows.filter((row) => WRONG_TYPES.has(String(row.feedback_type ?? ''))).length;
+        const familyCorrect = familyRows.filter((row) => CORRECT_TYPES.has(String(row.feedback_type ?? ''))).length;
+        const familyContexts = new Set(familyRows.map((row) => String(row.evidence_key ?? '')).filter(Boolean)).size;
+        penalties.push({
           candidate_key: key,
-          wrong_count: Number(row.wrong_count ?? 0),
-          correct_count: Number(row.correct_count ?? 0),
+          exact_wrong_count: Number(exact.wrong_count ?? 0),
+          exact_correct_count: Number(exact.correct_count ?? 0),
+          global_wrong_count: Number(global.wrong_count ?? 0),
+          global_correct_count: Number(global.correct_count ?? 0),
+          global_evidence_count: Number(global.evidence_count ?? 0),
+          family_wrong_count: familyWrong,
+          family_correct_count: familyCorrect,
+          family_context_count: familyContexts,
         });
       }
       return Response.json({ penalties });
@@ -541,6 +640,12 @@ export class FeedbackLedger {
     if (path === '/report') {
       const body = await request.json().catch(() => ({})) as { session_id?: unknown };
       const sessionId = bounded(body.session_id, 160);
+      const now = Date.now();
+      const windows = [
+        { key: '24h', since: new Date(now - 24 * 60 * 60 * 1000).toISOString() },
+        { key: '7d', since: new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString() },
+        { key: '30d', since: new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString() },
+      ];
       const sessionFilter = sessionId ? ' AND c.session_id = ?' : '';
       const sessionBindings = sessionId ? [sessionId] : [];
       const totals = this.rows(`
@@ -612,7 +717,31 @@ export class FeedbackLedger {
         ORDER BY f.created_at DESC
         LIMIT 100
       `, ...sessionBindings);
+      const windowed = Object.fromEntries(windows.map(({ key, since }) => {
+        const feedbackWindow = this.rows(`
+          SELECT
+            COUNT(*) AS feedback_count,
+            SUM(CASE WHEN f.feedback_type IN ('wrong_item','wrong_category','not_similar') THEN 1 ELSE 0 END) AS wrong_count,
+            SUM(CASE WHEN f.feedback_type IN ('correct_match','useful') THEN 1 ELSE 0 END) AS correct_count
+          FROM feedback f
+          LEFT JOIN result_context c ON c.event_id = f.event_id AND c.result_id = f.result_id
+          WHERE f.created_at >= ?${sessionFilter}
+        `, since, ...sessionBindings)[0] ?? {};
+        const learningWindow = this.rows(`
+          SELECT
+            COUNT(*) AS scoop_count,
+            SUM(CASE WHEN state = 'RESULTS' THEN 1 ELSE 0 END) AS results_count,
+            SUM(CASE WHEN state = 'NO_RESULTS' THEN 1 ELSE 0 END) AS no_results_count,
+            AVG(latency_ms) AS avg_latency_ms,
+            SUM(verification_cost_usd) AS verification_cost_usd
+          FROM scoop_learning
+          WHERE created_at >= ?${sessionId ? ' AND session_id = ?' : ''}
+        `, since, ...sessionBindings)[0] ?? {};
+        return [key, { since, totals: feedbackWindow, learning: learningWindow }];
+      }));
       return Response.json({
+        generated_at: new Date(now).toISOString(),
+        reporting_windows: { ...windowed, lifetime: { since: null, totals, learning } },
         session_id: sessionId || null,
         totals,
         learning,
