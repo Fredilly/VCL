@@ -1298,6 +1298,126 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
   return respond(queries[Math.max(0, Math.min(attempts - 1, queries.length - 1))]);
 }
 
+
+async function benchmarkRawCandidates(env: Env, body: Record<string, unknown>) {
+  const description = normalizeObjectDescription(body.description);
+  const context = normalizeContext(body.context);
+  const providers = commerceProviders(env);
+  if (!providers.length) throw new Error('No configured commerce providers');
+
+  const queries = buildProductQueryVariants(description, context, false).slice(0, 3);
+  const seen = new Set<string>();
+  const candidates: ProductCandidate[] = [];
+  const provider_calls: Record<string, number> = {};
+  const provider_failures: Record<string, string> = {};
+  const query_rows: Array<{ query: string; provider: string; returned: number }> = [];
+
+  for (const query of queries) {
+    const eligible = filterByCategory(providers, query);
+    const settled = await Promise.allSettled(eligible.map(async ({ name, provider }) => {
+      provider_calls[name] = (provider_calls[name] ?? 0) + 1;
+      const products = await provider.search(query);
+      return { name, products };
+    }));
+    settled.forEach((result, index) => {
+      const name = eligible[index]?.name ?? 'unknown';
+      if (result.status === 'rejected') {
+        if (!(result.reason instanceof CommerceNoResultsError)) {
+          provider_failures[name] = result.reason instanceof Error ? result.reason.name : 'provider_error';
+        }
+        query_rows.push({ query: query.query, provider: name, returned: 0 });
+        return;
+      }
+      query_rows.push({ query: query.query, provider: name, returned: result.value.products.length });
+      for (const product of result.value.products.slice(0, 8)) {
+        const key = candidateKey(product);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        candidates.push(product);
+        if (candidates.length >= 40) break;
+      }
+    });
+    if (candidates.length >= 40) break;
+  }
+
+  return {
+    benchmark: 'raw-commerce-candidates-v1',
+    description,
+    context,
+    queries,
+    candidates,
+    providers_configured: providers.map((p) => p.name),
+    provider_calls,
+    provider_failures,
+    query_rows,
+  };
+}
+
+async function benchmarkVerifyCandidates(env: Env, body: Record<string, unknown>) {
+  const description = normalizeObjectDescription(body.description);
+  const context = normalizeContext(body.context);
+  const sourceImage = parseSourceImage(body.source_image);
+  if (!sourceImage) throw new Error('source_image is required');
+  const rawCandidates = Array.isArray(body.candidates)
+    ? body.candidates.filter((value): value is ProductCandidate => Boolean(value && typeof value === 'object')).slice(0, 40)
+    : [];
+  if (!rawCandidates.length) throw new Error('candidates are required');
+
+  const verifier = body.verifier === 'clef' ? 'clef' : body.verifier === 'current' ? 'current' : null;
+  if (!verifier) throw new Error('verifier must be current or clef');
+
+  const metadata_rejected: Array<{ key: string; reason: string }> = [];
+  const viable = rawCandidates.filter((product) => {
+    const contradiction = highConfidenceMetadataContradiction(description, product);
+    if (!contradiction) return true;
+    metadata_rejected.push({ key: candidateKey(product), reason: contradiction });
+    return false;
+  });
+
+  const budget = imageRequestBudget();
+  const started = Date.now();
+  const imageResult = verifier === 'clef'
+    ? env.AI
+      ? await compareCandidateImagesWithClef(env.AI, 'workers-ai-binding', '@cf/cloudflare/clef', sourceImage, description, viable, context, budget)
+      : (() => { throw new Error('Workers AI binding unavailable'); })()
+    : env.VISION_PROVIDER === 'openrouter' && env.OPENROUTER_API_KEY
+      ? await compareCandidateImages(env.OPENROUTER_API_KEY, env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL, sourceImage, description, viable, context, budget, { provider: 'openrouter' })
+      : env.GEMINI_API_KEY
+        ? await compareCandidateImages(env.GEMINI_API_KEY, env.GEMINI_MODEL || 'gemini-3.5-flash-lite', sourceImage, description, viable, context, budget, { provider: 'gemini' })
+        : (() => { throw new Error('Current verifier credentials unavailable'); })();
+
+  const decisions = viable.map((product) => {
+    const comparison = imageResult.comparisons.get(candidateKey(product));
+    const decision = verifyCandidate(description, product, comparison, context, false);
+    return {
+      candidate_key: candidateKey(product),
+      candidate: product,
+      accepted: Boolean(decision.product),
+      product: decision.product ?? null,
+      reasons: decision.reasons,
+      comparison: comparison ?? null,
+    };
+  });
+
+  const accepted = decisions.flatMap((row) => row.product ? [row.product] : []);
+  return {
+    benchmark: 'raw-candidate-verifier-v1',
+    verifier,
+    input_candidates: rawCandidates.length,
+    viable_candidates: viable.length,
+    metadata_rejected,
+    products: dedupeProducts(rankVerified(accepted)),
+    decisions,
+    usage: imageResult.usage ?? null,
+    failures: imageResult.failures,
+    failure_reasons: imageResult.failure_reasons,
+    timing: {
+      ...(imageResult.timing ?? {}),
+      total_ms: Date.now() - started,
+    },
+  };
+}
+
 export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promise: Promise<unknown>): void }): Promise<Response> {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
   const path = new URL(request.url).pathname;
@@ -1313,6 +1433,24 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
     return jsonResponse(await authorizeAdminSession(env, request.headers.get('x-scoop-admin-session') ?? ''));
   }
   if (request.method !== 'POST') return jsonResponse({ error: 'Not found' }, 404);
+  if (env.BENCHMARK_MODE === 'true' && path === '/benchmark/raw-candidates') {
+    try {
+      const body = await request.json() as Record<string, unknown>;
+      return jsonResponse(await benchmarkRawCandidates(env, body));
+    } catch (error) {
+      logSafeError(error);
+      return jsonResponse({ error: error instanceof Error ? error.message : 'benchmark raw candidate failure' }, 400);
+    }
+  }
+  if (env.BENCHMARK_MODE === 'true' && path === '/benchmark/verify-candidates') {
+    try {
+      const body = await request.json() as Record<string, unknown>;
+      return jsonResponse(await benchmarkVerifyCandidates(env, body));
+    } catch (error) {
+      logSafeError(error);
+      return jsonResponse({ error: error instanceof Error ? error.message : 'benchmark verifier failure' }, 400);
+    }
+  }
   if (path === '/alpha/waitlist') {
     try {
       const body = await request.text();
