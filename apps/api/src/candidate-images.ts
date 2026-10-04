@@ -1,6 +1,7 @@
 import type { ProductCandidate, ProductContext } from './commerce.js';
 import type { ObjectDescription } from './types.js';
 import { attributes, canonical, type Evidence, type ImageComparison } from './verification-evidence.js';
+import { candidateEvidence, sourceEvidence } from './candidate-verification.js';
 
 type Image = { mimeType: string; data: string };
 // Shared across query broadening. Leave eight subrequests for retrieval/OAuth on Workers Free.
@@ -11,7 +12,7 @@ function reserve(budget: ImageRequestBudget): boolean {
   budget.remaining--; return true;
 }
 export type GeminiVerificationUsage = {
-  provider: 'gemini' | 'openrouter';
+  provider: 'gemini' | 'openrouter' | 'clef';
   model: string;
   requests: number;
   prompt_tokens: number;
@@ -351,6 +352,281 @@ export async function compareCandidateImages(
     const chunk = batches.slice(i, i + 2);
     await Promise.all(chunk.map((batch, j) => run(batch, i + j, batchBudgets[i + j])));
   }
+  timing.total_ms = Date.now() - timingStarted;
+  return { comparisons, failures, compared: comparisons.size, failure_reasons, usage, timing };
+}
+
+
+export type ClefVerificationBinding = {
+  run(model: string, input: unknown): Promise<unknown>;
+};
+
+function clefAnswerRoot(value: unknown): Record<string, unknown> {
+  const root = record(value);
+  const first = record(root?.result);
+  const second = record(first?.result);
+  return second ?? first ?? root ?? {};
+}
+
+function clefChoice(answer: unknown): string | null {
+  const item = record(answer);
+  if (!item) return null;
+  if (typeof item.choice === 'string') return item.choice;
+  if (typeof item.value === 'string') return item.value;
+  return null;
+}
+
+function clefNoul(answer: unknown): number | null {
+  const item = record(answer);
+  if (!item) return null;
+  for (const key of ['noul', 'probability', 'confidence']) {
+    const value = Number(item[key]);
+    if (Number.isFinite(value) && value >= 0 && value <= 1) return value;
+  }
+  return null;
+}
+
+function clefChoiceConfidence(answer: unknown, selected: string): number {
+  const item = record(answer);
+  if (!item) return 0.75;
+  const probabilities = record(item.probabilities) ?? record(item.probability) ?? record(item.probs);
+  const probability = Number(probabilities?.[selected]);
+  if (Number.isFinite(probability) && probability >= 0 && probability <= 1) return probability;
+  const confidence = Number(item.confidence);
+  return Number.isFinite(confidence) && confidence >= 0 && confidence <= 1 ? confidence : 0.75;
+}
+
+function clefNormalized(value: string | null | undefined): string {
+  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function clefTitleSupportsIdentity(title: string, brand: string, model: string): boolean {
+  const text = ` ${clefNormalized(title)} `;
+  const brandText = clefNormalized(brand);
+  const modelTokens = clefNormalized(model).split(' ').filter(Boolean);
+  return Boolean(brandText)
+    && text.includes(` ${brandText} `)
+    && modelTokens.length > 0
+    && modelTokens.every((token) => text.includes(` ${token} `));
+}
+
+function imageDataUrl(image: Image): string {
+  return `data:${image.mimeType};base64,${image.data}`;
+}
+
+export async function compareCandidateImagesWithClef(
+  ai: ClefVerificationBinding,
+  _apiKey: string,
+  _model: string,
+  source: Image,
+  description: ObjectDescription,
+  products: ProductCandidate[],
+  _context?: ProductContext,
+  budget = imageRequestBudget(),
+): Promise<ImageVerification> {
+  const comparisons = new Map<string, ImageComparison>();
+  let failures = 0;
+  const failure_reasons: Record<string, number> = {};
+  const timingStarted = Date.now();
+  const timing: ImageVerification['timing'] = { image_fetch_ms: 0, model_ms: 0, total_ms: 0, batches: [] };
+  const usage: GeminiVerificationUsage = {
+    provider: 'clef' as GeminiVerificationUsage['provider'],
+    model: '@cf/cloudflare/clef',
+    requests: 0,
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+    cost_usd: 0,
+  };
+  const fail = (reason: string, count = 1) => {
+    failure_reasons[reason] = (failure_reasons[reason] ?? 0) + count;
+    failures += count;
+  };
+
+  const runOne = async (product: ProductCandidate, index: number) => {
+    const batchStarted = Date.now();
+    const batchTiming: VerificationBatchTiming = {
+      batch_index: index,
+      candidates: 1,
+      images_loaded: 0,
+      comparisons: 0,
+      image_fetch_ms: 0,
+      model_ms: 0,
+      total_ms: 0,
+    };
+    try {
+      if (!product.image_reference) {
+        fail('image_missing');
+        return;
+      }
+      const localBudget: ImageRequestBudget = { remaining: 3 };
+      if (!reserve(budget)) {
+        fail('image_budget');
+        return;
+      }
+      const fetchStarted = Date.now();
+      const candidateImage = await fetchImage(product.image_reference, (reason) => {
+        failure_reasons[reason] = (failure_reasons[reason] ?? 0) + 1;
+      }, localBudget);
+      batchTiming.image_fetch_ms = Date.now() - fetchStarted;
+      timing.image_fetch_ms += batchTiming.image_fetch_ms;
+      if (!candidateImage) {
+        failures++;
+        return;
+      }
+      batchTiming.images_loaded = 1;
+
+      const modelStarted = Date.now();
+      usage.requests++;
+      let raw: unknown;
+      try {
+        raw = await ai.run('@cf/cloudflare/clef', {
+          model: 'clef',
+          state: {
+            task: 'Compare IMAGE 1, the selected object crop, with IMAGE 2, a commerce candidate. Pixels are primary evidence. Candidate metadata may corroborate identity but must not override visible contradictions. Never invent brand or model from style.',
+            source_description: description,
+            candidate: {
+              title: product.title,
+              brand: product.brand ?? null,
+              model: product.model ?? null,
+              category: product.category ?? null,
+              metadata: product.metadata ?? null,
+            },
+          },
+          images: [imageDataUrl(source), imageDataUrl(candidateImage)],
+          questions: {
+            relationship: {
+              type: 'choice',
+              instructions: 'What relationship is best supported between the two product images?',
+              criteria: {
+                same_product: 'Strong evidence supports the same product/model or SKU family, with no important visible contradiction.',
+                same_family: 'Same product family is plausible, but exact product/model is not sufficiently proven.',
+                similar_only: 'Only category/style similarity is supported; identity is not established.',
+                contradiction: 'A material visible or identity contradiction makes the candidate inconsistent with the selected object.',
+              },
+            },
+            source_brand_visible: {
+              type: 'noul',
+              instructions: 'Is the proposed source brand literally supported by readable logo, text, or unmistakable marking in IMAGE 1?',
+            },
+            source_model_visible: {
+              type: 'noul',
+              instructions: 'Is the proposed source model/product-family identity literally supported by readable text or unmistakable model marking in IMAGE 1?',
+            },
+            candidate_brand_supported: {
+              type: 'noul',
+              instructions: 'Is the candidate brand supported by IMAGE 2 and its supplied commerce metadata?',
+            },
+            candidate_model_supported: {
+              type: 'noul',
+              instructions: 'Is the candidate model/product-family identity supported by IMAGE 2 and its supplied commerce metadata?',
+            },
+            exact_model_variant_supported: {
+              type: 'noul',
+              instructions: 'Does the candidate support the exact same model/variant/version as the source hypothesis, including distinctions such as OG vs Classic, Pro, generation numbers, size/model codes, or named sub-variants? Answer low when only the broader family matches.',
+            },
+            critical_contradiction: {
+              type: 'noul',
+              instructions: 'Is there a critical contradiction in product type, dominant color family, sleeve/form, visible branding, model markings, silhouette, or distinctive construction?',
+            },
+          },
+        });
+      } catch (error) {
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        const diagnostic = rawMessage
+          .toLowerCase()
+          .replace(/https?:\/\/\S+/g, '[url]')
+          .replace(/[^a-z0-9._ -]+/g, ' ')
+          .replace(/\s+/g, '_')
+          .slice(0, 120);
+        fail(`model_fetch:${error instanceof Error ? error.name : 'error'}:${diagnostic || 'unknown'}`);
+        return;
+      } finally {
+        batchTiming.model_ms = Date.now() - modelStarted;
+        timing.model_ms += batchTiming.model_ms;
+      }
+
+      const root = clefAnswerRoot(raw);
+      const answers = record(root.answers) ?? {};
+      const relationAnswer = answers.relationship;
+      const relation = clefChoice(relationAnswer);
+      if (!relation) {
+        fail('model_schema');
+        return;
+      }
+      const contradiction = clefNoul(answers.critical_contradiction) ?? 0;
+      const relationConfidence = clefChoiceConfidence(relationAnswer, relation);
+      const similarity = contradiction >= 0.7
+        ? 0.2
+        : relation === 'same_product' ? 0.95
+        : relation === 'same_family' ? 0.78
+        : relation === 'similar_only' ? 0.62
+        : 0.2;
+      const sourceEv = sourceEvidence(description);
+      const candidateEv = candidateEvidence(product);
+
+      const sourceBrandVisible = clefNoul(answers.source_brand_visible) ?? 0;
+      const sourceModelVisible = clefNoul(answers.source_model_visible) ?? 0;
+      const candidateBrandSupported = clefNoul(answers.candidate_brand_supported) ?? 0;
+      const candidateModelSupported = clefNoul(answers.candidate_model_supported) ?? 0;
+      const exactModelVariantSupported = clefNoul(answers.exact_model_variant_supported) ?? 0;
+      const sourceBrandValue = description.brand_candidate ?? null;
+      const sourceModelValue = description.model_candidate ?? null;
+
+      const clefGroundedIdentity = relation === 'same_product'
+        && contradiction < 0.3
+        && Number(description.identity_confidence ?? 0) >= 0.85
+        && Boolean(sourceBrandValue && sourceModelValue)
+        && clefTitleSupportsIdentity(product.title, sourceBrandValue!, sourceModelValue!)
+        && candidateBrandSupported >= 0.7
+        && candidateModelSupported >= 0.7
+        && exactModelVariantSupported >= 0.8;
+
+      const sourceBrand = sourceEv.brand;
+      const sourceModel = sourceEv.model;
+      if (sourceBrand && (sourceBrandVisible >= 0.7 || clefGroundedIdentity)) {
+        sourceEv.brand = { ...sourceBrand, basis: 'image', confidence: Math.max(sourceBrand.confidence, clefGroundedIdentity ? 0.95 : 0.9) };
+      } else {
+        delete sourceEv.brand;
+      }
+      if (sourceModel && (sourceModelVisible >= 0.7 || clefGroundedIdentity)) {
+        sourceEv.model = { ...sourceModel, basis: 'image', confidence: Math.max(sourceModel.confidence, clefGroundedIdentity ? 0.95 : 0.9) };
+      } else {
+        delete sourceEv.model;
+      }
+
+      if (clefGroundedIdentity && sourceBrandValue && sourceModelValue) {
+        candidateEv.brand = { value: sourceBrandValue, confidence: 0.95, basis: 'image' };
+        candidateEv.model = { value: sourceModelValue, confidence: 0.95, basis: 'image' };
+      } else {
+        if (candidateBrandSupported < 0.6) delete candidateEv.brand;
+        if (candidateModelSupported < 0.6) delete candidateEv.model;
+      }
+
+      comparisons.set(candidateKey(product), {
+        source: sourceEv,
+        candidate: candidateEv,
+        similarity,
+        confidence: clefGroundedIdentity ? 0.95 : Math.max(0.65, Math.min(0.99, relationConfidence)),
+        matching_details: relation === 'same_product'
+          ? ['Clef found strong product-level visual agreement']
+          : relation === 'same_family'
+            ? ['Clef found product-family visual agreement']
+            : [],
+      });
+      batchTiming.comparisons = 1;
+    } finally {
+      batchTiming.total_ms = Date.now() - batchStarted;
+      timing.batches.push(batchTiming);
+    }
+  };
+
+  // Clef decisions are independent. Four-way concurrency keeps verifier latency bounded
+  // while preserving the same candidate order and downstream trust thresholds.
+  for (let i = 0; i < products.length; i += 4) {
+    await Promise.all(products.slice(i, i + 4).map((product, j) => runOne(product, i + j)));
+  }
+
   timing.total_ms = Date.now() - timingStarted;
   return { comparisons, failures, compared: comparisons.size, failure_reasons, usage, timing };
 }
