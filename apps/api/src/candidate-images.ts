@@ -396,6 +396,20 @@ function clefChoiceConfidence(answer: unknown, selected: string): number {
   return Number.isFinite(confidence) && confidence >= 0 && confidence <= 1 ? confidence : 0.75;
 }
 
+function clefNormalized(value: string | null | undefined): string {
+  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function clefTitleSupportsIdentity(title: string, brand: string, model: string): boolean {
+  const text = ` ${clefNormalized(title)} `;
+  const brandText = clefNormalized(brand);
+  const modelTokens = clefNormalized(model).split(' ').filter(Boolean);
+  return Boolean(brandText)
+    && text.includes(` ${brandText} `)
+    && modelTokens.length > 0
+    && modelTokens.every((token) => text.includes(` ${token} `));
+}
+
 function imageDataUrl(image: Image): string {
   return `data:${image.mimeType};base64,${image.data}`;
 }
@@ -507,6 +521,10 @@ export async function compareCandidateImagesWithClef(
               type: 'noul',
               instructions: 'Is the candidate model/product-family identity supported by IMAGE 2 and its supplied commerce metadata?',
             },
+            exact_model_variant_supported: {
+              type: 'noul',
+              instructions: 'Does the candidate support the exact same model/variant/version as the source hypothesis, including distinctions such as OG vs Classic, Pro, generation numbers, size/model codes, or named sub-variants? Answer low when only the broader family matches.',
+            },
             critical_contradiction: {
               type: 'noul',
               instructions: 'Is there a critical contradiction in product type, dominant color family, sleeve/form, visible branding, model markings, silhouette, or distinctive construction?',
@@ -540,26 +558,49 @@ export async function compareCandidateImagesWithClef(
       const sourceEv = sourceEvidence(description);
       const candidateEv = candidateEvidence(product);
 
+      const sourceBrandVisible = clefNoul(answers.source_brand_visible) ?? 0;
+      const sourceModelVisible = clefNoul(answers.source_model_visible) ?? 0;
+      const candidateBrandSupported = clefNoul(answers.candidate_brand_supported) ?? 0;
+      const candidateModelSupported = clefNoul(answers.candidate_model_supported) ?? 0;
+      const exactModelVariantSupported = clefNoul(answers.exact_model_variant_supported) ?? 0;
+      const sourceBrandValue = description.brand_candidate ?? null;
+      const sourceModelValue = description.model_candidate ?? null;
+
+      const clefGroundedIdentity = relation === 'same_product'
+        && contradiction < 0.3
+        && Number(description.identity_confidence ?? 0) >= 0.85
+        && Boolean(sourceBrandValue && sourceModelValue)
+        && clefTitleSupportsIdentity(product.title, sourceBrandValue!, sourceModelValue!)
+        && candidateBrandSupported >= 0.7
+        && candidateModelSupported >= 0.7
+        && exactModelVariantSupported >= 0.8;
+
       const sourceBrand = sourceEv.brand;
       const sourceModel = sourceEv.model;
-      if (sourceBrand && (clefNoul(answers.source_brand_visible) ?? 0) >= 0.7) {
-        sourceEv.brand = { ...sourceBrand, basis: 'image', confidence: Math.max(sourceBrand.confidence, 0.9) };
+      if (sourceBrand && (sourceBrandVisible >= 0.7 || clefGroundedIdentity)) {
+        sourceEv.brand = { ...sourceBrand, basis: 'image', confidence: Math.max(sourceBrand.confidence, clefGroundedIdentity ? 0.95 : 0.9) };
       } else {
         delete sourceEv.brand;
       }
-      if (sourceModel && (clefNoul(answers.source_model_visible) ?? 0) >= 0.7) {
-        sourceEv.model = { ...sourceModel, basis: 'image', confidence: Math.max(sourceModel.confidence, 0.9) };
+      if (sourceModel && (sourceModelVisible >= 0.7 || clefGroundedIdentity)) {
+        sourceEv.model = { ...sourceModel, basis: 'image', confidence: Math.max(sourceModel.confidence, clefGroundedIdentity ? 0.95 : 0.9) };
       } else {
         delete sourceEv.model;
       }
-      if ((clefNoul(answers.candidate_brand_supported) ?? 0) < 0.6) delete candidateEv.brand;
-      if ((clefNoul(answers.candidate_model_supported) ?? 0) < 0.6) delete candidateEv.model;
+
+      if (clefGroundedIdentity && sourceBrandValue && sourceModelValue) {
+        candidateEv.brand = { value: sourceBrandValue, confidence: 0.95, basis: 'image' };
+        candidateEv.model = { value: sourceModelValue, confidence: 0.95, basis: 'image' };
+      } else {
+        if (candidateBrandSupported < 0.6) delete candidateEv.brand;
+        if (candidateModelSupported < 0.6) delete candidateEv.model;
+      }
 
       comparisons.set(candidateKey(product), {
         source: sourceEv,
         candidate: candidateEv,
         similarity,
-        confidence: Math.max(0.65, Math.min(0.99, relationConfidence)),
+        confidence: clefGroundedIdentity ? 0.95 : Math.max(0.65, Math.min(0.99, relationConfidence)),
         matching_details: relation === 'same_product'
           ? ['Clef found strong product-level visual agreement']
           : relation === 'same_family'
