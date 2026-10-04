@@ -65,7 +65,7 @@ test('one comparable wrong correction only demotes and never strengthens identit
   assert.equal(result.suppressed, 0);
   assert.equal(adjusted.verification_score, 60);
   assert.equal(adjusted.result_class, 'LIKELY');
-  assert.match(adjusted.verification_reasons.at(-1), /prior comparable user correction/);
+  assert.match(adjusted.verification_reasons.at(-1), /prior exact-mapping user correction/);
 });
 
 test('repeated comparable wrong corrections suppress a known-bad mapping', () => {
