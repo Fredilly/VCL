@@ -56,9 +56,21 @@ jobs:
           };
           const prod = names(process.env.PROD);
           const base = names(process.env.BASE);
-          const required = [...prod].filter((name) => !name.startsWith('ALPHA_'));
+          // A real Scoop preview only needs the providers used by current production.
+          // Do not fail on legacy/sandbox secrets that are present on the production worker.
+          const required = [
+            'OPENROUTER_API_KEY',
+            'BRAVE_SEARCH_API_KEY',
+            'SERPAPI_API_KEY',
+            'ETSY_KEYSTRING',
+            'ETSY_SHARED_SECRET',
+          ].filter((name) => prod.has(name));
           const missing = required.filter((name) => !base.has(name));
-          if (missing.length) throw new Error('Preview Base missing: ' + missing.join(', '));
+          if (missing.length) {
+            console.error('Preview Base is not initialized with the current production provider secrets: ' + missing.join(', '));
+            console.error('This is a one-time Cloudflare preview configuration requirement, not a code failure.');
+            process.exit(2);
+          }
           NODE
 
       - name: Prepare preview config
