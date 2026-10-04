@@ -1,5 +1,6 @@
 import type { ProductCandidate } from './commerce.js';
 import type { ObjectDescription } from './types.js';
+import { brandsCompatible } from './brand-gate.js';
 
 export type VerifiedProductProvenance = 'creator_verified' | 'brand_verified' | 'admin_verified' | 'test_fixture';
 
@@ -139,9 +140,7 @@ export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProduc
         && typeof mapping.timestamp_end_ms === 'number'
         && input.timestampMs >= mapping.timestamp_start_ms
         && input.timestampMs <= mapping.timestamp_end_ms);
-    const expectedBrand = normalize(mapping.brand);
-    const observedBrand = normalize(input.description.brand_candidate);
-    const brandCompatible = !expectedBrand || !observedBrand || expectedBrand === observedBrand;
+    const brandCompatible = brandsCompatible(mapping.brand, input.description.brand_candidate);
 
     return normalize(mapping.platform) === platform
       && normalizeContentRef(mapping.platform, mapping.content_ref) === contentRef
