@@ -24,7 +24,7 @@ import { routeWithJevFabric } from './jev-fabric.js';
 import type { WorkersAiBinding } from './jev.js';
 import { resolveJevBinding } from './jev-binding.js';
 import { normalizeAlphaTelemetry, recordAlphaFeedback, recordAlphaScoop } from './alpha-telemetry.js';
-import { applyFeedbackPenalties, evidenceFingerprint, feedbackCandidateKey, feedbackPenalties, feedbackReport, feedbackReviewItem, persistFeedback, persistFeedbackContext, resolveFeedbackReview, FEEDBACK_RANKING_POLICY, type DurableObjectNamespaceLike } from './feedback-ledger.js';
+import { applyFeedbackPenalties, evidenceFingerprint, feedbackCandidateKey, feedbackFamily, feedbackPenalties, feedbackReport, feedbackReviewItem, persistFeedback, persistFeedbackContext, resolveFeedbackReview, FEEDBACK_RANKING_POLICY, type DurableObjectNamespaceLike } from './feedback-ledger.js';
 export { FeedbackLedger } from './feedback-ledger.js';
 import { persistAlphaLearning } from './alpha-learning.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
@@ -2195,13 +2195,27 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         }
       }
       const feedbackEvidenceKey = evidenceFingerprint(description);
-      let feedbackLearning = { penalized: 0, suppressed: 0 };
+      const feedbackFamilyKey = feedbackFamily({
+        category: resolved.query.category,
+        subcategory: resolved.query.subcategory,
+        brand: resolved.query.brand,
+        model: resolved.query.model,
+      });
+      let feedbackLearning = {
+        penalized: 0,
+        suppressed: 0,
+        signal_levels: { exact: 0, candidate_global: 0, family: 0 },
+      };
       if (env.FEEDBACK_LEDGER && resolved.products.length) {
         try {
-          const penalties = await feedbackPenalties(env, feedbackEvidenceKey, resolved.products);
+          const penalties = await feedbackPenalties(env, feedbackEvidenceKey, resolved.products, feedbackFamilyKey);
           const adjusted = applyFeedbackPenalties(resolved.products, penalties);
           resolved.products = adjusted.products;
-          feedbackLearning = { penalized: adjusted.penalized, suppressed: adjusted.suppressed };
+          feedbackLearning = {
+            penalized: adjusted.penalized,
+            suppressed: adjusted.suppressed,
+            signal_levels: adjusted.signal_levels,
+          };
         } catch (error) {
           logSafeError(error);
         }
