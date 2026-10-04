@@ -282,13 +282,15 @@ export default {
         }, 422);
       }
 
-      const metadataRejected: Array<{ candidate_key: string; reason: string }> = [];
-      const viable = raw.candidates.filter((candidate) => {
+      // Decisive A/B: both verifiers must receive the exact same raw commerce
+      // candidates before any metadata contradiction prefilter can remove rows.
+      // We still record what the production prefilter would have rejected for
+      // diagnostics, but it does not alter either verifier's input set.
+      const metadataRejected = raw.candidates.flatMap((candidate) => {
         const contradiction = highConfidenceMetadataContradiction(description, candidate);
-        if (!contradiction) return true;
-        metadataRejected.push({ candidate_key: candidateKey(candidate), reason: contradiction });
-        return false;
+        return contradiction ? [{ candidate_key: candidateKey(candidate), reason: contradiction }] : [];
       });
+      const viable = raw.candidates;
 
       const [current, clef] = await Promise.all([
         verifyWithCurrent(env, source, description, viable, context),
