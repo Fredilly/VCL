@@ -532,7 +532,14 @@ export async function compareCandidateImagesWithClef(
           },
         });
       } catch (error) {
-        fail('model_fetch');
+        const rawMessage = error instanceof Error ? error.message : String(error);
+        const diagnostic = rawMessage
+          .toLowerCase()
+          .replace(/https?:\/\/\S+/g, '[url]')
+          .replace(/[^a-z0-9._ -]+/g, ' ')
+          .replace(/\s+/g, '_')
+          .slice(0, 120);
+        fail(`model_fetch:${error instanceof Error ? error.name : 'error'}:${diagnostic || 'unknown'}`);
         return;
       } finally {
         batchTiming.model_ms = Date.now() - modelStarted;
