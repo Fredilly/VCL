@@ -1,0 +1,121 @@
+name: PR Scoop preview
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scoop-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify Preview Base secrets mirror production
+        run: |
+          set -euo pipefail
+          PROD="$(pnpm dlx wrangler@4.135.0 secret list --config apps/api/wrangler.jsonc --format json)"
+          BASE="$(pnpm dlx wrangler@4.135.0 preview base-config secret list --worker-name vcl-api --json)"
+          PROD="$PROD" BASE="$BASE" node --input-type=module <<'NODE'
+          const names = (raw) => {
+            const out = new Set();
+            const walk = (v) => {
+              if (Array.isArray(v)) return v.forEach(walk);
+              if (!v || typeof v !== 'object') return;
+              if (typeof v.name === 'string') out.add(v.name);
+              if (typeof v.key === 'string') out.add(v.key);
+              Object.values(v).forEach(walk);
+            };
+            walk(JSON.parse(raw || '[]'));
+            return out;
+          };
+          const prod = names(process.env.PROD);
+          const base = names(process.env.BASE);
+          const required = [...prod].filter((name) => !name.startsWith('ALPHA_'));
+          const missing = required.filter((name) => !base.has(name));
+          if (missing.length) throw new Error('Preview Base missing: ' + missing.join(', '));
+          NODE
+
+      - name: Prepare preview config
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const input = readFileSync('apps/api/wrangler.jsonc', 'utf8');
+          const previews = {
+            vars: {
+              VISION_PROVIDER: 'openrouter',
+              OPENROUTER_MODEL: 'google/gemini-2.5-flash-lite',
+              GEMINI_MODEL: 'gemini-3.5-flash-lite',
+              COMMERCE_ELIGIBILITY_GATE: '1',
+              EBAY_ENVIRONMENT: 'production',
+              JEV_DECISION_ROUTER: 'true',
+              BENCHMARK_MODE: 'false',
+              VERIFIED_PRODUCT_TEST_MODE: 'false'
+            },
+            ai: { binding: 'AI' }
+          };
+          writeFileSync('apps/api/.pr-preview-wrangler.jsonc',
+            input.replace(/\n}\s*$/, `,\n  "previews": ${JSON.stringify(previews, null, 2)}\n}\n`));
+          NODE
+
+      - name: Create Worker Preview
+        run: |
+          set -euo pipefail
+          output="$(pnpm dlx wrangler@4.135.0 preview --config apps/api/.pr-preview-wrangler.jsonc --worker-name vcl-api --name "pr-${{ github.event.pull_request.number }}" --json)"
+          printf '%s\n' "$output" | tee preview-upload.json
+          printf '%s' "$output" | jq -er '.preview_urls[0] // .preview.urls[0]' > preview-origin.txt
+          echo "Preview: $(cat preview-origin.txt)"
+
+      - name: Point test extension at preview
+        run: |
+          PREVIEW_ORIGIN="$(cat preview-origin.txt)" node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const path = 'apps/extension/entrypoints/background.ts';
+          let source = readFileSync(path, 'utf8');
+          source = source.replaceAll('https://api.vcl.article6.org', process.env.PREVIEW_ORIGIN);
+          writeFileSync(path, source);
+          NODE
+
+      - name: Build preview extension
+        run: pnpm --filter @vcl/extension build
+
+      - name: Package preview extension
+        run: |
+          mkdir -p preview-package
+          cp -R apps/extension/.output/chrome-mv3/* preview-package/
+          cp preview-origin.txt preview-package/PREVIEW_API.txt
+          (cd preview-package && zip -qr ../scoop-pr-${{ github.event.pull_request.number }}-preview.zip .)
+
+      - name: Upload preview extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: scoop-pr-${{ github.event.pull_request.number }}-preview
+          path: |
+            scoop-pr-${{ github.event.pull_request.number }}-preview.zip
+            preview-origin.txt
+          retention-days: 3
