@@ -4,6 +4,7 @@ const preparedPath = process.env.VCL_RAW_AB_PREPARED_INPUT;
 const origin = process.env.VCL_RAW_AB_ORIGIN;
 const outputPath = process.env.VCL_RAW_AB_OUTPUT ?? 'clef-raw-verifier-ab-report.json';
 const candidateLimit = Math.max(1, Math.min(12, Number(process.env.VCL_RAW_AB_CANDIDATE_LIMIT ?? 8) || 8));
+const versionId = process.env.VCL_RAW_AB_VERSION_ID ?? '';
 
 if (!preparedPath) throw new Error('VCL_RAW_AB_PREPARED_INPUT is required');
 if (!origin) throw new Error('VCL_RAW_AB_ORIGIN is required');
@@ -45,7 +46,10 @@ function percentile(values, p) {
 async function post(body) {
   const response = await fetch(origin, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(versionId ? { 'Cloudflare-Workers-Version-Overrides': `vcl-api="${versionId}"` } : {}),
+    },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(120000),
   });
