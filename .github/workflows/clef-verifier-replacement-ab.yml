@@ -122,18 +122,15 @@ jobs:
 
       - name: Upload benchmark-only Worker version
         run: |
-          cat > clef-raw-ab-wrangler.jsonc <<'JSON'
-          {
-            "$schema": "./node_modules/wrangler/config-schema.json",
-            "name": "vcl-api",
-            "main": "apps/api/src/clef-raw-verifier-ab-worker.ts",
-            "compatibility_date": "2026-09-11",
-            "workers_dev": true,
-            "preview_urls": true,
-            "keep_vars": true,
-            "ai": { "binding": "AI" }
-          }
-          JSON
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const config = readFileSync('apps/api/wrangler.jsonc', 'utf8');
+          writeFileSync(
+            'clef-raw-ab-wrangler.jsonc',
+            config.replace('"main": "src/server.ts"', '"main": "src/clef-raw-verifier-ab-worker.ts"')
+                  .replace(/"routes"\s*:\s*\[[\s\S]*?\]\s*,?/m, '')
+          );
+          NODE
 
           alias="clefraw-$GITHUB_RUN_ID"
           echo "$alias" > clef-raw-ab-alias.txt
