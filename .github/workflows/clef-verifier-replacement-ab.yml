@@ -127,7 +127,7 @@ jobs:
           const config = readFileSync('apps/api/wrangler.jsonc', 'utf8');
           writeFileSync(
             'clef-raw-ab-wrangler.jsonc',
-            config.replace('"main": "src/server.ts"', '"main": "src/clef-raw-verifier-ab-worker.ts"')
+            config.replace('"main": "src/server.ts"', '"main": "apps/api/src/clef-raw-verifier-ab-worker.ts"')
                   .replace(/"routes"\s*:\s*\[[\s\S]*?\]\s*,?/m, '')
           );
           NODE
