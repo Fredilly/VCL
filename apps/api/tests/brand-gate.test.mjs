@@ -10,7 +10,7 @@ const stripImports = (source) => source.replace(/^import[\s\S]*?from ['"][^'"]+[
 const source = await readFile(new URL('../src/brand-gate.ts', import.meta.url), 'utf8');
 const context = vm.createContext({ exports: {} });
 vm.runInContext(compile(stripImports(source)), context);
-const { applyBrandGate, candidateMatchesBrand } = context.exports;
+const { applyBrandGate, candidateMatchesBrand, brandsCompatible } = context.exports;
 
 const candidate = (title) => ({ id: title, title, brand: null, model: null, category: null, image_reference: null, provenance: 'test', destination: null, price: null, currency: null, result_class: 'SIMILAR' });
 const description = { brand_candidate: 'BOSS', identity_confidence: 0.95 };
@@ -27,4 +27,15 @@ test('low-confidence brand does not hard-filter alternatives', () => {
 
 test('Hugo Boss wording matches BOSS Hugo Boss recognition', () => {
   assert.equal(candidateMatchesBrand("HUGO BOSS Men's crewneck sweater", 'BOSS Hugo Boss'), true);
+});
+
+
+test('verified brand compatibility allows concise composite-brand observations', () => {
+  assert.equal(brandsCompatible("Kith & '47", 'Kith'), true);
+  assert.equal(brandsCompatible('BOSS Hugo Boss', 'Hugo Boss'), true);
+});
+
+test('verified brand compatibility rejects unrelated brands', () => {
+  assert.equal(brandsCompatible('Nike', 'New Balance'), false);
+  assert.equal(brandsCompatible('Adidas', 'Nike'), false);
 });
