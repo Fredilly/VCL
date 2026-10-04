@@ -145,6 +145,93 @@ test('admin verified time-window mapping is deterministic only inside its verifi
 });
 
 
+test('promoted Nike time-window mapping cannot override explicit New Balance evidence', () => {
+  const mapping = {
+    platform: 'youtube',
+    content_ref: 'youtube:SHOE_VIDEO',
+    scope: 'time_window',
+    timestamp_start_ms: 407000,
+    timestamp_end_ms: 417000,
+    object_type: 'sneaker',
+    brand: 'Nike',
+    product_id: 'AIR-FORCE-1',
+    title: 'Nike Air Force 1',
+    destination: 'https://www.nike.com/',
+    provenance: 'admin_verified',
+  };
+  const newBalance = {
+    ...shirt,
+    category: 'shoes',
+    subcategory: 'sneaker',
+    brand_candidate: 'New Balance',
+    model_candidate: null,
+    color: 'white',
+    style_attributes: ['low top'],
+    visible_text: ['New Balance'],
+    logos_markings: ['New Balance logo'],
+    distinctive_features: ['running sneaker'],
+    shape_silhouette: ['low-top sneaker'],
+    search_terms: ['New Balance white sneaker'],
+    confidence: 0.95,
+    identity_confidence: 0.8,
+  };
+
+  const hit = mod.lookupVerifiedProductMapping({
+    mappings: [mapping],
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: 'SHOE_VIDEO',
+    timestampMs: 412000,
+    description: newBalance,
+  });
+
+  assert.equal(hit, null);
+});
+
+test('promoted time-window mapping still resolves when current brand evidence agrees', () => {
+  const mapping = {
+    platform: 'youtube',
+    content_ref: 'youtube:SHOE_VIDEO',
+    scope: 'time_window',
+    timestamp_start_ms: 407000,
+    timestamp_end_ms: 417000,
+    object_type: 'sneaker',
+    brand: 'Nike',
+    product_id: 'AIR-FORCE-1',
+    title: 'Nike Air Force 1',
+    destination: 'https://www.nike.com/',
+    provenance: 'admin_verified',
+  };
+  const nike = {
+    ...shirt,
+    category: 'shoes',
+    subcategory: 'sneaker',
+    brand_candidate: 'Nike',
+    model_candidate: 'Air Force 1',
+    color: 'white',
+    style_attributes: ['low top'],
+    visible_text: ['Nike'],
+    logos_markings: ['Nike Swoosh'],
+    distinctive_features: ['basketball sneaker'],
+    shape_silhouette: ['low-top sneaker'],
+    search_terms: ['Nike Air Force 1 white sneaker'],
+    confidence: 0.95,
+    identity_confidence: 0.9,
+  };
+
+  const hit = mod.lookupVerifiedProductMapping({
+    mappings: [mapping],
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: 'SHOE_VIDEO',
+    timestampMs: 412000,
+    description: nike,
+  });
+
+  assert.equal(hit?.product_id, 'AIR-FORCE-1');
+});
+
+
 test('verified mapping preserves merchant thumbnail and provider for fallback display', () => {
   const mapping = {
     platform: 'youtube',
