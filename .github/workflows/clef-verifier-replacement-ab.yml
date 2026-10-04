@@ -120,7 +120,7 @@ jobs:
             exit 1
           fi
 
-      - name: Upload benchmark-only Worker version
+      - name: Upload benchmark-only Worker version and stage at 0%
         run: |
           node --input-type=module <<'NODE'
           import { readFileSync, writeFileSync } from 'node:fs';
@@ -132,35 +132,105 @@ jobs:
           );
           NODE
 
-          alias="clefraw-$GITHUB_RUN_ID"
-          echo "$alias" > clef-raw-ab-alias.txt
+          pnpm dlx wrangler@4.135.0 deployments list \
+            --config clef-raw-ab-wrangler.jsonc \
+            --name vcl-api \
+            --json > clef-raw-ab-deployments-before.json
+
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const raw = JSON.parse(readFileSync('clef-raw-ab-deployments-before.json', 'utf8'));
+          const deployments = Array.isArray(raw) ? raw : Array.isArray(raw?.result) ? raw.result : Array.isArray(raw?.deployments) ? raw.deployments : [];
+          if (!deployments.length) throw new Error('Could not read active vcl-api deployment');
+
+          const sorted = [...deployments].sort((a, b) => {
+            const ta = Date.parse(a.created_on ?? a.created_at ?? a.createdAt ?? 0) || 0;
+            const tb = Date.parse(b.created_on ?? b.created_at ?? b.createdAt ?? 0) || 0;
+            return tb - ta;
+          });
+          const active = sorted[0];
+          const versions = Array.isArray(active.versions) ? active.versions : [];
+          const positive = versions.filter((v) => Number(v.percentage ?? v.traffic_percentage ?? 0) > 0);
+          if (positive.length !== 1 || Number(positive[0].percentage ?? positive[0].traffic_percentage) !== 100) {
+            console.error(JSON.stringify(active, null, 2));
+            throw new Error('Refusing benchmark: active deployment is not exactly one version at 100%');
+          }
+          const oldId = positive[0].version_id ?? positive[0].id;
+          if (!oldId) throw new Error('Could not identify current production version ID');
+          writeFileSync('clef-raw-ab-old-version.txt', String(oldId));
+          NODE
+
+          export WRANGLER_OUTPUT_FILE="$GITHUB_WORKSPACE/clef-raw-ab-wrangler-output.ndjson"
+          rm -f "$WRANGLER_OUTPUT_FILE"
           pnpm dlx wrangler@4.135.0 versions upload \
             --config clef-raw-ab-wrangler.jsonc \
             --keep-vars \
-            --preview-alias "$alias" \
             --message "Clef raw-candidate verifier A/B $GITHUB_SHA" \
             | tee clef-raw-ab-version.log
 
-          origin="https://${alias}-vcl-api.fredilly.workers.dev"
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          let versionId = '';
+          try {
+            const lines = readFileSync('clef-raw-ab-wrangler-output.ndjson', 'utf8').trim().split(/\n+/);
+            for (const line of lines) {
+              const row = JSON.parse(line);
+              if (row?.type === 'version-upload' && row.version_id) versionId = row.version_id;
+            }
+          } catch {}
+          if (!versionId) {
+            const log = readFileSync('clef-raw-ab-version.log', 'utf8');
+            versionId = log.match(/Worker Version ID:\s*([0-9a-f-]{36})/i)?.[1] ?? '';
+          }
+          if (!versionId) throw new Error('Could not capture uploaded benchmark version ID');
+          writeFileSync('clef-raw-ab-new-version.txt', versionId);
+          NODE
+
+          old_id="$(cat clef-raw-ab-old-version.txt)"
+          new_id="$(cat clef-raw-ab-new-version.txt)"
+
+          pnpm dlx wrangler@4.135.0 versions deploy \
+            --config clef-raw-ab-wrangler.jsonc \
+            --name vcl-api \
+            "$old_id@100%" "$new_id@0%" -y \
+            --message "Stage Clef benchmark version at zero traffic"
+
+          touch clef-raw-ab-staged-at-zero
+          sleep 10
+
+          origin="https://api.vcl.article6.org"
           echo "$origin" > clef-raw-ab-origin.txt
 
-          for attempt in 1 2 3 4 5; do
-            if curl --fail --silent --show-error "$origin" > clef-raw-ab-health.json; then
-              cat clef-raw-ab-health.json
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "Version URL did not become ready: $origin"
-          exit 1
+          curl --fail --silent --show-error \
+            -H "Cloudflare-Workers-Version-Overrides: vcl-api=\"$new_id\"" \
+            "$origin" > clef-raw-ab-health.json
+          cat clef-raw-ab-health.json
 
       - name: Run decisive raw-candidate A/B
         run: |
           VCL_RAW_AB_PREPARED_INPUT="$GITHUB_WORKSPACE/clef-raw-ab-prepared.json" \
           VCL_RAW_AB_ORIGIN="$(cat clef-raw-ab-origin.txt)" \
+          VCL_RAW_AB_VERSION_ID="$(cat clef-raw-ab-new-version.txt)" \
           VCL_RAW_AB_CANDIDATE_LIMIT="$CANDIDATE_LIMIT" \
           VCL_RAW_AB_OUTPUT="$GITHUB_WORKSPACE/clef-raw-ab-report.json" \
           node tests/benchmark/clef-verification/raw-candidate-ab.mjs
+
+      - name: Restore production deployment
+        if: always()
+        run: |
+          if [ -f clef-raw-ab-staged-at-zero ] && [ -f clef-raw-ab-old-version.txt ]; then
+            old_id="$(cat clef-raw-ab-old-version.txt)"
+            pnpm dlx wrangler@4.135.0 versions deploy \
+              --config clef-raw-ab-wrangler.jsonc \
+              --name vcl-api \
+              "$old_id@100%" -y \
+              --message "Restore single production version after Clef benchmark"
+            sleep 5
+            pnpm dlx wrangler@4.135.0 deployments list \
+              --config clef-raw-ab-wrangler.jsonc \
+              --name vcl-api \
+              --json > clef-raw-ab-deployments-after.json
+          fi
 
       - name: Print decisive benchmark summary
         if: always()
@@ -176,9 +246,13 @@ jobs:
           name: clef-raw-candidate-verifier-ab-${{ github.run_id }}
           path: |
             clef-raw-ab-commit.txt
-            clef-raw-ab-alias.txt
             clef-raw-ab-origin.txt
             clef-raw-ab-version.log
+            clef-raw-ab-wrangler-output.ndjson
+            clef-raw-ab-old-version.txt
+            clef-raw-ab-new-version.txt
+            clef-raw-ab-deployments-before.json
+            clef-raw-ab-deployments-after.json
             clef-raw-ab-health.json
             clef-raw-ab-prepared.json
             clef-raw-ab-report.json
