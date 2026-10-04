@@ -204,8 +204,13 @@ export async function compareCandidateImages(
   const timingStarted = Date.now();
   const timing: ImageVerification['timing'] = { image_fetch_ms: 0, model_ms: 0, total_ms: 0, batches: [] };
   const failure = (reason: string, count = 1) => { failure_reasons[reason] = (failure_reasons[reason] ?? 0) + count; };
-  // Six thumbnails + one source stay under the inline payload limit, even at MAX_BYTES.
-  const batches = Array.from({ length: Math.ceil(products.length / 6) }, (_, i) => products.slice(i * 6, i * 6 + 6));
+  // Keep verifier batches small. In live OpenRouter/Gemini runs, six-candidate
+  // responses can return only a partial candidates array, which appears as
+  // model_schema failures even though the same model succeeds on the remaining
+  // two-candidate batch. Two candidates keeps the response shape reliable while
+  // preserving parallel verification.
+  const batchSize = 2;
+  const batches = Array.from({ length: Math.ceil(products.length / batchSize) }, (_, i) => products.slice(i * batchSize, i * batchSize + batchSize));
   // Pre-allocate budget in deterministic batch order before any concurrent work.
   // Earlier batches always receive verification slots first; if a batch fails and
   // returns unused budget it goes back to the shared pool for later batches, but
