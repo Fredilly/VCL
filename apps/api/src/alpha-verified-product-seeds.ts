@@ -46,7 +46,7 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     image_reference: null,
     provider: null,
     provenance: 'admin_verified',
-  },,
+  },
   {
     platform: 'youtube',
     content_ref: '313GzQj7TS8',
