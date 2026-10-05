@@ -262,15 +262,53 @@ export function identityWithTrustedVpmObservations(
   };
 }
 
+function objectFamily(value: string | null | undefined): string {
+  const normalized = normalizeIdentityText(value);
+  if (!normalized) return '';
+  const families: Array<[string, string[]]> = [
+    ['bag', ['bag', 'handbag', 'shoulder bag', 'crossbody', 'purse', 'tote', 'clutch', 'satchel']],
+    ['shoe', ['shoe', 'shoes', 'sneaker', 'sneakers', 'trainer', 'trainers', 'boot', 'boots', 'loafer', 'loafers']],
+    ['shirt', ['shirt', 't shirt', 'tee', 'top', 'apparel']],
+    ['outerwear', ['jacket', 'coat', 'blazer', 'outerwear']],
+    ['watch', ['watch', 'wristwatch', 'timepiece']],
+    ['eyewear', ['glasses', 'sunglasses', 'eyewear', 'frames']],
+    ['fragrance', ['fragrance', 'perfume', 'cologne', 'eau de parfum', 'eau de toilette']],
+  ];
+  for (const [family, values] of families) {
+    if (values.some((candidate) => normalized === candidate || normalized.includes(candidate))) return family;
+  }
+  return normalized;
+}
+
+function vpmTrackCompatible(identity: CanonicalProductIdentity, description: ObjectDescription): boolean {
+  const expectedBrand = normalizeIdentityText(identity.brand);
+  const observedBrand = normalizeIdentityText(description.brand_candidate);
+  if (expectedBrand && observedBrand && expectedBrand !== observedBrand) return false;
+
+  const expectedFamily = objectFamily(identity.object_type);
+  const observedFamily = objectFamily(description.subcategory || description.category);
+  if (expectedFamily && observedFamily && expectedFamily !== observedFamily) return false;
+
+  return true;
+}
+
 export function verifiedProductMemoryCandidates(input: {
   description: ObjectDescription;
   candidates: SameVideoCanonicalCandidate[];
 }): SameVideoCanonicalCandidate[] {
-  // Once explicit VPM tracks exist for a video, recognition should compare against
-  // those verified memories rather than every historical canonical mapping. This
-  // reduces ambiguity and model work without relaxing any Exact threshold.
-  return eligibleSameVideoCanonicalCandidates(input).filter(({ mapping, identity }) =>
-    Boolean(mapping.track_id) && mapping.track_id === identity.canonical_key);
+  // Explicit Product Memory tracks belong to this video, so later frames should not
+  // be discarded because the vision description drifted on color/model/subtype.
+  // Keep only clear brand/object-family contradictions here; the existing strict
+  // visual verifier remains authoritative for Exact.
+  const unique = new Map<string, SameVideoCanonicalCandidate>();
+  for (const candidate of input.candidates) {
+    const { mapping, identity } = candidate;
+    if (!mapping.canonical_key || mapping.canonical_key !== identity.canonical_key) continue;
+    if (!mapping.track_id || mapping.track_id !== identity.canonical_key) continue;
+    if (!vpmTrackCompatible(identity, input.description)) continue;
+    if (!unique.has(identity.canonical_key)) unique.set(identity.canonical_key, candidate);
+  }
+  return [...unique.values()];
 }
 
 export function eligibleSameVideoCanonicalCandidates(input: {
