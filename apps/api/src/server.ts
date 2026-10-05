@@ -429,12 +429,26 @@ export async function refreshVerifiedOffers(
     ?? mapping.image_reference
     ?? merchantMetadata?.image_reference
     ?? await sourceImageForVerifiedMapping(mapping);
-  const hydratedMapping = sourceImage ? { ...mapping, image_reference: sourceImage } : mapping;
-  const fallback = {
-    ...verifiedMappingProduct(hydratedMapping),
-    price: merchantMetadata?.price ?? null,
-    currency: merchantMetadata?.currency ?? null,
+  const hydratedMapping: VerifiedProductMapping = {
+    ...mapping,
+    ...(sourceImage ? { image_reference: sourceImage } : {}),
+    ...(merchantMetadata?.price ? { price: merchantMetadata.price } : {}),
+    ...(merchantMetadata?.currency ? { currency: merchantMetadata.currency } : {}),
   };
+
+  // Older Product Memory rows may predate cached commerce metadata. As soon as a
+  // later refresh successfully recovers image/price, persist it so future hits do
+  // not depend on the merchant page being fetchable again.
+  const metadataImproved = Boolean(
+    (hydratedMapping.image_reference && hydratedMapping.image_reference !== mapping.image_reference)
+    || (hydratedMapping.price && hydratedMapping.price !== mapping.price)
+    || (hydratedMapping.currency && hydratedMapping.currency !== mapping.currency)
+  );
+  if (metadataImproved && visual?.env && mapping.provenance === 'admin_verified') {
+    await persistAdminVerifiedMapping(visual.env, hydratedMapping).catch(() => hydratedMapping);
+  }
+
+  const fallback = verifiedMappingProduct(hydratedMapping);
 
   const identityKey = `verified:${verifiedIdentityKey(canonicalModel) || verifiedIdentityKey(mapping.product_id)}`;
   const makeExact = (product: ProductCandidate, reason = `${mapping.provenance} product identity; same verified SKU/model`): ProductCandidate => ({
