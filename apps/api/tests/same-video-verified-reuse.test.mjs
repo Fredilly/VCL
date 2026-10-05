@@ -437,11 +437,76 @@ test('occluded VPM product still fails closed on weak visual evidence', () => {
   assert.equal(winner.reason, 'visual_rejected');
 });
 
-test('VPM hard color contradiction is eliminated before visual fallback', () => {
+test('VPM color drift stays eligible until strict visual verification', () => {
   const promoted = { ...mapping, track_id: identity.canonical_key };
   const result = mod.verifiedProductMemoryCandidates({
     description: { ...description, color: 'white', visible_text: [], logos_markings: [] },
     candidates: [{ mapping: promoted, identity }],
+  });
+  assert.equal(result.length, 1);
+
+  const winner = mod.selectSameVideoVisualWinner({
+    candidates: result,
+    comparisons: new Map([[identity.canonical_key, {
+      ...visualMatch,
+      source: {
+        ...visualMatch.source,
+        color: { value: 'white', confidence: 0.97, basis: 'image' },
+      },
+      candidate: {
+        ...visualMatch.candidate,
+        color: { value: 'black', confidence: 0.97, basis: 'image' },
+      },
+    }]]),
+  });
+  assert.equal(winner.mapping, null);
+  assert.equal(winner.reason, 'visual_rejected');
+});
+
+test('same promoted bag track survives handbag/shoulder-bag wording drift', () => {
+  const bagIdentity = {
+    ...identity,
+    canonical_key: 'product:v1:multipass',
+    object_type: 'Shoulder Bag',
+    brand: 'Louis Vuitton',
+    model: 'M3A285',
+    color: 'burgundy',
+  };
+  const promoted = {
+    ...mapping,
+    canonical_key: bagIdentity.canonical_key,
+    track_id: bagIdentity.canonical_key,
+    object_type: 'Shoulder Bag',
+    brand: 'Louis Vuitton',
+    product_id: 'M3A285',
+  };
+  const laterFrame = {
+    ...description,
+    category: 'Bags',
+    subcategory: 'Handbag',
+    brand_candidate: 'Louis Vuitton',
+    model_candidate: null,
+    color: 'red',
+    visible_text: [],
+    logos_markings: ['Louis Vuitton Paris logo'],
+    search_terms: ['Louis Vuitton red handbag'],
+  };
+
+  const result = mod.verifiedProductMemoryCandidates({
+    description: laterFrame,
+    candidates: [{ mapping: promoted, identity: bagIdentity }],
+  });
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].identity.canonical_key, 'product:v1:multipass');
+});
+
+test('clear different-brand VPM track is still excluded before visual fallback', () => {
+  const promoted = { ...mapping, track_id: identity.canonical_key };
+  const branded = { ...identity, brand: 'Nike' };
+  const result = mod.verifiedProductMemoryCandidates({
+    description: { ...description, brand_candidate: 'Adidas' },
+    candidates: [{ mapping: promoted, identity: branded }],
   });
   assert.equal(result.length, 0);
 });
