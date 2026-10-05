@@ -1798,10 +1798,18 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           const title = (sourceMetadata.title || (typeof product.title === 'string' ? product.title.trim() : '') || productId).slice(0, 300);
           const imageReference = (sourceMetadata.image_reference || (typeof product.image_reference === 'string' ? product.image_reference.trim() : '') || '').slice(0, 1200) || null;
           const brand = (typeof product.brand === 'string' ? product.brand.trim() : item.brand || '').slice(0, 120);
+          const hasSourceContext = Boolean(item.platform && item.content_ref);
+          const timestampMs = item.timestamp_ms != null && Number.isFinite(item.timestamp_ms)
+            ? Math.max(0, Math.round(item.timestamp_ms))
+            : null;
           const mapping: VerifiedProductMapping = {
-            platform: 'alpha-learning',
-            content_ref: eventId,
-            scope: 'entire_video',
+            platform: hasSourceContext ? item.platform! : 'alpha-learning',
+            content_ref: hasSourceContext ? item.content_ref! : eventId,
+            scope: hasSourceContext && timestampMs != null ? 'time_window' : 'entire_video',
+            ...(hasSourceContext && timestampMs != null ? {
+              timestamp_start_ms: Math.max(0, timestampMs - 5000),
+              timestamp_end_ms: timestampMs + 5000,
+            } : {}),
             object_type: item.subcategory || item.category,
             brand,
             product_id: productId,
@@ -1825,6 +1833,24 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           });
           const saved = await persistCanonicalProductIdentity(env, canonical);
           canonicalKey = saved.canonical_key;
+          await persistAdminVerifiedMapping(env, {
+            ...mapping,
+            canonical_key: saved.canonical_key,
+            track_id: saved.canonical_key,
+            trusted_observations: [{
+              observed_at: new Date().toISOString(),
+              timestamp_ms: timestampMs,
+              reason: 'promotion',
+              confidence: 1,
+              visible_text: item.visible_text,
+              logos_markings: item.logos_markings,
+              distinctive_features: item.distinctive_features,
+              shape_silhouette: item.shape_silhouette,
+              style_attributes: item.style_attributes,
+              color: item.color,
+              material: item.material,
+            }],
+          });
         }
 
         await resolveFeedbackReview(env, {
@@ -2062,6 +2088,11 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           verification_usage: sameVideoVisualCheck.usage ?? crossVideoVisualCheck.usage,
           commerce_calls: refreshed.commerce_calls,
           verified_canonical_key: verifiedMapping.canonical_key ?? null,
+          context: {
+            platform: context?.platform ?? null,
+            content_ref: contentRef,
+            timestamp_ms: context?.timestamp_ms ?? null,
+          },
         }).catch((error) => { logSafeError(error); });
         if (ctx?.waitUntil) ctx.waitUntil(verifiedLearning);
         else await verifiedLearning;
@@ -2245,6 +2276,11 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         query: resolved.query,
         verification_usage: resolved.cost_usage?.verification_usage,
         commerce_calls: resolved.cost_usage?.commerce_calls,
+        context: {
+          platform: context?.platform ?? null,
+          content_ref: contentRef,
+          timestamp_ms: context?.timestamp_ms ?? null,
+        },
       }).catch((error) => { logSafeError(error); });
       if (ctx?.waitUntil) ctx.waitUntil(learningWrite);
       else await learningWrite;
