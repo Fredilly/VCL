@@ -30,6 +30,8 @@ export type VerifiedProductMapping = {
   title: string;
   destination: string;
   image_reference?: string | null;
+  price?: string | null;
+  currency?: string | null;
   provider?: string | null;
   canonical_key?: string | null;
   // A promoted product becomes a persistent identity track for this video.
@@ -115,6 +117,8 @@ export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProd
       title: (record.title as string).trim(),
       destination: (record.destination as string).trim(),
       image_reference: typeof record.image_reference === 'string' && record.image_reference.trim() ? record.image_reference.trim() : null,
+      price: typeof record.price === 'string' && record.price.trim() ? record.price.trim() : null,
+      currency: typeof record.currency === 'string' && record.currency.trim() ? record.currency.trim().toUpperCase().slice(0, 8) : null,
       provider: typeof record.provider === 'string' && record.provider.trim() ? record.provider.trim() : null,
       ...(typeof record.canonical_key === 'string' && record.canonical_key.trim()
         ? { canonical_key: record.canonical_key.trim().slice(0, 220) }
@@ -125,6 +129,57 @@ export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProd
       provenance,
     }];
   });
+}
+
+const GENERIC_IDENTITY_TOKENS = new Set([
+  'louis', 'vuitton', 'bag', 'bags', 'handbag', 'handbags', 'canvas', 'monogram',
+  'women', 'woman', 'mens', 'men', 'product', 'authentic', 'edition',
+]);
+
+function verifiedMappingIdentityScore(mapping: VerifiedProductMapping, description: ObjectDescription): number {
+  const evidence = normalize([
+    description.model_candidate,
+    description.color,
+    description.material,
+    ...description.visible_text,
+    ...description.logos_markings,
+    ...description.distinctive_features,
+    ...description.style_attributes,
+    ...description.shape_silhouette,
+    ...description.search_terms,
+  ].filter(Boolean).join(' '));
+
+  if (!evidence) return 0;
+
+  const productId = normalize(mapping.product_id);
+  let score = productId && evidence.includes(productId) ? 20 : 0;
+
+  const identityTokens = [...new Set(normalize(mapping.title)
+    .split(' ')
+    .filter((token) => token.length >= 4 && !GENERIC_IDENTITY_TOKENS.has(token)))];
+
+  for (const token of identityTokens) {
+    if (evidence.includes(token)) score += token.length >= 8 ? 3 : 1;
+  }
+
+  for (const observation of mapping.trusted_observations ?? []) {
+    const observationTokens = [
+      observation.color,
+      observation.material,
+      ...observation.visible_text,
+      ...observation.logos_markings,
+      ...observation.distinctive_features,
+      ...observation.shape_silhouette,
+      ...observation.style_attributes,
+    ]
+      .map((value) => normalize(value))
+      .filter(Boolean);
+    for (const token of observationTokens) {
+      if (token.length >= 4 && evidence.includes(token)) score += 2;
+    }
+  }
+
+  return score;
 }
 
 export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProductMapping | null {
@@ -148,8 +203,23 @@ export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProduc
       && objectCompatible(mapping.object_type, input.description)
       && brandCompatible;
   });
-  const primary = matches[0];
-  if (!primary) return null;
+  if (!matches.length) return null;
+
+  let primary = matches[0];
+  const identities = [...new Set(matches.map((mapping) => normalize(mapping.product_id)))];
+  if (identities.length > 1) {
+    const ranked = identities
+      .map((identity) => {
+        const group = matches.filter((mapping) => normalize(mapping.product_id) === identity);
+        return {
+          mapping: group[0],
+          score: Math.max(...group.map((mapping) => verifiedMappingIdentityScore(mapping, input.description))),
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+    if (ranked[0].score <= 0 || ranked[0].score === ranked[1].score) return null;
+    primary = ranked[0].mapping;
+  }
 
   // The same verified SKU may exist in both durable storage and a seed/registry
   // during migration. Keep the first mapping as authority, but fill missing
@@ -161,6 +231,8 @@ export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProduc
     .reduce<VerifiedProductMapping>((merged, mapping) => ({
       ...merged,
       image_reference: merged.image_reference ?? mapping.image_reference ?? null,
+      price: merged.price ?? mapping.price ?? null,
+      currency: merged.currency ?? mapping.currency ?? null,
       provider: merged.provider ?? mapping.provider ?? null,
       canonical_key: merged.canonical_key ?? mapping.canonical_key ?? null,
       track_id: merged.track_id ?? mapping.track_id ?? null,
@@ -180,8 +252,8 @@ export function verifiedMappingProduct(mapping: VerifiedProductMapping): Product
     image_reference: mapping.image_reference ?? null,
     provenance: mapping.provenance,
     destination: mapping.destination,
-    price: null,
-    currency: null,
+    price: mapping.price ?? null,
+    currency: mapping.currency ?? null,
     result_class: 'EXACT',
     relationship: 'EXACT',
     metadata: { brand: mapping.brand, model: mapping.product_id, category: mapping.object_type },
