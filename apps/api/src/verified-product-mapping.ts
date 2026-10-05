@@ -206,9 +206,16 @@ export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProduc
   if (!matches.length) return null;
 
   let primary = matches[0];
-  if (matches.length > 1) {
-    const ranked = matches
-      .map((mapping) => ({ mapping, score: verifiedMappingIdentityScore(mapping, input.description) }))
+  const identities = [...new Set(matches.map((mapping) => normalize(mapping.product_id)))];
+  if (identities.length > 1) {
+    const ranked = identities
+      .map((identity) => {
+        const group = matches.filter((mapping) => normalize(mapping.product_id) === identity);
+        return {
+          mapping: group[0],
+          score: Math.max(...group.map((mapping) => verifiedMappingIdentityScore(mapping, input.description))),
+        };
+      })
       .sort((a, b) => b.score - a.score);
     if (ranked[0].score <= 0 || ranked[0].score === ranked[1].score) return null;
     primary = ranked[0].mapping;
