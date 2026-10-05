@@ -1816,6 +1816,8 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             title,
             destination,
             image_reference: imageReference,
+            price: sourceMetadata.price,
+            currency: sourceMetadata.currency,
             provider: verifiedSourceProviderName(null, destination) || null,
             provenance: 'admin_verified',
           };

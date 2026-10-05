@@ -50,6 +50,37 @@ function canonicalHref(html: string): string | null {
   return null;
 }
 
+function visiblePrice(html: string): { price: string | null; currency: string | null } {
+  const compact = html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ');
+  const usd = compact.match(/\$\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})?)/);
+  if (usd?.[1]) return { price: usd[1].replace(/,/g, ''), currency: 'USD' };
+  return { price: null, currency: null };
+}
+
+function likelyProductImage(html: string, source: URL, title: string | null, sku: string | null): string | null {
+  const wanted = [title, sku].filter((value): value is string => Boolean(value))
+    .map((value) => value.toLowerCase());
+  const tags = html.match(/<img\b[^>]*>/gi) ?? [];
+  const candidates = tags.map((tag) => {
+    const alt = decodeHtml(tag.match(/\balt\s*=\s*["']([^"']*)["']/i)?.[1] ?? '').toLowerCase();
+    const src = tag.match(/\b(?:src|data-src)\s*=\s*["']([^"']+)["']/i)?.[1]
+      ?? tag.match(/\bsrcset\s*=\s*["']([^"']+)["']/i)?.[1]?.split(',')[0]?.trim().split(/\s+/)[0];
+    if (!src || src.startsWith('data:')) return null;
+    const url = safeHttpUrl(decodeHtml(src), source);
+    if (!url) return null;
+    const score = wanted.some((value) => alt.includes(value.toLowerCase())) ? 2
+      : /product|zoom|handbag|bag|shoe|shirt|watch|dress|jacket/i.test(alt) ? 1
+      : 0;
+    return { url: url.toString(), score };
+  }).filter((value): value is { url: string; score: number } => Boolean(value));
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0]?.score ? candidates[0].url : null;
+}
+
 function asString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
@@ -218,7 +249,9 @@ export function extractProductPageMetadata(html: string, sourceUrl: string): Pro
   if (!source) return { sku: null, title: null, canonical_url: null, image_reference: null, price: null, currency: null };
 
   const product = jsonLdProduct(html);
-  const sku = asString(product?.sku) ?? asString(product?.productID) ?? asString(product?.mpn);
+  const pathSku = source.pathname.split('/').filter(Boolean).at(-1) ?? '';
+  const sku = asString(product?.sku) ?? asString(product?.productID) ?? asString(product?.mpn)
+    ?? (/^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9-]{4,20}$/.test(pathSku) ? pathSku : null);
   const title = asString(product?.name)
     ?? metaContent(html, ['og:title', 'twitter:title'])
     ?? null;
@@ -232,19 +265,23 @@ export function extractProductPageMetadata(html: string, sourceUrl: string): Pro
   const imageRaw = firstImage(product?.image)
     ?? metaContent(html, ['og:image', 'og:image:secure_url', 'twitter:image']);
   const image = imageRaw ? safeHttpUrl(imageRaw, source) : null;
+  const fallbackImage = image?.toString() ?? likelyProductImage(html, source, title, sku);
   const structuredOffer = offerPrice(product?.offers);
+  const visibleOffer = visiblePrice(html);
   const price = structuredOffer.price
     ?? metaContent(html, ['product:price:amount', 'og:price:amount', 'price'])
+    ?? visibleOffer.price
     ?? null;
   const currency = structuredOffer.currency
     ?? metaContent(html, ['product:price:currency', 'og:price:currency', 'priceCurrency'])
+    ?? visibleOffer.currency
     ?? null;
 
   return {
     sku,
     title,
     canonical_url: canonicalUrl,
-    image_reference: image?.toString() ?? null,
+    image_reference: fallbackImage,
     price,
     currency,
   };

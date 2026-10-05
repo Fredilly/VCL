@@ -178,3 +178,23 @@ test('known Shopify merchant price uses product JSON before storefront HTML', as
     'https://kith.com/products/khma050113-001.json',
   ]);
 });
+
+
+test('falls back to visible USD price, URL SKU, and product image when structured metadata is absent', () => {
+  const html = `
+    <html><body>
+      <h1>Multipass</h1>
+      <div>$3,350.00</div>
+      <img alt="Multipass handbag product zoom" src="/images/multipass-rouge.jpg">
+    </body></html>`;
+
+  const metadata = mod.extractProductPageMetadata(
+    html,
+    'https://us.louisvuitton.com/eng-us/products/Multipass-H27-nvprod7150031v/M3A285',
+  );
+
+  assert.equal(metadata.sku, 'M3A285');
+  assert.equal(metadata.price, '3350.00');
+  assert.equal(metadata.currency, 'USD');
+  assert.equal(metadata.image_reference, 'https://us.louisvuitton.com/images/multipass-rouge.jpg');
+});
