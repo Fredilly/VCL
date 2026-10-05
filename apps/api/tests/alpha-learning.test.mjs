@@ -66,6 +66,11 @@ test('alpha learning persists reusable evidence and candidate relationships with
     },
     verification_usage: { cost_usd: 0.003 },
     commerce_calls: { brave: 1 },
+    context: {
+      platform: 'youtube',
+      content_ref: 'youtube:test-video-123',
+      timestamp_ms: 41821,
+    },
   });
 
   assert.deepEqual(writes.map((write) => write.path).sort(), ['/context', '/scoop']);
@@ -74,6 +79,9 @@ test('alpha learning persists reusable evidence and candidate relationships with
   assert.equal(learning.brand, 'Creed');
   assert.deepEqual(learning.visible_text, ['CREED', 'AVENTUS']);
   assert.equal(learning.verification_cost_usd, 0.003);
+  assert.equal(learning.platform, 'youtube');
+  assert.equal(learning.content_ref, 'youtube:test-video-123');
+  assert.equal(learning.timestamp_ms, 41821);
   assert.equal(JSON.stringify(learning).includes('data:image'), false);
   assert.equal(JSON.stringify(learning).includes('youtube.com'), false);
 });
