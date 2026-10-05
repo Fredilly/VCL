@@ -25,6 +25,11 @@ export async function persistAlphaLearning(input: {
   verification_usage?: unknown;
   commerce_calls?: unknown;
   verified_canonical_key?: string | null;
+  context?: {
+    platform?: string | null;
+    content_ref?: string | null;
+    timestamp_ms?: number | null;
+  };
 }): Promise<void> {
   if (!input.telemetry || !input.env.FEEDBACK_LEDGER) return;
 
@@ -43,6 +48,9 @@ export async function persistAlphaLearning(input: {
     persistScoopLearningRecord(input.env, {
       event_id: input.telemetry.event_id,
       session_id: input.telemetry.session_id,
+      platform: input.context?.platform ?? null,
+      content_ref: input.context?.content_ref ?? null,
+      timestamp_ms: input.context?.timestamp_ms ?? null,
       state: input.state,
       evidence_key: evidenceKey,
       category: input.description.category,
