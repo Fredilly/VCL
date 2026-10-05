@@ -169,3 +169,87 @@ test('Stephen A. Jordan polo seed does not fire for non-shirt clicks in the same
     assert.equal(miss, null, `seed must not leak into ${subcategory}`);
   }
 });
+
+
+const luxMommyNeverfull = {
+  category: 'accessories',
+  subcategory: 'bag',
+  brand_candidate: 'Louis Vuitton',
+  model_candidate: 'Neverfull MM M20511',
+  color: 'Midnight Fuchsia',
+  material: 'coated canvas',
+  style_attributes: ['Spring in the City', 'gradient monogram', 'tote'],
+  visible_text: [],
+  logos_markings: ['Louis Vuitton monogram'],
+  distinctive_features: ['Neverfull MM'],
+  hardware_details: [],
+  shape_silhouette: ['tote'],
+  search_terms: ['Louis Vuitton Neverfull MM Midnight Fuchsia M20511'],
+  confidence: 0.98,
+  identity_confidence: 0.95,
+};
+
+const luxMommyKeepall = {
+  ...luxMommyNeverfull,
+  model_candidate: 'Keepall Bandouliere 45 M13915',
+  color: 'silver multicolor',
+  material: 'iridescent coated canvas',
+  style_attributes: ['Monogram Iridescent', 'rainbow effect'],
+  distinctive_features: ['Keepall Bandouliere 45', 'earphones charm'],
+  shape_silhouette: ['duffel'],
+  search_terms: ['Louis Vuitton Keepall Bandouliere 45 Monogram Iridescent M13915'],
+};
+
+test('same video resolves Neverfull by product evidence without timestamps', () => {
+  const hit = mappingMod.lookupVerifiedProductMapping({
+    mappings: seedMod.ALPHA_VERIFIED_PRODUCT_SEEDS,
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: '313GzQj7TS8',
+    timestampMs: 1000,
+    description: luxMommyNeverfull,
+  });
+  assert.equal(hit?.product_id, 'M20511');
+  const product = mappingMod.verifiedMappingProduct(hit);
+  assert.equal(product.result_class, 'EXACT');
+  assert.equal(product.price, '7999');
+  assert.equal(product.currency, 'USD');
+  assert.ok(product.image_reference?.includes('6ab1a7747b19910922bcdc98.jpg'));
+});
+
+test('same video resolves Keepall by product evidence without timestamps', () => {
+  const hit = mappingMod.lookupVerifiedProductMapping({
+    mappings: seedMod.ALPHA_VERIFIED_PRODUCT_SEEDS,
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: '313GzQj7TS8',
+    timestampMs: 900000,
+    description: luxMommyKeepall,
+  });
+  assert.equal(hit?.product_id, 'M13915');
+  const product = mappingMod.verifiedMappingProduct(hit);
+  assert.equal(product.result_class, 'EXACT');
+  assert.equal(product.price, '5225');
+  assert.equal(product.currency, 'USD');
+  assert.ok(product.image_reference?.includes('6a03a4c13509d12a5bdd3136.jpg'));
+});
+
+test('same-video verified mappings fail closed when product evidence is ambiguous', () => {
+  const hit = mappingMod.lookupVerifiedProductMapping({
+    mappings: seedMod.ALPHA_VERIFIED_PRODUCT_SEEDS,
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: '313GzQj7TS8',
+    description: {
+      ...luxMommyNeverfull,
+      model_candidate: null,
+      color: '',
+      material: '',
+      style_attributes: [],
+      distinctive_features: [],
+      shape_silhouette: ['bag'],
+      search_terms: ['Louis Vuitton bag'],
+    },
+  });
+  assert.equal(hit, null);
+});
