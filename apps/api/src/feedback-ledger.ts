@@ -50,6 +50,9 @@ export type FeedbackReviewItem = {
   result_id: string;
   feedback_type: string;
   evidence_key: string;
+  platform: string | null;
+  content_ref: string | null;
+  timestamp_ms: number | null;
   category: string;
   subcategory: string;
   brand: string | null;
@@ -78,6 +81,9 @@ export type FeedbackReviewResolution = {
 export type ScoopLearningRecord = {
   event_id: string;
   session_id: string | null;
+  platform: string | null;
+  content_ref: string | null;
+  timestamp_ms: number | null;
   state: string;
   evidence_key: string;
   category: string;
@@ -357,6 +363,9 @@ export class FeedbackLedger {
       CREATE TABLE IF NOT EXISTS scoop_learning (
         event_id TEXT PRIMARY KEY,
         session_id TEXT,
+        platform TEXT,
+        content_ref TEXT,
+        timestamp_ms INTEGER,
         state TEXT NOT NULL,
         evidence_key TEXT NOT NULL,
         category TEXT NOT NULL,
@@ -385,6 +394,17 @@ export class FeedbackLedger {
       CREATE INDEX IF NOT EXISTS idx_learning_evidence ON scoop_learning(evidence_key);
       CREATE INDEX IF NOT EXISTS idx_feedback_review_action ON feedback_review(action);
     `);
+    for (const statement of [
+      'ALTER TABLE scoop_learning ADD COLUMN platform TEXT',
+      'ALTER TABLE scoop_learning ADD COLUMN content_ref TEXT',
+      'ALTER TABLE scoop_learning ADD COLUMN timestamp_ms INTEGER',
+    ]) {
+      try {
+        this.sql.exec(statement);
+      } catch (error) {
+        if (!String(error).toLowerCase().includes('duplicate column')) throw error;
+      }
+    }
   }
 
   private rows(query: string, ...bindings: unknown[]): Record<string, unknown>[] {
@@ -436,11 +456,12 @@ export class FeedbackLedger {
         : {};
       this.sql.exec(
         `INSERT INTO scoop_learning (
-          event_id, session_id, state, evidence_key, category, subcategory, brand, model, color, material,
+          event_id, session_id, platform, content_ref, timestamp_ms, state, evidence_key, category, subcategory, brand, model, color, material,
           visible_text_json, logos_markings_json, distinctive_features_json, shape_silhouette_json, style_attributes_json,
           vision_model, latency_ms, verification_cost_usd, commerce_calls_json, verified_canonical_key, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(event_id) DO UPDATE SET
+          platform=excluded.platform, content_ref=excluded.content_ref, timestamp_ms=excluded.timestamp_ms,
           state=excluded.state, evidence_key=excluded.evidence_key, category=excluded.category, subcategory=excluded.subcategory,
           brand=excluded.brand, model=excluded.model, color=excluded.color, material=excluded.material,
           visible_text_json=excluded.visible_text_json, logos_markings_json=excluded.logos_markings_json,
@@ -448,7 +469,11 @@ export class FeedbackLedger {
           style_attributes_json=excluded.style_attributes_json, vision_model=excluded.vision_model,
           latency_ms=excluded.latency_ms, verification_cost_usd=excluded.verification_cost_usd,
           commerce_calls_json=excluded.commerce_calls_json, verified_canonical_key=excluded.verified_canonical_key`,
-        eventId, value.session_id ? bounded(value.session_id, 160) : null, bounded(value.state, 40), bounded(value.evidence_key, 80),
+        eventId, value.session_id ? bounded(value.session_id, 160) : null,
+        value.platform ? bounded(value.platform, 40) : null,
+        value.content_ref ? bounded(value.content_ref, 180) : null,
+        value.timestamp_ms != null && Number.isFinite(Number(value.timestamp_ms)) ? Math.max(0, Math.round(Number(value.timestamp_ms))) : null,
+        bounded(value.state, 40), bounded(value.evidence_key, 80),
         sanitizeLearningText(value.category, 80), sanitizeLearningText(value.subcategory, 80), value.brand ? sanitizeLearningText(value.brand, 100) : null,
         value.model ? sanitizeLearningText(value.model, 120) : null, value.color ? sanitizeLearningText(value.color, 80) : null,
         value.material ? sanitizeLearningText(value.material, 80) : null, list(value.visible_text, 8), list(value.logos_markings, 8),
@@ -525,7 +550,7 @@ export class FeedbackLedger {
       if (!eventId || !resultId) return Response.json({ item: null }, { status: 400 });
       const row = this.rows(`
         SELECT f.event_id, f.result_id, f.feedback_type,
-               l.evidence_key, l.category, l.subcategory, l.brand, l.model, l.color, l.material,
+               l.evidence_key, l.platform, l.content_ref, l.timestamp_ms, l.category, l.subcategory, l.brand, l.model, l.color, l.material,
                l.visible_text_json, l.logos_markings_json, l.distinctive_features_json,
                l.shape_silhouette_json, l.style_attributes_json,
                c.candidate_key, c.provider, c.provenance, c.result_class
@@ -541,6 +566,9 @@ export class FeedbackLedger {
         result_id: String(row.result_id ?? ''),
         feedback_type: String(row.feedback_type ?? ''),
         evidence_key: String(row.evidence_key ?? ''),
+        platform: row.platform == null ? null : String(row.platform),
+        content_ref: row.content_ref == null ? null : String(row.content_ref),
+        timestamp_ms: row.timestamp_ms == null ? null : Number(row.timestamp_ms),
         category: String(row.category ?? ''),
         subcategory: String(row.subcategory ?? ''),
         brand: row.brand == null ? null : String(row.brand),
