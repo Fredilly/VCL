@@ -18,7 +18,8 @@
     "EBAY_ENVIRONMENT": "production",
     "JEV_DECISION_ROUTER": "true",
     "BENCHMARK_MODE": "false",
-    "VERIFIED_PRODUCT_TEST_MODE": "false"
+    "VERIFIED_PRODUCT_TEST_MODE": "false",
+    "VISUAL_PRODUCT_INDEX": "false"
   },
   "ai": {
     "binding": "AI"
