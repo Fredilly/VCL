@@ -43,5 +43,5 @@ Return JSON only: {"x":0..1,"y":0..1,"width":0..1,"height":0..1,"confidence":0..
 }
 
 export function clickedObjectPrompt(point?: SelectionPoint): string {
-  return point ? ` The user's click in the PRIMARY crop is x=${point.x.toFixed(4)}, y=${point.y.toFixed(4)} (normalized). Describe only the physical object at that point. Surrounding objects, the wearer, supports and background colors/text are not properties of the selected object. The crop boundary is context, not an instruction to identify everything inside it.` : '';
+  return point ? ` The user's click in the PRIMARY crop is x=${point.x.toFixed(4)}, y=${point.y.toFixed(4)} (normalized). Describe only the physical object at that point. Surrounding objects, the wearer, supports and background colors/text are not properties of the selected object. Text from subtitles, lower thirds, watermarks, channel graphics, UI overlays, or nearby objects must not become product evidence even when it visually overlaps the selected object. Only text/logos physically printed, stitched, embossed, engraved, labeled, or marked on the selected object may influence brand, model, visible_text, logos_markings, or search_terms. If it is unclear whether text belongs to the object, exclude it. The crop boundary is context, not an instruction to identify everything inside it.` : '';
 }
