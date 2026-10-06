@@ -131,6 +131,21 @@ export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProd
   });
 }
 
+
+function directSkuEvidence(description: ObjectDescription, productId: string): boolean {
+  const sku = normalize(productId);
+  if (!sku) return false;
+  const groundedContext = (description.evidence_confidence?.contextual_text ?? 0) >= 0.8
+    ? (description.contextual_text ?? [])
+    : [];
+  const evidence = normalize([
+    description.model_candidate,
+    ...description.visible_text,
+    ...groundedContext,
+  ].filter(Boolean).join(' '));
+  return Boolean(evidence && evidence.includes(sku));
+}
+
 const GENERIC_IDENTITY_TOKENS = new Set([
   'louis', 'vuitton', 'bag', 'bags', 'handbag', 'handbags', 'canvas', 'monogram',
   'women', 'woman', 'mens', 'men', 'product', 'authentic', 'edition',
@@ -209,17 +224,16 @@ export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProduc
   let primary = matches[0];
   const identities = [...new Set(matches.map((mapping) => normalize(mapping.product_id)))];
   if (identities.length > 1) {
-    const ranked = identities
-      .map((identity) => {
-        const group = matches.filter((mapping) => normalize(mapping.product_id) === identity);
-        return {
-          mapping: group[0],
-          score: Math.max(...group.map((mapping) => verifiedMappingIdentityScore(mapping, input.description))),
-        };
-      })
-      .sort((a, b) => b.score - a.score);
-    if (ranked[0].score <= 0 || ranked[0].score === ranked[1].score) return null;
-    primary = ranked[0].mapping;
+    // A multi-product video/partner catalog must never turn a family-level guess
+    // (for example "Speedy") into an Exact SKU merely because only one seeded
+    // product shares that family name. Direct Exact is allowed only when the
+    // SKU itself is explicitly grounded in the current evidence. Otherwise the
+    // catalog remains retrieval context and normal search/visual verification
+    // stays authoritative.
+    const directSkuMatches = matches.filter((mapping) => directSkuEvidence(input.description, mapping.product_id));
+    const directSkuIdentities = [...new Set(directSkuMatches.map((mapping) => normalize(mapping.product_id)))];
+    if (directSkuIdentities.length !== 1) return null;
+    primary = directSkuMatches.find((mapping) => normalize(mapping.product_id) === directSkuIdentities[0]) ?? directSkuMatches[0];
   }
 
   // The same verified SKU may exist in both durable storage and a seed/registry
