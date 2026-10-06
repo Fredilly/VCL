@@ -1,4 +1,5 @@
 import type { VerifiedProductMapping } from './verified-product-mapping.js';
+import { canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 
 /**
  * Small alpha-only verified registry for creator demos.
@@ -192,3 +193,75 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     provenance: 'admin_verified',
   }
 ];
+
+
+function normalizeSeedContentRef(platform: string | null | undefined, value: string | null | undefined): string {
+  const raw = (value ?? '').trim();
+  if (!raw) return '';
+  if ((platform ?? '').trim().toLowerCase() !== 'youtube') return raw.toLowerCase();
+  try {
+    const url = new URL(raw);
+    const id = url.searchParams.get('v');
+    if (id) return id.toLowerCase();
+  } catch {}
+  return raw.replace(/^youtube:/i, '').toLowerCase();
+}
+
+function canonicalizeAlphaSeed(mapping: VerifiedProductMapping): {
+  mapping: VerifiedProductMapping;
+  identity: CanonicalProductIdentity;
+} {
+  // Alpha seeds are verified product roster entries. They become Product Memory
+  // candidates, never automatic Exact matches: the current frame must still pass
+  // the normal visual verifier before reuse.
+  const identity = canonicalProductIdentity({
+    mapping,
+    model: null,
+    merchantItemId: mapping.product_id,
+    verifiedAt: '2026-10-06T00:00:00.000Z',
+  });
+  return {
+    mapping: {
+      ...mapping,
+      canonical_key: identity.canonical_key,
+      track_id: identity.canonical_key,
+    },
+    identity,
+  };
+}
+
+export function alphaVerifiedCanonicalRowsForContent(
+  platform: string | null | undefined,
+  contentRef: string | null | undefined,
+): Array<{ mapping: VerifiedProductMapping; identity: CanonicalProductIdentity }> {
+  const normalizedPlatform = (platform ?? '').trim().toLowerCase();
+  const normalizedRef = normalizeSeedContentRef(platform, contentRef);
+  if (!normalizedPlatform || !normalizedRef) return [];
+
+  const unique = new Map<string, { mapping: VerifiedProductMapping; identity: CanonicalProductIdentity }>();
+  for (const mapping of ALPHA_VERIFIED_PRODUCT_SEEDS) {
+    if (mapping.platform.trim().toLowerCase() !== normalizedPlatform) continue;
+    if (normalizeSeedContentRef(mapping.platform, mapping.content_ref) !== normalizedRef) continue;
+    const row = canonicalizeAlphaSeed(mapping);
+    if (!unique.has(row.identity.canonical_key)) unique.set(row.identity.canonical_key, row);
+  }
+  return [...unique.values()];
+}
+
+export function alphaVerifiedCanonicalIdentitiesExcludingContent(
+  platform: string | null | undefined,
+  contentRef: string | null | undefined,
+): CanonicalProductIdentity[] {
+  const normalizedPlatform = (platform ?? '').trim().toLowerCase();
+  const normalizedRef = normalizeSeedContentRef(platform, contentRef);
+  const unique = new Map<string, CanonicalProductIdentity>();
+
+  for (const mapping of ALPHA_VERIFIED_PRODUCT_SEEDS) {
+    const sameContent = mapping.platform.trim().toLowerCase() === normalizedPlatform
+      && normalizeSeedContentRef(mapping.platform, mapping.content_ref) === normalizedRef;
+    if (sameContent) continue;
+    const row = canonicalizeAlphaSeed(mapping);
+    if (!unique.has(row.identity.canonical_key)) unique.set(row.identity.canonical_key, row.identity);
+  }
+  return [...unique.values()];
+}
