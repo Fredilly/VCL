@@ -36,6 +36,7 @@ import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, type Canon
 import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 import { fetchProductPageMetadata } from './product-page-enrichment.js';
+import { recoverVerifiedProductImage } from './verified-image-recovery.js';
 import { ALPHA_VERIFIED_PRODUCT_SEEDS } from './alpha-verified-product-seeds.js';
 export { AlphaAccessLedger } from './alpha-access.js';
 export { VerifiedProductLedger } from './verified-product-ledger.js';
@@ -428,7 +429,8 @@ export async function refreshVerifiedOffers(
   const sourceImage = exactSource?.image_reference
     ?? mapping.image_reference
     ?? merchantMetadata?.image_reference
-    ?? await sourceImageForVerifiedMapping(mapping);
+    ?? await sourceImageForVerifiedMapping(mapping)
+    ?? await recoverVerifiedProductImage(visual?.env.BRAVE_SEARCH_API_KEY, mapping);
   const hydratedMapping: VerifiedProductMapping = {
     ...mapping,
     ...(sourceImage ? { image_reference: sourceImage } : {}),
