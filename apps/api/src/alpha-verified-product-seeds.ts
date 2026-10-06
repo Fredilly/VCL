@@ -195,6 +195,13 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
 ];
 
 
+const ALPHA_VERIFIED_ROSTER_ALIASES: Record<string, string> = {
+  // Paid-pilot style creator review: same verified product roster appears in this
+  // second video. The current video remains open-world: these SKUs are candidates,
+  // not an assertion that every bag shown belongs to the roster.
+  'kbwtwhnr0_e': '1auv6jxlh_q',
+};
+
 function normalizeSeedContentRef(platform: string | null | undefined, value: string | null | undefined): string {
   const raw = (value ?? '').trim();
   if (!raw) return '';
@@ -237,12 +244,16 @@ export function alphaVerifiedCanonicalRowsForContent(
   const normalizedPlatform = (platform ?? '').trim().toLowerCase();
   const normalizedRef = normalizeSeedContentRef(platform, contentRef);
   if (!normalizedPlatform || !normalizedRef) return [];
+  const rosterRef = ALPHA_VERIFIED_ROSTER_ALIASES[normalizedRef] ?? normalizedRef;
 
   const unique = new Map<string, { mapping: VerifiedProductMapping; identity: CanonicalProductIdentity }>();
   for (const mapping of ALPHA_VERIFIED_PRODUCT_SEEDS) {
     if (mapping.platform.trim().toLowerCase() !== normalizedPlatform) continue;
-    if (normalizeSeedContentRef(mapping.platform, mapping.content_ref) !== normalizedRef) continue;
-    const row = canonicalizeAlphaSeed(mapping);
+    if (normalizeSeedContentRef(mapping.platform, mapping.content_ref) !== rosterRef) continue;
+    const effectiveMapping = rosterRef === normalizedRef
+      ? mapping
+      : { ...mapping, content_ref: contentRef ?? normalizedRef };
+    const row = canonicalizeAlphaSeed(effectiveMapping);
     if (!unique.has(row.identity.canonical_key)) unique.set(row.identity.canonical_key, row);
   }
   return [...unique.values()];
