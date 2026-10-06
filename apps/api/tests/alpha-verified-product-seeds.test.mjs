@@ -275,3 +275,11 @@ test('alpha Product Memory can nominate known products in a different video but 
   const sameVideo = seedMod.alphaVerifiedCanonicalIdentitiesExcludingContent('youtube', '1auV6jxLh_Q');
   assert.equal(sameVideo.some((identity) => identity.merchant_refs.some((ref) => ref.item_id === 'N40952')), false);
 });
+
+
+test('current LV review video inherits the verified roster as candidates without timestamps', () => {
+  const rows = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'KbWTwHNR0_E');
+  const ids = new Set(rows.map(({ mapping }) => mapping.product_id));
+  assert.deepEqual(ids, new Set(['M3A350', 'N48280', 'N40952', 'N48279', 'M2A904', 'M3A947']));
+  assert.ok(rows.every(({ mapping }) => mapping.content_ref === 'KbWTwHNR0_E'));
+});

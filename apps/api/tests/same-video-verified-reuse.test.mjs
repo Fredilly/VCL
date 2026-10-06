@@ -510,3 +510,62 @@ test('clear different-brand VPM track is still excluded before visual fallback',
   });
   assert.equal(result.length, 0);
 });
+
+
+test('brand boilerplate alone cannot trigger distinctive-text Exact reuse', () => {
+  const identity = {
+    canonical_key: 'product:v1:pochette',
+    title: 'Louis Vuitton Pochette Metis Monogram Canvas',
+    brand: 'Louis Vuitton',
+    model: null,
+    object_type: 'bag',
+    visible_text: ['LOUIS VUITTON PARIS'],
+    color: null,
+    material: null,
+    style_attributes: [],
+    logos_markings: ['LOUIS VUITTON PARIS'],
+    distinctive_features: [],
+    shape_silhouette: [],
+    normalized_fingerprint: 'fixture',
+    relationship: 'EXACT',
+    provenance: 'admin_verified',
+    verified_at: '2026-10-06T00:00:00.000Z',
+    merchant_refs: [],
+  };
+  const mapping = {
+    platform: 'youtube',
+    content_ref: 'KbWTwHNR0_E',
+    scope: 'entire_video',
+    object_type: 'bag',
+    brand: 'Louis Vuitton',
+    product_id: 'wrong-pochette',
+    title: identity.title,
+    destination: 'https://example.com/pochette',
+    canonical_key: identity.canonical_key,
+    track_id: identity.canonical_key,
+    provenance: 'admin_verified',
+  };
+  const description = {
+    category: 'Handbags',
+    subcategory: 'bag',
+    brand_candidate: 'Louis Vuitton',
+    model_candidate: 'Alma',
+    color: 'White and Beige',
+    material: 'Canvas and Leather',
+    style_attributes: ['checkerboard'],
+    visible_text: ['LOUIS VUITTON', 'PARIS'],
+    logos_markings: ['Louis Vuitton'],
+    distinctive_features: ['braided top handle'],
+    hardware_details: [],
+    shape_silhouette: ['dome satchel'],
+    search_terms: ['Louis Vuitton Alma'],
+    confidence: 0.95,
+    identity_confidence: 0.95,
+  };
+  const result = mod.distinctiveTextSameVideoReuse({
+    description,
+    candidates: [{ mapping, identity }],
+  });
+  assert.equal(result.mapping, null);
+  assert.notEqual(result.reason, 'distinctive_text_exact');
+});
