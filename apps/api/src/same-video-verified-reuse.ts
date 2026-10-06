@@ -479,3 +479,22 @@ export function canonicalVisualExactOfferIds(input: {
   }
   return exact;
 }
+
+/** Resolve recorded evidence in one place. Once image verification has been
+ * attempted, text/model nomination cannot override rejection or missing images.
+ * Omitted comparisons retain the evidence-only shortcut API for legacy callers.
+ */
+export function resolveSameVideoReuse(input: {
+  description: ObjectDescription;
+  candidates: SameVideoCanonicalCandidate[];
+  comparisons?: Map<string, ImageComparison>;
+}): SameVideoReuseDecision {
+  if (input.comparisons !== undefined) {
+    const vpm = verifiedProductMemoryCandidates(input);
+    const eligible = vpm.length ? vpm : eligibleSameVideoCanonicalCandidates(input);
+    return selectSameVideoVisualWinner({ candidates: eligible, comparisons: input.comparisons });
+  }
+  const model = exactModelSameVideoReuse(input);
+  if (model.mapping) return model;
+  return distinctiveTextSameVideoReuse(input);
+}

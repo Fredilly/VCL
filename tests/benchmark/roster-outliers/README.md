@@ -82,11 +82,19 @@ positive and negative examples for every scenario, multiple categories and
 held-out videos. Freeze reviewed cases before evaluating. Never edit labels,
 comparisons or thresholds to make a regression pass.
 
-## Current failure exposed
+## Failure and fix evidence
 
-The initial run catches `nearby-ocr-wrong-item`: the distinctive text shortcut
-returns Exact before a supplied contradictory image comparison is considered.
-This PR deliberately leaves the new hard gate failing rather than disguising
-this trust bug. Fix the shortcut in a separately measured production change;
-retain this frozen case. Existing Golden smoke tests remain required for that
-production change. No production deployment is part of this harness change.
+The immutable initial run catches `nearby-ocr-wrong-item`: the distinctive text
+shortcut returned Exact before image comparison. The visual-veto run keeps the
+same frozen fixture and thresholds and passes all 26 cases with false Exact 0.
+Production same-video reuse now waits for visual verification; rejection or
+unavailable image evidence cannot inherit an OCR/model Exact. The benchmark
+adapter forwards recorded comparisons to the same resolver, without changing
+evaluation labels, comparisons, or scoring. Evidence-only cases without recorded
+comparisons retain their existing legacy evaluation path.
+
+Live Golden regression remains blocked in this workspace by missing provider
+credentials and saved frames. Its immutable blocked record is under
+`tests/golden/runs/`. Passing deterministic gates is not live Golden evidence.
+Additional image verification may increase provider calls, cost and latency;
+those effects require a live controlled run before production promotion.

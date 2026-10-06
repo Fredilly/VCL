@@ -23,27 +23,14 @@ function offDecision(testCase) {
 }
 
 export function onDecision(testCase) {
-  const exactModel = reuse.exactModelSameVideoReuse({
-    description: testCase.description,
-    candidates: testCase.candidates,
-  });
-  if (exactModel.mapping) return { track_id: exactModel.canonical_key, verification_requests: 0 };
-
-  const distinctive = reuse.distinctiveTextSameVideoReuse({
-    description: testCase.description,
-    candidates: testCase.candidates,
-  });
-  if (distinctive.mapping) return { track_id: distinctive.canonical_key, verification_requests: 0 };
-
-  const eligible = reuse.verifiedProductMemoryCandidates({
-    description: testCase.description,
-    candidates: testCase.candidates,
-  });
-  if (!eligible.length) return { track_id: null, verification_requests: 0 };
-
   const comparisons = new Map(Object.entries(testCase.comparisons ?? {}));
-  if (!comparisons.size) return { track_id: null, verification_requests: 0 };
-  const decision = reuse.selectSameVideoVisualWinner({ candidates: eligible, comparisons });
+  const decision = reuse.resolveSameVideoReuse({
+    description: testCase.description,
+    candidates: testCase.candidates,
+    // No recorded image comparison means legacy evidence-only evaluation.
+    // Supplied comparison evidence must reach the production resolver.
+    comparisons: comparisons.size ? comparisons : undefined,
+  });
   return {
     track_id: decision.mapping ? decision.canonical_key : null,
     verification_requests: comparisons.size ? 1 : 0,
