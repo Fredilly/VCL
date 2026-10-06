@@ -429,12 +429,26 @@ export async function refreshVerifiedOffers(
     ?? mapping.image_reference
     ?? merchantMetadata?.image_reference
     ?? await sourceImageForVerifiedMapping(mapping);
-  const hydratedMapping = sourceImage ? { ...mapping, image_reference: sourceImage } : mapping;
-  const fallback = {
-    ...verifiedMappingProduct(hydratedMapping),
-    price: merchantMetadata?.price ?? null,
-    currency: merchantMetadata?.currency ?? null,
+  const hydratedMapping: VerifiedProductMapping = {
+    ...mapping,
+    ...(sourceImage ? { image_reference: sourceImage } : {}),
+    ...(merchantMetadata?.price ? { price: merchantMetadata.price } : {}),
+    ...(merchantMetadata?.currency ? { currency: merchantMetadata.currency } : {}),
   };
+
+  // Older Product Memory rows may predate cached commerce metadata. As soon as a
+  // later refresh successfully recovers image/price, persist it so future hits do
+  // not depend on the merchant page being fetchable again.
+  const metadataImproved = Boolean(
+    (hydratedMapping.image_reference && hydratedMapping.image_reference !== mapping.image_reference)
+    || (hydratedMapping.price && hydratedMapping.price !== mapping.price)
+    || (hydratedMapping.currency && hydratedMapping.currency !== mapping.currency)
+  );
+  if (metadataImproved && visual?.env && mapping.provenance === 'admin_verified') {
+    await persistAdminVerifiedMapping(visual.env, hydratedMapping).catch(() => hydratedMapping);
+  }
+
+  const fallback = verifiedMappingProduct(hydratedMapping);
 
   const identityKey = `verified:${verifiedIdentityKey(canonicalModel) || verifiedIdentityKey(mapping.product_id)}`;
   const makeExact = (product: ProductCandidate, reason = `${mapping.provenance} product identity; same verified SKU/model`): ProductCandidate => ({
@@ -464,12 +478,13 @@ export async function refreshVerifiedOffers(
 
   // A canonical product is the anchor. Search all configured commerce providers
   // with product-level identity evidence, not the original merchant item id.
+  const searchIdentity = canonicalModel || mapping.product_id || null;
   const searchQuery: ProductQuery = {
-    query: canonicalModel || mapping.title,
+    query: searchIdentity || mapping.title,
     category: mapping.object_type,
     subcategory: mapping.object_type,
     brand: mapping.brand || null,
-    model: canonicalModel,
+    model: searchIdentity,
     attributes: [],
   };
 
@@ -485,7 +500,7 @@ export async function refreshVerifiedOffers(
   }));
 
   const candidates = dedupeProducts(batches.flat());
-  const expectedSku = verifiedIdentityKey(canonicalModel);
+  const expectedSku = verifiedIdentityKey(canonicalModel || mapping.product_id);
   const metadataExact: ProductCandidate[] = [];
   const needsVisual: ProductCandidate[] = [];
 
@@ -673,6 +688,26 @@ export async function refreshVerifiedOffers(
     price: canonicalProduct.price ?? pricedExact?.price ?? null,
     currency: canonicalProduct.currency ?? pricedExact?.currency ?? null,
   };
+
+  // If exact-SKU commerce search recovered richer metadata than the original
+  // merchant page fetch, write it back to Product Memory as well.
+  if (visual?.env && mapping.provenance === 'admin_verified') {
+    const enrichedFromOffers: VerifiedProductMapping = {
+      ...mapping,
+      ...(canonicalExact.image_reference ? { image_reference: canonicalExact.image_reference } : {}),
+      ...(canonicalExact.price ? { price: canonicalExact.price } : {}),
+      ...(canonicalExact.currency ? { currency: canonicalExact.currency } : {}),
+    };
+    const offerMetadataImproved = Boolean(
+      (enrichedFromOffers.image_reference && enrichedFromOffers.image_reference !== mapping.image_reference)
+      || (enrichedFromOffers.price && enrichedFromOffers.price !== mapping.price)
+      || (enrichedFromOffers.currency && enrichedFromOffers.currency !== mapping.currency)
+    );
+    if (offerMetadataImproved) {
+      await persistAdminVerifiedMapping(visual.env, enrichedFromOffers).catch(() => enrichedFromOffers);
+    }
+  }
+
   const exactProducts = dedupeProducts([canonicalExact, ...visualAlternatives]).slice(0, 8);
 
   // Teach canonical memory which merchant offers have now independently passed.
