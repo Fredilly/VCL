@@ -31,7 +31,7 @@ import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerc
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { backfillLegacyAdminCanonicalMappings, consolidateCanonicalProducts, durableCanonicalCandidates, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
-import { distinctiveTextSameVideoReuse, eligibleSameVideoCanonicalCandidates, exactModelSameVideoReuse, selectSameVideoVisualWinner, verifiedProductMemoryCandidates, identityWithTrustedVpmObservations, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
+import { eligibleSameVideoCanonicalCandidates, resolveSameVideoReuse, verifiedProductMemoryCandidates, identityWithTrustedVpmObservations, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
@@ -786,14 +786,8 @@ async function confirmSameVideoReuseWithImage(
   };
   const empty = { decision: noDecision, compared: 0, failures: 0, failure_reasons: {} };
 
-  const exactModel = exactModelSameVideoReuse({ description, candidates });
-  if (exactModel.mapping) return { ...empty, decision: exactModel };
-
-  // A unique promoted track with the same distinctive visible phrase is already
-  // strong product identity evidence. Reconnect before expensive image comparison.
-  const distinctiveText = distinctiveTextSameVideoReuse({ description, candidates });
-  if (distinctiveText.mapping) return { ...empty, decision: distinctiveText };
-
+  // OCR/model matches nominate identities; they cannot bypass the visual check.
+  // Unavailable comparison evidence keeps this production path fail-closed.
   const eligible = eligibleSameVideoCanonicalCandidates({ description, candidates });
   const vpm = verifiedProductMemoryCandidates({ description, candidates });
   // Explicit VPM tracks are the authoritative memory set. Historical canonical
@@ -890,7 +884,7 @@ async function confirmSameVideoReuseWithImage(
   }
 
   return {
-    decision: selectSameVideoVisualWinner({ candidates: visualCandidates, comparisons }),
+    decision: resolveSameVideoReuse({ description, candidates: visualCandidates, comparisons }),
     compared: images.compared,
     failures: images.failures,
     failure_reasons: images.failure_reasons ?? {},

@@ -8,7 +8,7 @@
     "deploy:api": "pnpm --filter @vcl/api run deploy",
     "build": "pnpm -r build",
     "check": "pnpm -r check",
-    "test": "pnpm --filter @vcl/api build && node --test apps/api/tests/*.test.mjs apps/extension/tests/*.test.mjs tests/benchmark/spike-4f/*.test.mjs tests/benchmark/product-tracks/*.test.mjs tests/manual/spike-5/*.test.mjs tests/cost/*.test.mjs tests/alpha/*.test.mjs",
+    "test": "pnpm --filter @vcl/api build && node --test apps/api/tests/*.test.mjs apps/extension/tests/*.test.mjs tests/benchmark/spike-4f/*.test.mjs tests/benchmark/product-tracks/*.test.mjs tests/benchmark/roster-outliers/*.test.mjs tests/manual/spike-5/*.test.mjs tests/cost/*.test.mjs tests/alpha/*.test.mjs",
     "benchmark": "pnpm --filter @vcl/api build && node tests/benchmark/spike-4f/run.mjs static",
     "benchmark:replay": "node tests/benchmark/spike-4f/run.mjs replay",
     "cost:run": "node tests/cost/run-live.mjs",
@@ -17,7 +17,9 @@
     "secret:add": "node tools/secrets.mjs add",
     "secrets:check": "node tools/secrets.mjs check",
     "dev:auto": "node tools/dev-auto-sync.mjs",
-    "setup:dev-auto": "bash tools/install-scoop-autosync-macos.sh"
+    "setup:dev-auto": "bash tools/install-scoop-autosync-macos.sh",
+    "benchmark:outliers": "node tests/benchmark/roster-outliers/run.mjs",
+    "benchmark:outliers:replay": "node tests/benchmark/roster-outliers/replay.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.131.0"

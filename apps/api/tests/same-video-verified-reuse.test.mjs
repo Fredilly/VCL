@@ -569,3 +569,42 @@ test('brand boilerplate alone cannot trigger distinctive-text Exact reuse', () =
   assert.equal(result.mapping, null);
   assert.notEqual(result.reason, 'distinctive_text_exact');
 });
+
+test('recorded visual rejection vetoes distinctive OCR and model Exact nominations', () => {
+  const candidate = { mapping: { ...mapping, track_id: identity.canonical_key }, identity: { ...identity, model: 'SKU-123' } };
+  const observed = { ...description, model_candidate: 'SKU-123' };
+  assert.ok(mod.exactModelSameVideoReuse({ description: observed, candidates: [candidate] }).mapping);
+  const rejection = {
+    source: {}, candidate: {}, similarity: .55, confidence: .96,
+    matching_details: ['different chest print'],
+  };
+  for (const desc of [description, observed]) {
+    const result = mod.resolveSameVideoReuse({ description: desc, candidates: [candidate],
+      comparisons: new Map([[identity.canonical_key, rejection]]) });
+    assert.equal(result.mapping, null);
+    assert.equal(result.reason, 'visual_rejected');
+  }
+});
+
+test('high-confidence attribute contradiction vetoes even high visual similarity', () => {
+  const result = mod.resolveSameVideoReuse({ description, candidates: [{ mapping: { ...mapping, track_id: identity.canonical_key }, identity }],
+    comparisons: new Map([[identity.canonical_key, {
+      source: { color: { value: 'white', confidence: .96, basis: 'image' } },
+      candidate: { color: { value: 'black', confidence: .96, basis: 'image' } },
+      similarity: .99, confidence: .99, matching_details: ['same chest lettering'],
+    }]]) });
+  assert.equal(result.mapping, null);
+  assert.equal(result.reason, 'visual_rejected');
+});
+
+test('visual verification preserves agreeing in-roster match and fails closed on missing comparison', () => {
+  const input = { description, candidates: [{ mapping: { ...mapping, track_id: identity.canonical_key }, identity }] };
+  const comparison = { source: {}, candidate: {}, similarity: .97, confidence: .96,
+    matching_details: ['tonal embossed chest lettering'] };
+  const agreed = mod.resolveSameVideoReuse({ ...input, comparisons: new Map([[identity.canonical_key, comparison]]) });
+  assert.equal(agreed.canonical_key, identity.canonical_key);
+  assert.equal(agreed.reason, 'visual_confirmed');
+  const unavailable = mod.resolveSameVideoReuse({ ...input, comparisons: new Map() });
+  assert.equal(unavailable.mapping, null);
+  assert.equal(unavailable.reason, 'visual_unavailable');
+});

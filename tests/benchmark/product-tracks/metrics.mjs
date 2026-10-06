@@ -10,13 +10,13 @@ export function summarize(rows) {
   const negatives = rows.filter((row) => !row.expected_track_id);
   const multi = rows.filter((row) => row.expected_track_id && row.candidate_count > 1);
   const correct = positives.filter((row) => row.on_track_id === row.expected_track_id);
-  const falseExact = negatives.filter((row) => Boolean(row.on_track_id));
+  const falseExact = rows.filter((row) => Boolean(row.on_track_id) && row.on_track_id !== row.expected_track_id);
   const rescued = positives.filter((row) => !row.off_track_id && row.on_track_id === row.expected_track_id);
   return {
     observations: rows.length,
     persistence_recall: positives.length ? correct.length / positives.length : 0,
     false_inherited_exact: falseExact.length,
-    false_inheritance_rate: negatives.length ? falseExact.length / negatives.length : 0,
+    false_inheritance_rate: negatives.length ? negatives.filter((row) => Boolean(row.on_track_id)).length / negatives.length : 0,
     multi_track_accuracy: multi.length
       ? multi.filter((row) => row.on_track_id === row.expected_track_id).length / multi.length
       : 0,
