@@ -803,7 +803,7 @@ async function confirmSameVideoReuseWithImage(
   const model = useOpenRouter ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
 
   const providers = commerceProviders(env);
-  const rows: Array<{ identity: CanonicalProductIdentity; product: ProductCandidate }> = [];
+  const rows: Array<{ candidate: SameVideoCanonicalCandidate; identity: CanonicalProductIdentity; product: ProductCandidate }> = [];
   for (const candidate of visualCandidates) {
     let identity = candidate.identity;
     let merchantRef = identity.merchant_refs.find((ref) => Boolean(ref.image_reference && ref.destination));
@@ -831,6 +831,7 @@ async function confirmSameVideoReuseWithImage(
     if (!merchantRef?.image_reference) continue;
 
     rows.push({
+      candidate,
       identity,
       product: {
         id: identity.canonical_key,
@@ -857,6 +858,7 @@ async function confirmSameVideoReuseWithImage(
 
   if (!rows.length) return { ...empty, decision: { ...noDecision, reason: 'visual_unavailable' } };
 
+  const budget = imageRequestBudget();
   const images = await compareCandidateImages(
     key,
     model,
@@ -864,7 +866,7 @@ async function confirmSameVideoReuseWithImage(
     description,
     rows.map((row) => row.product),
     context,
-    imageRequestBudget(),
+    budget,
     { provider: useOpenRouter ? 'openrouter' : 'gemini' },
   ).catch(() => null);
 
@@ -883,13 +885,74 @@ async function confirmSameVideoReuseWithImage(
     if (comparison) comparisons.set(row.identity.canonical_key, comparison);
   }
 
+  // A verified roster entry must not disappear merely because its saved image URL
+  // is stale or blocked. Recover another image only for that exact verified SKU,
+  // then run the same strict visual verifier again. Missing or rejected evidence
+  // still fails closed; no generic lookalike can inherit Exact.
+  let retryVerification: typeof images | null = null;
+  const missingRows = rows.filter((row) => !comparisons.has(row.identity.canonical_key));
+  if (missingRows.length && env.BRAVE_SEARCH_API_KEY) {
+    const recoveredRows = (await Promise.all(missingRows.map(async (row) => {
+      const recovered = await recoverVerifiedProductImage(
+        env.BRAVE_SEARCH_API_KEY,
+        { ...row.candidate.mapping, image_reference: null },
+      ).catch(() => null);
+      return recovered ? { ...row, product: { ...row.product, image_reference: recovered } } : null;
+    }))).filter((row): row is NonNullable<typeof row> => Boolean(row));
+
+    if (recoveredRows.length) {
+      retryVerification = await compareCandidateImages(
+        key,
+        model,
+        sourceImage,
+        description,
+        recoveredRows.map((row) => row.product),
+        context,
+        budget,
+        { provider: useOpenRouter ? 'openrouter' : 'gemini' },
+      ).catch(() => null);
+
+      if (retryVerification) {
+        for (const row of recoveredRows) {
+          const comparison = retryVerification.comparisons.get(candidateKey(row.product));
+          if (comparison) comparisons.set(row.identity.canonical_key, comparison);
+        }
+      }
+    }
+  }
+
+  const retryFailures = retryVerification?.failure_reasons ?? {};
+  const failureReasons = { ...(images.failure_reasons ?? {}) };
+  for (const [reason, count] of Object.entries(retryFailures)) {
+    failureReasons[reason] = (failureReasons[reason] ?? 0) + count;
+  }
+  const usage = retryVerification ? {
+    ...images.usage,
+    requests: images.usage.requests + retryVerification.usage.requests,
+    prompt_tokens: images.usage.prompt_tokens + retryVerification.usage.prompt_tokens,
+    completion_tokens: images.usage.completion_tokens + retryVerification.usage.completion_tokens,
+    total_tokens: images.usage.total_tokens + retryVerification.usage.total_tokens,
+    ...((images.usage.cost_usd != null || retryVerification.usage.cost_usd != null)
+      ? { cost_usd: (images.usage.cost_usd ?? 0) + (retryVerification.usage.cost_usd ?? 0) }
+      : {}),
+  } : images.usage;
+  const timing = retryVerification ? {
+    image_fetch_ms: images.timing.image_fetch_ms + retryVerification.timing.image_fetch_ms,
+    model_ms: images.timing.model_ms + retryVerification.timing.model_ms,
+    total_ms: images.timing.total_ms + retryVerification.timing.total_ms,
+    batches: [
+      ...images.timing.batches,
+      ...retryVerification.timing.batches.map((batch, index) => ({ ...batch, batch_index: images.timing.batches.length + index })),
+    ],
+  } : images.timing;
+
   return {
     decision: resolveSameVideoReuse({ description, candidates: visualCandidates, comparisons }),
-    compared: images.compared,
-    failures: images.failures,
-    failure_reasons: images.failure_reasons ?? {},
-    usage: images.usage,
-    timing: images.timing,
+    compared: images.compared + (retryVerification?.compared ?? 0),
+    failures: images.failures + (retryVerification?.failures ?? 0),
+    failure_reasons: failureReasons,
+    usage,
+    timing,
   };
 }
 
