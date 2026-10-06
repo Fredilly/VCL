@@ -75,6 +75,7 @@ export interface Env {
   ALPHA_CREATOR_CONTENT_MAP?: string;
   VERIFIED_PRODUCT_MAPPINGS_JSON?: string;
   VERIFIED_PRODUCT_TEST_MODE?: string;
+  VISUAL_PRODUCT_INDEX?: string;
   ALPHA_INSTALL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
   ALPHA_GLOBAL_RATE_LIMITER?: { limit(input: { key: string }): Promise<{ success: boolean }> };
   AI?: WorkersAiBinding & CloudflareVisionBinding;
