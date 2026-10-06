@@ -347,14 +347,26 @@ export function distinctiveTextSameVideoReuse(input: {
   const matches = eligible.filter(({ mapping, identity }) => {
     // This shortcut is only authoritative for explicitly promoted product tracks.
     if (!mapping.track_id || mapping.track_id !== identity.canonical_key) return false;
-    const signals = candidateSignals(identity, input.description);
-    // Require a genuinely distinctive phrase, not generic apparel words. Exact phrase
-    // is preferred; fragmented OCR may still qualify when at least three distinctive
-    // words cover most of the stored phrase.
-    const stored = distinctiveWords(identity.visible_text);
-    if (stored.length < 3) return false;
-    return signals.exactVisiblePhrase
-      || (signals.visibleOverlap.shared >= 3 && signals.visibleOverlap.ratio >= 0.75);
+
+    // Brand markings such as "LOUIS VUITTON PARIS" are not product identity.
+    // Remove brand/location/authenticity boilerplate before deciding whether OCR
+    // is distinctive enough to bypass image verification.
+    const brandTokens = new Set(distinctiveWords([identity.brand]));
+    const genericMarkingTokens = new Set([
+      'paris', 'france', 'italy', 'spain', 'london', 'tokyo',
+      'made', 'authentic', 'original', 'official', 'brand',
+    ]);
+    const stored = distinctiveWords(identity.visible_text)
+      .filter((token) => !brandTokens.has(token) && !genericMarkingTokens.has(token));
+    const observed = distinctiveWords(input.description.visible_text)
+      .filter((token) => !brandTokens.has(token) && !genericMarkingTokens.has(token));
+    if (stored.length < 3 || observed.length < 3) return false;
+
+    const direct = overlap(stored, observed);
+    const storedPhrase = stored.join(' ');
+    const observedPhrase = observed.join(' ');
+    return storedPhrase === observedPhrase
+      || (direct.shared >= 3 && direct.ratio >= 0.75);
   });
 
   const keys = new Set(matches.map(({ identity }) => identity.canonical_key));
