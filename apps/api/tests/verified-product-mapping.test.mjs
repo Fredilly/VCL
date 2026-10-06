@@ -296,3 +296,39 @@ test('equivalent durable and seed mappings merge richer metadata without changin
   assert.equal(hit?.image_reference, 'https://cdn.shopify.com/1WS-1916.jpg');
   assert.equal(hit?.provider, 'mizzenandmain');
 });
+
+
+test('contextual SKU text selects the correct product among multiple verified products in one video', () => {
+  const mappings = [
+    {
+      platform: 'youtube', content_ref: '1auV6jxLh_Q', scope: 'entire_video', object_type: 'bag',
+      brand: 'Louis Vuitton', product_id: 'N48280', title: 'Louis Vuitton Pochette Métis',
+      destination: 'https://example.com/N48280', provenance: 'admin_verified',
+    },
+    {
+      platform: 'youtube', content_ref: '1auV6jxLh_Q', scope: 'entire_video', object_type: 'bag',
+      brand: 'Louis Vuitton', product_id: 'N40952', title: 'Louis Vuitton Neverfull Inside Out MM',
+      destination: 'https://example.com/N40952', provenance: 'admin_verified',
+    },
+  ];
+  const description = {
+    ...shirt,
+    category: 'Bags',
+    subcategory: 'Tote Bag',
+    brand_candidate: 'Louis Vuitton',
+    model_candidate: 'Neverfull',
+    contextual_text: ['Neverfull I-O MM', 'N40952'],
+    evidence_confidence: { contextual_text: 0.95 },
+    search_terms: ['Louis Vuitton Neverfull N40952'],
+  };
+
+  const hit = mod.lookupVerifiedProductMapping({
+    mappings,
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: '1auV6jxLh_Q',
+    description,
+  });
+
+  assert.equal(hit?.product_id, 'N40952');
+});
