@@ -332,3 +332,73 @@ test('contextual SKU text selects the correct product among multiple verified pr
 
   assert.equal(hit?.product_id, 'N40952');
 });
+
+
+test('multi-product partner catalog does not force a family-level Speedy guess to Exact', () => {
+  const mappings = [
+    {
+      platform: 'youtube', content_ref: '1auV6jxLh_Q', scope: 'entire_video', object_type: 'bag',
+      brand: 'Louis Vuitton', product_id: 'M3A350', title: 'Louis Vuitton Speedy Soft 25',
+      destination: 'https://example.com/M3A350', provenance: 'admin_verified',
+    },
+    {
+      platform: 'youtube', content_ref: '1auV6jxLh_Q', scope: 'entire_video', object_type: 'bag',
+      brand: 'Louis Vuitton', product_id: 'N40952', title: 'Louis Vuitton Neverfull Inside Out MM',
+      destination: 'https://example.com/N40952', provenance: 'admin_verified',
+    },
+  ];
+  const description = {
+    ...shirt,
+    category: 'Bags',
+    subcategory: 'Handbag',
+    brand_candidate: 'Louis Vuitton',
+    model_candidate: 'Speedy',
+    color: 'Wine',
+    search_terms: ['Louis Vuitton Speedy wine bag'],
+  };
+
+  const hit = mod.lookupVerifiedProductMapping({
+    mappings,
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: '1auV6jxLh_Q',
+    description,
+  });
+
+  assert.equal(hit, null);
+});
+
+test('multi-product partner catalog resolves when the exact SKU is explicitly grounded', () => {
+  const mappings = [
+    {
+      platform: 'youtube', content_ref: '1auV6jxLh_Q', scope: 'entire_video', object_type: 'bag',
+      brand: 'Louis Vuitton', product_id: 'M3A350', title: 'Louis Vuitton Speedy Soft 25',
+      destination: 'https://example.com/M3A350', provenance: 'admin_verified',
+    },
+    {
+      platform: 'youtube', content_ref: '1auV6jxLh_Q', scope: 'entire_video', object_type: 'bag',
+      brand: 'Louis Vuitton', product_id: 'N40952', title: 'Louis Vuitton Neverfull Inside Out MM',
+      destination: 'https://example.com/N40952', provenance: 'admin_verified',
+    },
+  ];
+  const description = {
+    ...shirt,
+    category: 'Bags',
+    subcategory: 'Tote Bag',
+    brand_candidate: 'Louis Vuitton',
+    model_candidate: 'Neverfull',
+    contextual_text: ['Neverfull I-O MM', 'N40952'],
+    evidence_confidence: { contextual_text: 0.95 },
+    search_terms: ['Louis Vuitton Neverfull N40952'],
+  };
+
+  const hit = mod.lookupVerifiedProductMapping({
+    mappings,
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: '1auV6jxLh_Q',
+    description,
+  });
+
+  assert.equal(hit?.product_id, 'N40952');
+});
