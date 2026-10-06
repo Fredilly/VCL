@@ -326,3 +326,73 @@ test('legacy canonical equivalence rejects different slogans even when product t
   });
   assert.equal(memory.canonicalProductsEquivalent(a, b), false);
 });
+
+
+test('canonical identity stores verified visual references separately from merchant offers', () => {
+  const identity = memory.canonicalProductIdentity({
+    mapping: {
+      ...mapping,
+      brand: 'Louis Vuitton',
+      product_id: 'M3A285',
+      title: 'Louis Vuitton Multipass Monogram Rouge',
+      destination: 'https://us.louisvuitton.com/eng-us/products/multipass/M3A285',
+      image_reference: 'https://images.example.com/m3a285-front.jpg',
+    },
+    model: 'M3A285',
+    merchantItemId: 'M3A285',
+    visualReferences: [
+      {
+        reference_key: 'partner:m3a285:side',
+        image_url: 'https://images.example.com/m3a285-side.jpg',
+        provenance: 'partner_catalog',
+        viewpoint: 'side',
+        namespace: 'partner:demo',
+        vector_id: null,
+      },
+    ],
+  });
+
+  assert.equal(identity.visual_references.length, 2);
+  assert.deepEqual(
+    new Set(identity.visual_references.map((ref) => ref.provenance)),
+    new Set(['partner_catalog', 'merchant_verified']),
+  );
+  assert.equal(identity.merchant_refs.length, 1);
+});
+
+test('canonical merge preserves distinct visual references and dedupes repeated reference keys', () => {
+  const first = memory.canonicalProductIdentity({
+    mapping: { ...mapping, image_reference: null },
+    merchantItemId: 'merchant-item-1',
+    visualReferences: [{
+      reference_key: 'partner:front',
+      image_url: 'https://images.example.com/front.jpg',
+      provenance: 'partner_catalog',
+      viewpoint: 'front',
+      namespace: 'partner:test',
+      vector_id: 'vec-front',
+    }],
+  });
+
+  const second = {
+    ...first,
+    visual_references: [
+      ...(first.visual_references ?? []),
+      {
+        reference_key: 'partner:side',
+        image_url: 'https://images.example.com/side.jpg',
+        provenance: 'partner_catalog',
+        viewpoint: 'side',
+        namespace: 'partner:test',
+        vector_id: 'vec-side',
+      },
+    ],
+  };
+
+  const merged = memory.mergeCanonicalProductIdentity(first, second);
+  assert.equal(merged.visual_references.length, 2);
+  assert.deepEqual(
+    new Set(merged.visual_references.map((ref) => ref.reference_key)),
+    new Set(['partner:front', 'partner:side']),
+  );
+});
