@@ -37,7 +37,7 @@ import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideo
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 import { fetchProductPageMetadata } from './product-page-enrichment.js';
 import { recoverVerifiedProductImage } from './verified-image-recovery.js';
-import { ALPHA_VERIFIED_PRODUCT_SEEDS } from './alpha-verified-product-seeds.js';
+import { ALPHA_VERIFIED_PRODUCT_SEEDS, alphaVerifiedCanonicalRowsForContent, alphaVerifiedCanonicalIdentitiesExcludingContent } from './alpha-verified-product-seeds.js';
 export { AlphaAccessLedger } from './alpha-access.js';
 export { VerifiedProductLedger } from './verified-product-ledger.js';
 export { AdminAccessLedger } from './admin-access.js';
@@ -954,7 +954,7 @@ async function confirmCrossVideoReuseWithImage(
       : [retrievalAction] as const;
   if (!paths.length) return empty;
 
-  const identities = (await durableCanonicalCandidates(env, {
+  const durableIdentities = (await durableCanonicalCandidates(env, {
     paths: [...paths],
     brand: description.brand_candidate,
     model: description.model_candidate,
@@ -965,6 +965,19 @@ async function confirmCrossVideoReuseWithImage(
     limit: 24,
   }).catch(() => []))
     .filter((identity) => !excludeCanonicalKeys.has(identity.canonical_key));
+
+  // During alpha, verified creator/admin roster entries must also be reusable
+  // across videos. They are candidates only: cross-video Exact still requires
+  // the existing strict image verification below.
+  const seedIdentities = alphaVerifiedCanonicalIdentitiesExcludingContent(
+    context?.platform ?? null,
+    context?.content_ref ?? null,
+  ).filter((identity) => !excludeCanonicalKeys.has(identity.canonical_key));
+  const identityMap = new Map<string, CanonicalProductIdentity>();
+  for (const identity of [...durableIdentities, ...seedIdentities]) {
+    if (!identityMap.has(identity.canonical_key)) identityMap.set(identity.canonical_key, identity);
+  }
+  const identities = [...identityMap.values()];
   const candidates = crossVideoCanonicalCandidates({ description, identities });
   if (!candidates.length) return empty;
 
@@ -2009,14 +2022,28 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         failures: 0,
         failure_reasons: {},
       };
-      if (!verifiedMapping && durableMappings.length) {
+      const alphaCanonicalRows = alphaVerifiedCanonicalRowsForContent(
+        context?.platform ?? null,
+        contentRef,
+      );
+      if (!verifiedMapping && (durableMappings.length || alphaCanonicalRows.length)) {
         const canonicalMappings = durableMappings.filter((mapping) => Boolean(mapping.canonical_key));
-        const canonicalRows = (await Promise.all(canonicalMappings.map(async (mapping) => {
+        const durableCanonicalRows = (await Promise.all(canonicalMappings.map(async (mapping) => {
           const identity = mapping.canonical_key
             ? await durableCanonicalProductIdentity(env, mapping.canonical_key).catch(() => null)
             : null;
           return identity ? { mapping, identity: identityWithTrustedVpmObservations(identity, mapping) } : null;
         }))).filter((row): row is NonNullable<typeof row> => Boolean(row));
+
+        // Durable rows win when the same canonical product has already been
+        // persisted. Alpha roster rows fill the gap so a multi-product creator
+        // video can be resolved from its verified product list without manual
+        // timestamps. Visual verification still decides which product is on screen.
+        const canonicalRowMap = new Map<string, SameVideoCanonicalCandidate>();
+        for (const row of [...durableCanonicalRows, ...alphaCanonicalRows]) {
+          if (!canonicalRowMap.has(row.identity.canonical_key)) canonicalRowMap.set(row.identity.canonical_key, row);
+        }
+        const canonicalRows = [...canonicalRowMap.values()];
 
         sameVideoVisualCheck = await confirmSameVideoReuseWithImage(
           env,
