@@ -22,7 +22,7 @@ function offDecision(testCase) {
   return result?.canonical_key ?? null;
 }
 
-function onDecision(testCase) {
+export function onDecision(testCase) {
   const exactModel = reuse.exactModelSameVideoReuse({
     description: testCase.description,
     candidates: testCase.candidates,

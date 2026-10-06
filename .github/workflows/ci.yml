@@ -47,6 +47,17 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Roster outlier trust gate
+        run: node tests/benchmark/roster-outliers/run.mjs roster-outlier-report.json
+
+      - name: Upload roster outlier evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roster-outlier-report
+          path: roster-outlier-report.json
+          if-no-files-found: warn
+
       - name: Deterministic tests
         run: pnpm test
 

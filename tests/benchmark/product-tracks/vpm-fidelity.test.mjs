@@ -13,7 +13,7 @@ test('frozen VPM corpus covers required fidelity scenarios', () => {
 
 test('VPM hard gate: no wrong inherited Exact', () => {
   const { rows, metrics } = runFrozenVpmBenchmark();
-  const falseExacts = rows.filter((row) => !row.expected_track_id && row.on_track_id);
+  const falseExacts = rows.filter((row) => row.on_track_id && row.on_track_id !== row.expected_track_id);
   assert.deepEqual(falseExacts, []);
   assert.equal(metrics.false_inherited_exact, 0);
 });
