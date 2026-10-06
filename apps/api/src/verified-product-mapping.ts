@@ -142,6 +142,7 @@ function verifiedMappingIdentityScore(mapping: VerifiedProductMapping, descripti
     description.color,
     description.material,
     ...description.visible_text,
+    ...((description.evidence_confidence?.contextual_text ?? 0) >= 0.8 ? (description.contextual_text ?? []) : []),
     ...description.logos_markings,
     ...description.distinctive_features,
     ...description.style_attributes,
