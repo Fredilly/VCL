@@ -253,3 +253,25 @@ test('same-video verified mappings fail closed when product evidence is ambiguou
   });
   assert.equal(hit, null);
 });
+
+
+test('LV review roster becomes same-video Product Memory without manual timestamps', () => {
+  const rows = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', '1auV6jxLh_Q');
+  const ids = new Set(rows.map(({ mapping }) => mapping.product_id));
+  assert.deepEqual(ids, new Set(['M3A350', 'N48280', 'N40952', 'N48279', 'M2A904', 'M3A947']));
+  for (const { mapping, identity } of rows) {
+    assert.equal(mapping.scope, 'entire_video');
+    assert.equal(mapping.canonical_key, identity.canonical_key);
+    assert.equal(mapping.track_id, identity.canonical_key);
+    assert.ok(identity.merchant_refs.some((ref) => ref.image_reference));
+  }
+});
+
+test('alpha Product Memory can nominate known products in a different video but excludes the current video roster', () => {
+  const otherVideo = seedMod.alphaVerifiedCanonicalIdentitiesExcludingContent('youtube', 'some-new-video');
+  assert.ok(otherVideo.some((identity) => identity.title.includes('Neverfull Inside Out MM')));
+  assert.ok(otherVideo.some((identity) => identity.merchant_refs.some((ref) => ref.item_id === 'N40952')));
+
+  const sameVideo = seedMod.alphaVerifiedCanonicalIdentitiesExcludingContent('youtube', '1auV6jxLh_Q');
+  assert.equal(sameVideo.some((identity) => identity.merchant_refs.some((ref) => ref.item_id === 'N40952')), false);
+});
