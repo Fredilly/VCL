@@ -332,12 +332,16 @@ export function verifyProductCandidate(description: ObjectDescription, candidate
 export function buildProductQuery(description: ObjectDescription, context?: ProductContext): ProductQuery {
   const type = primaryType(description, context);
   const evidence = identityEvidence(description);
+  const groundedContextualText = (description.evidence_confidence?.contextual_text ?? 0) >= 0.8
+    ? (description.contextual_text ?? [])
+    : [];
   const strongestEvidence = uniqueNonEmpty([
+    ...groundedContextualText,
     ...description.visible_text,
     ...description.logos_markings,
     ...description.distinctive_features,
     ...description.shape_silhouette,
-  ]).slice(0, 2);
+  ]).slice(0, 3);
 
   const hasStrongIdentity = Boolean(description.brand_candidate || description.model_candidate || type);
   const ordered = hasStrongIdentity
@@ -379,16 +383,19 @@ export function buildProductQueryVariants(description: ObjectDescription, contex
   const base = buildProductQuery(description, context);
   const type = primaryType(description, context);
   const readableText = description.visible_text.map((value) => value.trim()).filter(Boolean).slice(0, 2);
+  const contextualText = (description.contextual_text ?? []).map((value) => value.trim()).filter(Boolean).slice(0, 3);
   const groundedReadableText = (description.evidence_confidence?.visible_text ?? 0) >= 0.8 ? readableText : [];
+  const groundedContextualText = (description.evidence_confidence?.contextual_text ?? 0) >= 0.8 ? contextualText : [];
   const groundedIdentityText = groundedReadableText.filter((text) => ![description.brand_candidate, description.model_candidate].some(
     (identity) => identity && normalized(identity) === normalized(text),
   ));
 
-  const textFirst = visibleTextFirst && readableText.length
+  const retrievalText = groundedContextualText.length ? groundedContextualText : readableText;
+  const textFirst = (groundedContextualText.length || (visibleTextFirst && readableText.length))
     ? uniqueNonEmpty([
         description.brand_candidate,
         description.model_candidate,
-        ...readableText.filter((text) => ![description.brand_candidate, description.model_candidate].some(
+        ...retrievalText.filter((text) => ![description.brand_candidate, description.model_candidate].some(
           (identity) => identity && normalized(identity) === normalized(text),
         )),
         type,
@@ -400,6 +407,7 @@ export function buildProductQueryVariants(description: ObjectDescription, contex
   const identity = uniqueNonEmpty([
     description.brand_candidate,
     description.model_candidate,
+    ...groundedContextualText,
     ...groundedIdentityText,
     type || description.subcategory,
   ]).join(' ');
@@ -409,7 +417,7 @@ export function buildProductQueryVariants(description: ObjectDescription, contex
   // broadening. If we can reliably read markings such as a surname + jersey
   // number, do not fall back to a generic type/color query that can retrieve
   // visually similar but wrong identities.
-  if (!groundedIdentityText.length) {
+  if (!groundedIdentityText.length && !groundedContextualText.length) {
     const visual = uniqueNonEmpty([
       type || description.subcategory,
       description.color,

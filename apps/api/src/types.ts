@@ -20,6 +20,8 @@ export type ObjectDescription = {
   material: string;
   style_attributes: string[];
   visible_text: string[];
+  /** Nearby frame/caption/card text that explicitly labels the selected product; retrieval evidence only, not a direct object marking. */
+  contextual_text?: string[];
   logos_markings: string[];
   distinctive_features: string[];
   hardware_details: string[];
@@ -73,6 +75,7 @@ export function normalizeObjectDescription(value: unknown): ObjectDescription {
     material: typeof record.material === 'string' ? record.material : '',
     style_attributes: stringArray(record.style_attributes, 12),
     visible_text: stringArray(record.visible_text, 8),
+    ...(stringArray(record.contextual_text, 8).length ? { contextual_text: stringArray(record.contextual_text, 8) } : {}),
     logos_markings: stringArray(record.logos_markings, 8),
     distinctive_features: stringArray(record.distinctive_features, 12),
     hardware_details: stringArray(record.hardware_details, 8),
