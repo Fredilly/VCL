@@ -121,6 +121,31 @@ test('grounded visible identity survives fallback broadening', () => {
     'must not broaden away grounded surname/number identity');
 });
 
+test('grounded nearby product label and SKU drive retrieval without becoming object markings', () => {
+  const neverfull = description({
+    category: 'Bags', subcategory: 'Tote Bag', brand_candidate: 'Louis Vuitton', model_candidate: 'Neverfull',
+    color: 'Brown', material: 'Canvas', visible_text: ['LOUIS VUITTON', 'PARIS'],
+    contextual_text: ['Neverfull I-O MM', 'N40952'],
+    evidence_confidence: { visible_text: 0.9, contextual_text: 0.95 },
+  });
+  const variants = buildProductQueryVariants(neverfull);
+  assert.match(variants[0].query, /Louis Vuitton/);
+  assert.match(variants[0].query, /Neverfull I-O MM/);
+  assert.match(variants[0].query, /N40952/);
+  assert.ok(variants.every((variant) => !/^Tote Bag Brown$/.test(variant.query)),
+    'must not broaden away a clearly grounded product label/SKU');
+});
+
+test('weak contextual text is ignored so unrelated slide text cannot hijack retrieval', () => {
+  const weak = description({
+    category: 'Bags', subcategory: 'Tote Bag', brand_candidate: 'Louis Vuitton', model_candidate: 'Neverfull',
+    color: 'Brown', material: 'Canvas', contextual_text: ['Pochette Metis N48280'],
+    evidence_confidence: { contextual_text: 0.4 },
+  });
+  const variants = buildProductQueryVariants(weak);
+  assert.ok(variants.every((variant) => !/N48280|Pochette Metis/.test(variant.query)));
+});
+
 test('weak readable text can still fall back to generic visual retrieval', () => {
   const weak = description({
     subcategory: 'Basketball Jersey', brand_candidate: null, model_candidate: null,
