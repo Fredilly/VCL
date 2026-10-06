@@ -10,6 +10,15 @@ export type CanonicalMerchantRef = {
   image_reference: string | null;
 };
 
+export type CanonicalVisualReference = {
+  reference_key: string;
+  image_url: string;
+  provenance: 'partner_catalog' | 'admin_verified' | 'merchant_verified' | 'web_verified';
+  viewpoint?: string | null;
+  namespace?: string | null;
+  vector_id?: string | null;
+};
+
 export type CanonicalProductIdentity = {
   canonical_key: string;
   title: string;
@@ -29,6 +38,7 @@ export type CanonicalProductIdentity = {
   provenance: VerifiedProductProvenance;
   verified_at: string;
   merchant_refs: CanonicalMerchantRef[];
+  visual_references?: CanonicalVisualReference[];
 };
 
 type CanonicalIdentityInput = {
@@ -42,6 +52,7 @@ type CanonicalIdentityInput = {
   logosMarkings?: string[];
   distinctiveFeatures?: string[];
   shapeSilhouette?: string[];
+  visualReferences?: CanonicalVisualReference[];
   verifiedAt?: string;
 };
 
@@ -59,6 +70,32 @@ function uniqueText(values: string[] | undefined, maxItems = 12): string[] {
     .filter(Boolean)
     .map((value) => value.replace(/\s+/g, ' ')))]
     .slice(0, maxItems);
+}
+
+function normalizeVisualReferences(values: CanonicalVisualReference[] | undefined, maxItems = 12): CanonicalVisualReference[] {
+  const unique = new Map<string, CanonicalVisualReference>();
+  for (const value of values ?? []) {
+    const imageUrl = bounded(value.image_url, 1200);
+    const key = bounded(value.reference_key, 240) || imageUrl;
+    if (!imageUrl || !key) continue;
+    let valid = false;
+    try {
+      const url = new URL(imageUrl);
+      valid = url.protocol === 'https:' || url.protocol === 'http:';
+    } catch {}
+    if (!valid) continue;
+    if (!unique.has(key)) {
+      unique.set(key, {
+        reference_key: key,
+        image_url: imageUrl,
+        provenance: value.provenance,
+        viewpoint: bounded(value.viewpoint, 80) || null,
+        namespace: bounded(value.namespace, 160) || null,
+        vector_id: bounded(value.vector_id, 220) || null,
+      });
+    }
+  }
+  return [...unique.values()].slice(0, maxItems);
 }
 
 function stableHash(value: string): string {
@@ -230,6 +267,7 @@ export function canonicalProductIdentity(input: CanonicalIdentityInput): Canonic
   const logosMarkings = uniqueText(input.logosMarkings, 8);
   const distinctiveFeatures = uniqueText(input.distinctiveFeatures, 12);
   const shapeSilhouette = uniqueText(input.shapeSilhouette, 8);
+  const visualReferences = normalizeVisualReferences(input.visualReferences);
   if (!title || !objectType) throw new Error('Canonical product identity needs title and object type');
 
   const normalized_fingerprint = normalizedFingerprint({
@@ -275,6 +313,17 @@ export function canonicalProductIdentity(input: CanonicalIdentityInput): Canonic
       destination: mapping.destination,
       image_reference: mapping.image_reference ?? null,
     }],
+    visual_references: normalizeVisualReferences([
+      ...visualReferences,
+      ...(mapping.image_reference ? [{
+        reference_key: `merchant:${canonicalMerchantOfferKey({ source, item_id: merchantItemId, destination: mapping.destination })}`,
+        image_url: mapping.image_reference,
+        provenance: 'merchant_verified' as const,
+        viewpoint: null,
+        namespace: null,
+        vector_id: null,
+      }] : []),
+    ]),
   };
 }
 
@@ -306,6 +355,11 @@ export function mergeCanonicalProductIdentity(
     }
   }
 
+  const visualReferences = normalizeVisualReferences([
+    ...(existing.visual_references ?? []),
+    ...(incoming.visual_references ?? []),
+  ]);
+
   return {
     ...existing,
     title: existing.title || incoming.title,
@@ -323,5 +377,6 @@ export function mergeCanonicalProductIdentity(
     provenance: existing.provenance,
     verified_at: incoming.verified_at,
     merchant_refs: merchantRefs.slice(0, 25),
+    visual_references: visualReferences,
   };
 }
