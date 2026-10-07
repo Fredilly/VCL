@@ -24,9 +24,10 @@ test('unchanged production resolver executes all 30 fixtures offline and repeats
     assert.equal(metrics.multi_frame_used, 5);
     assert.equal(metrics.multi_frame_contributed, 5);
     assert.equal(metrics.provider_failure_rate.numerator, 5);
-    assert.equal(metrics.similar_precision.numerator, 10);
-    assert.equal(metrics.similar_precision.denominator, 10, 'All true identities survive; weaker lookalikes remain RELATED');
-    assert.deepEqual(metrics.false_similar_selections, []);
+    assert.equal(metrics.known_top_identity_accuracy.numerator, 10, 'The same ten true identities must remain top results after label migration');
+    assert.equal(metrics.known_top_identity_accuracy.denominator, 20);
+    assert.ok(first.observations.every(row => row.response.products.every(product => ['EXACT', 'SIMILAR', 'RELATED'].includes(product.result_class))));
+    assert.deepEqual(metrics.false_likely_selections, []);
     assert.equal(metrics.useful_result_rate.numerator, 24);
     for (const row of rows.filter(r => r.multi_frame_used)) {
       assert.equal(row.multi_frame.field_sources.brand_candidate, 'next');

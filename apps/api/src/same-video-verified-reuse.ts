@@ -17,6 +17,7 @@ export type SameVideoReuseReason =
   | 'visual_confirmed'
   | 'visual_rejected'
   | 'visual_unavailable'
+  | 'incomplete_comparison'
   | 'no_candidate';
 
 export type SameVideoReuseDecision = {
@@ -187,7 +188,9 @@ export function confirmSameVideoVisual(
   comparison: ImageComparison | null | undefined,
 ): SameVideoReuseDecision {
   if (!decision.mapping || !decision.requires_visual) return decision;
-  if (!comparison) return { ...decision, mapping: null, canonical_key: null, confidence: 0, reason: 'visual_unavailable' };
+  if (!comparison || ![comparison.similarity, comparison.confidence].every(value => Number.isFinite(value) && value >= 0 && value <= 1)) {
+    return { ...decision, mapping: null, canonical_key: null, confidence: 0, reason: 'visual_unavailable' };
+  }
 
   const critical = ['subtype', 'color', 'sleeve', 'brand', 'model'] as const;
   for (const key of critical) {
@@ -378,6 +381,65 @@ export function verifiedProductMemoryCandidates(input: {
   return [...unique.values()];
 }
 
+export const ROSTER_VISUAL_CANDIDATE_LIMIT = 24;
+
+/** Two independent retrieval views prevent a guessed model/brand from consuming
+ * every slot. Scores order work only; all unexamined identities remain visible
+ * to the coverage gate. No creator, product or timestamp rules belong here. */
+export function retrieveSameVideoRosterCandidates(input: {
+  description: ObjectDescription;
+  candidates: SameVideoCanonicalCandidate[];
+}): SameVideoCanonicalCandidate[] {
+  const candidates = eligibleSameVideoCanonicalCandidates(input);
+  const hypotheses = rankSameVideoRosterCandidates({ ...input, candidates });
+  const observations = rankSameVideoRosterCandidates({ candidates, description: {
+    ...input.description, brand_candidate: null, model_candidate: null, search_terms: [],
+  } });
+  const selected = new Map<string, SameVideoCanonicalCandidate>();
+  for (let i = 0; i < candidates.length && selected.size < ROSTER_VISUAL_CANDIDATE_LIMIT; i++) {
+    for (const row of [hypotheses[i], observations[i]]) {
+      if (selected.size >= ROSTER_VISUAL_CANDIDATE_LIMIT) break;
+      if (row) selected.set(row.identity.canonical_key, row);
+    }
+  }
+  return [...selected.values()];
+}
+
+/** Missing comparison is uncertainty, not a negative. Only consistent, strong
+ * source-pixel attributes from the independent verifier can rule out an unseen
+ * roster entry. Description/model guesses and retrieval scores cannot do it. */
+export function unresolvedRosterCandidateKeys(input: {
+  candidates: SameVideoCanonicalCandidate[];
+  comparisons: Map<string, ImageComparison>;
+}): string[] {
+  const keys = new Set(input.candidates.map(row => row.identity.canonical_key));
+  const comparisons = [...input.comparisons].filter(([key, comparison]) => keys.has(key)
+    && [comparison.similarity, comparison.confidence].every(value => Number.isFinite(value) && value >= 0 && value <= 1))
+    .map(([, comparison]) => comparison);
+  const sourceValue = (attribute: 'category' | 'brand' | 'color'): string | null => {
+    const values = comparisons.map(comparison => {
+      const observation = comparison.source[attribute]
+        ?? (attribute === 'category' ? comparison.source.subtype : undefined);
+      return observation?.basis === 'image' && observation.confidence >= .9 && observation.confidence <= 1
+        ? canonical(attribute, observation.value) : null;
+    }).filter((value): value is string => Boolean(value));
+    const unique = [...new Set(values)];
+    return unique.length === 1 ? unique[0] : null;
+  };
+  const observed = { category: sourceValue('category'), brand: sourceValue('brand'), color: sourceValue('color') };
+  return input.candidates.filter(({ identity }) => {
+    const comparison = input.comparisons.get(identity.canonical_key);
+    // A low-confidence comparison also leaves identity unresolved. A confident
+    // rejection or confirmation counts as examined, without changing thresholds.
+    if (comparison && comparison.confidence >= .9 && comparison.confidence <= 1
+      && Number.isFinite(comparison.similarity) && comparison.similarity >= 0 && comparison.similarity <= 1) return false;
+    const expected = { category: canonical('category', identity.object_type),
+      brand: canonical('brand', identity.brand), color: canonical('color', identity.color) };
+    return !(['category', 'brand', 'color'] as const).some(attribute => observed[attribute] && expected[attribute]
+      && !compatible(attribute, observed[attribute]!, expected[attribute]!));
+  }).map(row => row.identity.canonical_key);
+}
+
 export function eligibleSameVideoCanonicalCandidates(input: {
   description: ObjectDescription;
   candidates: SameVideoCanonicalCandidate[];
@@ -547,13 +609,20 @@ export function resolveSameVideoReuse(input: {
   description: ObjectDescription;
   candidates: SameVideoCanonicalCandidate[];
   comparisons?: Map<string, ImageComparison>;
+  /** Live bounded retrieval must account for missing candidates. Frozen legacy
+   * evidence fixtures may omit the upstream comparison coverage contract. */
+  require_complete_comparisons?: boolean;
 }): SameVideoReuseDecision {
   if (input.comparisons !== undefined) {
     // A previously promoted track is evidence, not an exclusive answer set.
     // Compare every canonical roster candidate that survived structural validity;
     // the visual winner decides identity.
     const eligible = eligibleSameVideoCanonicalCandidates(input);
-    return selectSameVideoVisualWinner({ candidates: eligible, comparisons: input.comparisons });
+    const decision = selectSameVideoVisualWinner({ candidates: eligible, comparisons: input.comparisons });
+    if (input.require_complete_comparisons && unresolvedRosterCandidateKeys({ candidates: eligible, comparisons: input.comparisons }).length) {
+      return { mapping: null, canonical_key: null, confidence: 0, reason: 'incomplete_comparison' };
+    }
+    return decision;
   }
   const model = exactModelSameVideoReuse(input);
   if (model.mapping) return model;

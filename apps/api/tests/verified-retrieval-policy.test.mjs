@@ -36,7 +36,7 @@ function requestFor(contentRef = 'youtube:VIDEO') {
   });
 }
 
-test('verified source page supplies a missing thumbnail without broad commerce retrieval', async () => {
+test('verified appearance window supplies a missing thumbnail without broad commerce retrieval', async () => {
   const fetches = [];
   const worker = loadModule(serverFile, {
     fetch: async (url) => {
@@ -52,7 +52,9 @@ test('verified source page supplies a missing thumbnail without broad commerce r
   const mapping = [{
     platform: 'youtube',
     content_ref: 'youtube:VIDEO',
-    scope: 'entire_video',
+    scope: 'time_window',
+    timestamp_start_ms: 9000,
+    timestamp_end_ms: 11000,
     object_type: 'shirt',
     brand: 'Brand',
     product_id: 'SKU-1',

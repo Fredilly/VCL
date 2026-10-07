@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
-export const CLASSES = ['EXACT', 'SIMILAR', 'RELATED', 'NO_RESULT'];
+// Retain LIKELY for immutable historical fixture/run input only. Current runtime
+// classes are EXACT/SIMILAR/RELATED; RELATED carries no original-identity claim.
+export const CLASSES = ['EXACT', 'LIKELY', 'SIMILAR', 'RELATED', 'NO_RESULT'];
 export const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const ratio = (numerator, denominator) => ({ numerator, denominator, value: denominator ? numerator / denominator : null });
 const count = (rows, predicate) => rows.filter(predicate).length;
@@ -84,7 +86,7 @@ export function summarize(rows) {
   const categories = Object.fromEntries([...new Set(rows.map(r => r.category))].map(c => [c, count(rows, r => r.category === c)]));
   return {
     selections: rows.length, category_mix: categories, known_identity: known.length, unknown_identity: rows.length - known.length,
-    exact_precision: precision('EXACT'), similar_precision: precision('SIMILAR'),
+    exact_precision: precision('EXACT'), likely_precision: precision('LIKELY'),
     false_exact_rate: ratio(count(rows, r => r.false_exact), rows.length),
     unverified_exact_selections: count(rows, r => r.unverified_exact),
     all_returned_exact: { claims: allExact.length, false: count(allExact, p => p.adjudication.correct === false), unknown: count(allExact, p => p.adjudication.correct === null) },
@@ -95,7 +97,7 @@ export function summarize(rows) {
     provider_failure_rate: ratio(count(providers, p => p.failed), providers.length),
     multi_frame_used: count(rows, r => r.multi_frame_used), multi_frame_contributed: count(rows, r => r.multi_frame_contributed),
     request_failures: count(rows, r => r.error !== null),
-    false_similar_selections: rows.filter(r => r.actual_classification === 'SIMILAR' && r.top_candidate_correct === false).map(r => r.selection_id),
+    false_likely_selections: rows.filter(r => r.actual_classification === 'LIKELY' && r.top_candidate_correct === false).map(r => r.selection_id),
   };
 }
 
@@ -106,14 +108,14 @@ export function reportMarkdown(report) {
   return `# Spike 4f exact-match benchmark\n\nDecision: **${report.decision}**. Mode: ${report.mode}.\n\n${report.limitations.join(' ')}\n\n` +
     `Selections: ${m.selections}; known ${m.known_identity}, unknown ${m.unknown_identity}. Categories: ${Object.entries(m.category_mix).map(([k, v]) => `${k} ${v}`).join(', ')}.\n\n` +
     `| Metric | Result |\n| --- | --- |\n${[
-      ['Exact precision (top, judged)', rate(m.exact_precision)], ['Similar precision (top, judged)', rate(m.similar_precision)],
+      ['Exact precision (top, judged)', rate(m.exact_precision)], ['Likely precision (top, judged)', rate(m.likely_precision)],
       ['False-EXACT selections (any returned rank)', rate(m.false_exact_rate)], ['Unverified EXACT selections', m.unverified_exact_selections],
       ['Useful-result rate (any returned rank)', rate(m.useful_result_rate)], ['No-result rate', rate(m.no_result_rate)],
       ['P50 / P95 latency (ms)', `${m.p50_latency_ms} / ${m.p95_latency_ms}`], ['Provider failure rate (observable only)', rate(m.provider_failure_rate)],
       ['Multi-frame used / contributed', `${m.multi_frame_used} / ${m.multi_frame_contributed}`],
     ].map(([k, v]) => `| ${k} | ${v} |`).join('\n')}\n\n` +
     `False EXACT: ${report.rows.filter(r => r.false_exact).map(r => r.selection_id).join(', ') || 'none'}. Unverified EXACT: ${report.rows.filter(r => r.unverified_exact).map(r => r.selection_id).join(', ') || 'none'}.\n\n` +
-    `False SIMILAR: ${m.false_similar_selections.join(', ') || 'none'}.\n\n` +
+    `False LIKELY: ${m.false_likely_selections.join(', ') || 'none'}.\n\n` +
     `| Selection | Expected | Actual | Top candidate | Correct | Useful | False EXACT | No result | ms |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n` +
     report.rows.map(r => `| ${[r.selection_id, r.expected_classification, r.actual_classification, r.top_candidate?.title, r.top_candidate_correct, r.useful_result, r.false_exact, r.no_result, r.latency_ms].map(text).join(' | ')} |`).join('\n') + '\n';
 }

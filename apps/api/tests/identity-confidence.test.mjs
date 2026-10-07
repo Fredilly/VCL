@@ -61,5 +61,5 @@ test('strong visual floor is conjunctive with comparison confidence, never a rep
   f.comparison.confidence = .89;
   assert.equal(verify(f)?.result_class, 'SIMILAR');
   f.comparison.confidence = .99; f.candidate.metadata.model = 'different model';
-  assert.equal(verify(f)?.result_class, 'SIMILAR');
+  assert.equal(verify(f)?.result_class, 'RELATED');
 });

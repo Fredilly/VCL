@@ -207,3 +207,44 @@ test('a previously promoted sibling does not become an exclusive answer set', ()
   });
   assert.equal(decision.canonical_key, 'sku-correct');
 });
+
+test('73-entry retrieval is bounded, reaches the evidence match at the tail and is order invariant', () => {
+  const correct = rosterCandidate({ key: 'z-match', title: 'Acme Orbit White Bag', family: 'Orbit', color: 'white',
+    features: ['light blue monogram', 'front padlock'], shape: ['structured vanity case'] });
+  const noise = Array.from({ length: 72 }, (_, i) => rosterCandidate({ key: `noise-${i}`, title: `Acme Dark Bag ${i}`, family: `Group ${i}`, color: 'brown' }));
+  const input = { description: description({ model_candidate: 'Wrong Family' }), candidates: [...noise, correct] };
+  const shortlist = reuse.retrieveSameVideoRosterCandidates(input);
+  assert.ok(shortlist.length <= reuse.ROSTER_VISUAL_CANDIDATE_LIMIT);
+  assert.ok(shortlist.slice(0, 5).some(row => row.identity.canonical_key === 'z-match'));
+  const reversed = reuse.retrieveSameVideoRosterCandidates({ ...input, candidates: [...input.candidates].reverse() });
+  assert.deepEqual(shortlist.map(row => row.identity.canonical_key), reversed.map(row => row.identity.canonical_key));
+});
+
+test('missing or uncertain sibling comparison blocks live Exact, even when a nominee looks excellent', () => {
+  const candidates = ['A', 'B'].map(key => rosterCandidate({ key, title: `Acme Orbit ${key}`, family: 'Orbit', color: 'white' }));
+  for (const evidence of [undefined, { ...comparison(.98), confidence: .4 }, { ...comparison(NaN), confidence: .99 }]) {
+    const comparisons = new Map([['A', comparison(.98)]]);
+    if (evidence) comparisons.set('B', evidence);
+    const result = reuse.resolveSameVideoReuse({ description: description(), candidates, comparisons, require_complete_comparisons: true });
+    assert.equal(result.mapping, null);
+    assert.equal(result.reason, 'incomplete_comparison');
+  }
+});
+
+test('a deferred different category can be ruled out by independent pixels, never model guesses', () => {
+  const a = rosterCandidate({ key: 'A', title: 'Acme Orbit White Bag', family: 'Orbit', color: 'white' });
+  const b = rosterCandidate({ key: 'B', title: 'Acme Watch', family: 'Time' });
+  b.identity.object_type = 'watch'; b.mapping.object_type = 'watch';
+  const input = { description: description({ subcategory: 'watch' }), candidates: [a, b], require_complete_comparisons: true };
+  const pixels = comparison(.98);
+  assert.equal(reuse.resolveSameVideoReuse({ ...input, comparisons: new Map([['A', pixels]]) }).canonical_key, 'A');
+  pixels.source.subtype.basis = 'description';
+  assert.equal(reuse.resolveSameVideoReuse({ ...input, comparisons: new Map([['A', pixels]]) }).mapping, null);
+});
+
+test('contradictory source comparisons cannot selectively excuse an unseen rival', () => {
+  const candidates = ['A', 'B', 'C'].map(key => rosterCandidate({ key, title: `Acme Orbit ${key}`, family: 'Orbit', color: 'brown' }));
+  const white = comparison(.98); white.source.color = { value: 'white', confidence: .99, basis: 'image' };
+  const brown = comparison(.4); brown.source.color = { value: 'brown', confidence: .99, basis: 'image' };
+  assert.equal(reuse.resolveSameVideoReuse({ description: description(), candidates, comparisons: new Map([['A', white], ['B', brown]]), require_complete_comparisons: true }).mapping, null);
+});

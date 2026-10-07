@@ -41,7 +41,7 @@ const metrics = summarize(rows);
 const safeguardsPass = metrics.all_returned_exact.false === 0 && metrics.all_returned_exact.unknown === 0
   && metrics.useful_result_rate.value >= .7 && metrics.request_failures === 0;
 const calibrationPass = rows.every(r => {
-  const level = { NO_RESULT: 0, RELATED: 1, SIMILAR: 2, EXACT: 3 };
+  const level = { NO_RESULT: 0, RELATED: 0, SIMILAR: 1, LIKELY: 2, EXACT: 3 };
   return level[r.actual_classification] <= level[r.expected_classification];
 });
 const report = { schema_version: 1, mode: 'static_authored_evidence', corpus_sha256: digest(corpus), provenance,

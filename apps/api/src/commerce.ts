@@ -330,9 +330,15 @@ export function verifyProductCandidate(description: ObjectDescription, candidate
   return { ...candidate, result_class: resultClass, relationship: resultClass, verification_score: score, verification_reasons: reasons };
 }
 
+function retrievalProductType(description: ObjectDescription, inferredType: string | null): string | null {
+  const subtype = description.subcategory?.trim();
+  const generic = /^(top|tops|apparel|clothing|accessory|accessories|object|product|unknown)$/i;
+  return subtype && !generic.test(subtype) ? subtype : inferredType || subtype || null;
+}
+
 export function buildProductQuery(description: ObjectDescription, context?: ProductContext): ProductQuery {
   const type = primaryType(description, context);
-  const retrievalType = description.subcategory?.trim() || type;
+  const retrievalType = retrievalProductType(description, type);
   const evidence = identityEvidence(description);
   const groundedContextualText = (description.evidence_confidence?.contextual_text ?? 0) >= 0.8
     ? (description.contextual_text ?? [])
@@ -385,7 +391,7 @@ export function buildProductQuery(description: ObjectDescription, context?: Prod
 export function buildProductQueryVariants(description: ObjectDescription, context?: ProductContext, visibleTextFirst = false): ProductQuery[] {
   const base = buildProductQuery(description, context);
   const type = primaryType(description, context);
-  const retrievalType = description.subcategory?.trim() || type;
+  const retrievalType = retrievalProductType(description, type);
   const readableText = description.visible_text.map((value) => value.trim()).filter(Boolean).slice(0, 2);
   const contextualText = (description.contextual_text ?? []).map((value) => value.trim()).filter(Boolean).slice(0, 3);
   const groundedReadableText = (description.evidence_confidence?.visible_text ?? 0) >= 0.8 ? readableText : [];

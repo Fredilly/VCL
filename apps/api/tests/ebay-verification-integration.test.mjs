@@ -83,11 +83,13 @@ for (const environment of ['sandbox', 'production']) test(`${environment} creden
   assert.equal(body.products[0].result_class, 'SIMILAR', 'brand-only tee fixture has no readable model identity');
 });
 
-test('readable source model plus independently compared distinctive pixels can earn EXACT through the HTTP route', async () => {
+test('readable source model and matching pixels stay SIMILAR without a verified canonical variant', async () => {
   const { response, body } = await resolve({ readableModel: true });
   assert.equal(response.status, 200);
   assert.equal(body.products.length, 1);
-  assert.equal(body.products[0].result_class, 'EXACT');
+  assert.equal(body.products[0].result_class, 'SIMILAR');
+  assert.equal(body.products[0].relationship, 'SIMILAR');
+  assert.ok(body.products[0].verification_reasons.includes('canonical variant identity is not independently verified'));
   assert.equal(body.products[0].provenance, 'ebay:browse');
 });
 

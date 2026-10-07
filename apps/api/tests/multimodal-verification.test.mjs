@@ -46,7 +46,7 @@ test('type and audience alone are too weak when image comparison is unavailable'
   candidate.title = 'Men t-shirt'; candidate.metadata = {};
   assert.equal(verifyCandidate(description, candidate).product, null);
   candidate.title = 'Men black t-shirt';
-  assert.equal(verifyCandidate(description, candidate).product.result_class, 'SIMILAR');
+  assert.equal(verifyCandidate(description, candidate).product.result_class, 'RELATED');
 });
 
 test('brand and generic construction agreement remain SIMILAR without readable model identity', () => {
@@ -94,11 +94,11 @@ test('generic visual attributes cannot masquerade as distinctive identity eviden
   assert.equal(verifyCandidate(description, candidate, comparison).product.result_class, 'SIMILAR');
 });
 
-test('a clearly different neckline is at most SIMILAR despite otherwise strong image agreement', () => {
+test('a clearly different neckline stays RELATED despite otherwise strong image agreement', () => {
   const { description, candidate, comparison } = example(apparelCases[0]);
   comparison.source.neckline = { value: 'crew neck', confidence: 0.95, basis: 'image' };
   comparison.candidate.neckline = { value: 'v-neck', confidence: 0.95, basis: 'image' };
-  assert.equal(verifyCandidate(description, candidate, comparison).product.result_class, 'SIMILAR');
+  assert.equal(verifyCandidate(description, candidate, comparison).product.result_class, 'RELATED');
 });
 
 test('explicit kids products cannot match an adult selection, regardless of brand or visual score', () => {

@@ -31,7 +31,7 @@ import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerc
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, parseVerifiedProductMappings, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { backfillLegacyAdminCanonicalMappings, consolidateCanonicalProducts, durableCanonicalCandidates, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
-import { eligibleSameVideoCanonicalCandidates, resolveSameVideoReuse, verifiedProductMemoryCandidates, identityWithTrustedVpmObservations, rankSameVideoRosterCandidates, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
+import { eligibleSameVideoCanonicalCandidates, resolveSameVideoReuse, identityWithTrustedVpmObservations, rankSameVideoRosterCandidates, retrieveSameVideoRosterCandidates, unresolvedRosterCandidateKeys, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
@@ -746,6 +746,7 @@ export async function refreshVerifiedOffers(
 }
 
 type SameVideoVisualCheck = {
+  retrieval?: { roster_count: number; retrieved_keys: string[]; verified_keys: string[]; unresolved_keys: string[] };
   comparisons?: Record<string, ImageComparison>;
   decision: SameVideoReuseDecision;
   compared: number;
@@ -789,18 +790,19 @@ async function confirmSameVideoReuseWithImage(
     confidence: 0,
     reason: 'no_candidate',
   };
-  const empty = { decision: noDecision, compared: 0, failures: 0, failure_reasons: {} };
-
   // OCR/model matches nominate identities; they cannot bypass the visual check.
   // Unavailable comparison evidence keeps this production path fail-closed.
   const eligible = eligibleSameVideoCanonicalCandidates({ description, candidates });
   // Product Memory is evidence, not an exclusive answer set. A stale or previously
   // promoted sibling must never hide another canonical roster identity before
   // visual comparison. Rank the whole structurally valid roster instead.
-  const visualCandidates = rankSameVideoRosterCandidates({
+  const visualCandidates = retrieveSameVideoRosterCandidates({
     description,
     candidates: eligible,
   });
+  const retrieval = { roster_count: eligible.length, retrieved_keys: visualCandidates.map(row => row.identity.canonical_key),
+    verified_keys: [] as string[], unresolved_keys: eligible.map(row => row.identity.canonical_key) };
+  const empty = { decision: noDecision, compared: 0, failures: 0, failure_reasons: {}, retrieval };
   if (!visualCandidates.length || !sourceImage) {
     return { ...empty, decision: { ...noDecision, reason: visualCandidates.length ? 'visual_unavailable' : 'no_candidate' } };
   }
@@ -899,7 +901,7 @@ async function confirmSameVideoReuseWithImage(
   // then run the same strict visual verifier again. Missing or rejected evidence
   // still fails closed; no generic lookalike can inherit Exact.
   let retryVerification: typeof images | null = null;
-  const missingRows = rows.filter((row) => !comparisons.has(row.identity.canonical_key));
+  const missingRows = rows.filter((row) => !comparisons.has(row.identity.canonical_key)).slice(0, 2);
   if (missingRows.length && env.BRAVE_SEARCH_API_KEY) {
     const recoveredRows = (await Promise.all(missingRows.map(async (row) => {
       const recovered = await recoverVerifiedProductImage(
@@ -956,7 +958,9 @@ async function confirmSameVideoReuseWithImage(
   } : images.timing;
 
   return {
-    decision: resolveSameVideoReuse({ description, candidates: visualCandidates, comparisons }),
+    decision: resolveSameVideoReuse({ description, candidates: eligible, comparisons, require_complete_comparisons: true }),
+    retrieval: { ...retrieval, verified_keys: [...comparisons.keys()],
+      unresolved_keys: unresolvedRosterCandidateKeys({ candidates: eligible, comparisons }) },
     comparisons: Object.fromEntries(comparisons),
     compared: images.compared + (retryVerification?.compared ?? 0),
     failures: images.failures + (retryVerification?.failures ?? 0),
@@ -1276,7 +1280,15 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     }
 
     for (const { decision } of decisions) {
-      if (decision.product) accepted.push(decision.product);
+      if (decision.product) {
+        // Open-world model/design agreement is not a binding to a verified
+        // catalog variant. Preserve the independent canonical identity gate;
+        // changing the label enum must not promote old uncertain search hits.
+        accepted.push(decision.product.result_class === 'EXACT' ? {
+          ...decision.product, result_class: 'SIMILAR', relationship: 'SIMILAR',
+          verification_reasons: [...(decision.product.verification_reasons ?? []), 'canonical variant identity is not independently verified'],
+        } : decision.product);
+      }
       else {
         verification.rejected++;
         const reason = decision.reasons[0].split(':')[0];
@@ -1896,7 +1908,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       if (!authorized.admin || !authorized.admin_id) return jsonResponse({ error: 'Unauthorized' }, 401);
       try {
         if (path === '/learning-export') return jsonResponse(await verifiedLedgerRequest(env, '/learning/export', {}));
-        const input = await request.json() as { platform: string; content_ref: string; offers: RosterOfferInput[] };
+        const input = await request.json() as { platform: string; content_ref: string; offers: Array<RosterOfferInput | string> };
         const rows = await preparePartnerRoster(env, new URL(request.url).origin, input);
         await ingestPartnerRoster(env, rows);
         await auditAdminAction(env, authorized.admin_id, 'partner_roster_ingested', { identities: rows.length, offers: input.offers.length, content_ref: input.content_ref });
@@ -2073,7 +2085,11 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       let verifiedMapping = lookupVerifiedProductMapping({
         // Durable/admin mappings win. Alpha seed data is only the fallback until
         // a creator/brand-confirmed mapping is persisted for the same content.
-        mappings: [...parseVerifiedProductMappings(env.VERIFIED_PRODUCT_MAPPINGS_JSON), ...durableMappings, ...ALPHA_VERIFIED_PRODUCT_SEEDS].filter(mapping => !mapping.canonical_key || !reviewedNegativeKeys.has(mapping.canonical_key)),
+        mappings: [...parseVerifiedProductMappings(env.VERIFIED_PRODUCT_MAPPINGS_JSON), ...durableMappings, ...ALPHA_VERIFIED_PRODUCT_SEEDS]
+          // A roster entry, even the only matching entry, is a candidate. Only
+          // legacy explicit appearance assertions can use the direct lookup.
+          .filter(mapping => mapping.scope === 'time_window' && !mapping.variant_id)
+          .filter(mapping => !mapping.canonical_key || !reviewedNegativeKeys.has(mapping.canonical_key)),
         allowTestFixtures: benchmarkMode || env.VERIFIED_PRODUCT_TEST_MODE === 'true',
         platform: context?.platform ?? null,
         contentRef,
@@ -2117,6 +2133,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         context?.timestamp_ms ?? null,
       );
       const partnerCanonicalRows = [...configuredCanonicalRows, ...alphaCanonicalRows].filter(row => !reviewedNegativeKeys.has(row.identity.canonical_key));
+      let canonicalRows: SameVideoCanonicalCandidate[] = partnerCanonicalRows;
       if (!verifiedMapping && (durableMappings.length || partnerCanonicalRows.length)) {
         const canonicalMappings = durableMappings.filter((mapping) => Boolean(mapping.canonical_key));
         const durableCanonicalRows = (await Promise.all(canonicalMappings.map(async (mapping) => {
@@ -2126,7 +2143,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           return identity ? { mapping, identity: identityWithTrustedVpmObservations(identity, mapping) } : null;
         }))).filter((row): row is NonNullable<typeof row> => Boolean(row));
 
-        const canonicalRows = scopedPartnerRosterCandidates({
+        canonicalRows = scopedPartnerRosterCandidates({
           partner: partnerCanonicalRows, durable: durableCanonicalRows, timestamp_ms: context?.timestamp_ms,
         }).filter(row => !reviewedNegativeKeys.has(row.identity.canonical_key));
 
@@ -2166,9 +2183,12 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           }
         }
       }
-      if (!verifiedMapping) {
+      // Unresolved roster evidence is not an open-set miss. A different memory
+      // candidate must not acquire Exact while roster rivals remain unchecked.
+      if (!verifiedMapping && !['incomplete_comparison', 'ambiguous', 'visual_unavailable'].includes(sameVideoReuse.reason)) {
         const sameVideoCanonicalKeys = new Set(
-          [...reviewedNegativeKeys, ...durableMappings.map((mapping) => mapping.canonical_key).filter((key): key is string => Boolean(key))],
+          [...reviewedNegativeKeys, ...canonicalRows.map(row => row.identity.canonical_key),
+            ...durableMappings.map((mapping) => mapping.canonical_key).filter((key): key is string => Boolean(key))],
         );
         crossVideoVisualCheck = await confirmCrossVideoReuseWithImage(
           env,
@@ -2287,6 +2307,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           feedback_learning: { penalized: 0, suppressed: 0, signal_levels: { exact: 0, candidate_global: 0, family: 0 }, reviewed_roster_suppressed: reviewedNegatives.length },
           verified_mapping: {
             hit: true,
+            roster_retrieval: sameVideoVisualCheck.retrieval,
             provenance: verifiedMapping.provenance,
             product_id: verifiedMapping.product_id,
             ...(verifiedMapping.canonical_key ? { canonical_key: verifiedMapping.canonical_key } : {}),
@@ -2349,17 +2370,24 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       // Keep identity proof conservative after a roster miss, but do not throw away
       // useful family/subtype hypotheses before retrieval. Retrieval and verification
       // are deliberately different evidence roles.
-      const fallbackDescription = partnerCanonicalRows.length ? rosterFallbackDescription(description) : description;
-      const retrievalDescription = partnerCanonicalRows.length ? rosterFallbackRetrievalDescription(description) : description;
+      const fallbackDescription = canonicalRows.length ? rosterFallbackDescription(description) : description;
+      const retrievalDescription = canonicalRows.length ? rosterFallbackRetrievalDescription(description) : description;
       const baseQueries = buildProductQueryVariants(retrievalDescription, context, visibleTextQueryV2);
       // Rank the entire roster independent of partner input order, then spend the
       // bounded open-world query budget on the strongest roster hypotheses.
       // These queries nominate candidates only and never assert identity.
-      const rankedRosterRows = rankSameVideoRosterCandidates({ description, candidates: partnerCanonicalRows });
+      const rankedRosterRows = rankSameVideoRosterCandidates({ description, candidates: canonicalRows })
+        // A rejected roster reference is not a useful commerce hypothesis.
+        .filter(row => {
+          const comparison = sameVideoVisualCheck.comparisons?.[row.identity.canonical_key];
+          if (!comparison || comparison.confidence < .9) return true;
+          return Boolean(resolveSameVideoReuse({ description, candidates: [row],
+            comparisons: new Map([[row.identity.canonical_key, comparison]]) }).mapping);
+        });
       const rosterQueries = rankedRosterRows.slice(0, 4).map(row => ({
         ...baseQueries[0], query: row.identity.title, model: null,
       }));
-      const queries = [...rosterQueries, ...baseQueries].filter((query, index, all) =>
+      const queries = [baseQueries[0], ...rosterQueries, ...baseQueries.slice(1)].filter((query, index, all) =>
         all.findIndex(other => other.query === query.query) === index).map((query) => affiliateClickRef
         ? { ...query, affiliate_reference_id: affiliateClickRef }
         : query);
@@ -2499,6 +2527,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         feedback_learning: feedbackLearning,
         verified_mapping: {
           hit: false,
+          roster_retrieval: sameVideoVisualCheck.retrieval,
           reuse: crossVideoReuse.reason !== 'no_candidate' ? 'cross_video' : 'same_video',
           confidence: crossVideoReuse.reason !== 'no_candidate' ? crossVideoReuse.confidence : sameVideoReuse.confidence,
           reason: crossVideoReuse.reason !== 'no_candidate' ? crossVideoReuse.reason : sameVideoReuse.reason,

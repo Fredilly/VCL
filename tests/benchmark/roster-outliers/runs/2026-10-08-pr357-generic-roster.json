@@ -1,0 +1,384 @@
+{
+  "mode": "frozen_evidence",
+  "metrics": {
+    "observations": 28,
+    "top1_accuracy": 1,
+    "in_roster_accuracy": 1,
+    "false_exact": 0,
+    "false_exact_ids": [],
+    "none_recall": 1,
+    "none_precision": 0.38461538461538464,
+    "ambiguity_abstention": 1,
+    "exact_coverage": 0.5357142857142857,
+    "false_assignment": 0,
+    "provider_blocked": 0,
+    "system_failures": 0,
+    "by_scenario": {
+      "single_sku": {
+        "cases": 2,
+        "false_exact": 0,
+        "correct": 2
+      },
+      "multi_sku": {
+        "cases": 2,
+        "false_exact": 0,
+        "correct": 2
+      },
+      "colorways": {
+        "cases": 2,
+        "false_exact": 0,
+        "correct": 2
+      },
+      "near_size": {
+        "cases": 2,
+        "false_exact": 0,
+        "correct": 2
+      },
+      "comparison_outside_roster": {
+        "cases": 1,
+        "false_exact": 0,
+        "correct": 1
+      },
+      "near_trim": {
+        "cases": 1,
+        "false_exact": 0,
+        "correct": 1
+      },
+      "near_season": {
+        "cases": 1,
+        "false_exact": 0,
+        "correct": 1
+      },
+      "old_new": {
+        "cases": 2,
+        "false_exact": 0,
+        "correct": 2
+      },
+      "reversed": {
+        "cases": 1,
+        "false_exact": 0,
+        "correct": 1
+      },
+      "worn": {
+        "cases": 1,
+        "false_exact": 0,
+        "correct": 1
+      },
+      "folded": {
+        "cases": 1,
+        "false_exact": 0,
+        "correct": 1
+      },
+      "partially_hidden": {
+        "cases": 1,
+        "false_exact": 0,
+        "correct": 1
+      },
+      "poor_lighting": {
+        "cases": 2,
+        "false_exact": 0,
+        "correct": 2
+      },
+      "inside_out": {
+        "cases": 1,
+        "false_exact": 0,
+        "correct": 1
+      },
+      "screen_vs_speech": {
+        "cases": 1,
+        "false_exact": 0,
+        "correct": 1
+      },
+      "nearby_ocr": {
+        "cases": 1,
+        "false_exact": 0,
+        "correct": 1
+      },
+      "wrong_roster": {
+        "cases": 1,
+        "false_exact": 0,
+        "correct": 1
+      },
+      "overlapping_accessories": {
+        "cases": 2,
+        "false_exact": 0,
+        "correct": 2
+      },
+      "alma_pochette": {
+        "cases": 1,
+        "false_exact": 0,
+        "correct": 1
+      },
+      "partner_roster_variant": {
+        "cases": 2,
+        "false_exact": 0,
+        "correct": 2
+      }
+    }
+  },
+  "gate": {
+    "passed": true,
+    "failures": []
+  },
+  "rows": [
+    {
+      "id": "single-x",
+      "scenario": "single_sku",
+      "truth": "IN_ROSTER",
+      "expected_class": "product:v1:building-love",
+      "predicted_class": "product:v1:building-love",
+      "result_class": "EXACT",
+      "status": "OK"
+    },
+    {
+      "id": "single-not-x",
+      "scenario": "single_sku",
+      "truth": "OUT_OF_ROSTER",
+      "expected_class": "NONE",
+      "predicted_class": "NONE",
+      "result_class": null,
+      "status": "OK"
+    },
+    {
+      "id": "multi-a",
+      "scenario": "multi_sku",
+      "truth": "IN_ROSTER",
+      "expected_class": "product:v1:building-love",
+      "predicted_class": "product:v1:building-love",
+      "result_class": "EXACT",
+      "status": "OK"
+    },
+    {
+      "id": "multi-b",
+      "scenario": "multi_sku",
+      "truth": "IN_ROSTER",
+      "expected_class": "product:v1:eating-love",
+      "predicted_class": "product:v1:eating-love",
+      "result_class": "EXACT",
+      "status": "OK"
+    },
+    {
+      "id": "multi-c",
+      "scenario": "colorways",
+      "truth": "IN_ROSTER",
+      "expected_class": "shirt:blue",
+      "predicted_class": "shirt:blue",
+      "result_class": "EXACT",
+      "status": "OK"
+    },
+    {
+      "id": "multi-d",
+      "scenario": "near_size",
+      "truth": "IN_ROSTER",
+      "expected_class": "shirt:large",
+      "predicted_class": "shirt:large",
+      "result_class": "EXACT",
+      "status": "OK"
+    },
+    {
+      "id": "comparison-none",
+      "scenario": "comparison_outside_roster",
+      "truth": "OUT_OF_ROSTER",
+      "expected_class": "NONE",
+      "predicted_class": "NONE",
+      "result_class": null,
+      "status": "OK"
+    },
+    {
+      "id": "size-unreadable",
+      "scenario": "near_size",
+      "truth": "AMBIGUOUS",
+      "expected_class": "NONE",
+      "predicted_class": "NONE",
+      "result_class": null,
+      "status": "OK"
+    },
+    {
+      "id": "trim-hidden",
+      "scenario": "near_trim",
+      "truth": "AMBIGUOUS",
+      "expected_class": "NONE",
+      "predicted_class": "NONE",
+      "result_class": null,
+      "status": "OK"
+    },
+    {
+      "id": "season-unreadable",
+      "scenario": "near_season",
+      "truth": "AMBIGUOUS",
+      "expected_class": "NONE",
+      "predicted_class": "NONE",
+      "result_class": null,
+      "status": "OK"
+    },
+    {
+      "id": "old-new-ambiguous",
+      "scenario": "old_new",
+      "truth": "AMBIGUOUS",
+      "expected_class": "NONE",
+      "predicted_class": "NONE",
+      "result_class": null,
+      "status": "OK"
+    },
+    {
+      "id": "old-new-visible",
+      "scenario": "old_new",
+      "truth": "IN_ROSTER",
+      "expected_class": "shirt:2025",
+      "predicted_class": "shirt:2025",
+      "result_class": "EXACT",
+      "status": "OK"
+    },
+    {
+      "id": "reversed-recoverable",
+      "scenario": "reversed",
+      "truth": "IN_ROSTER",
+      "expected_class": "product:v1:building-love",
+      "predicted_class": "product:v1:building-love",
+      "result_class": "EXACT",
+      "status": "OK"
+    },
+    {
+      "id": "worn-recoverable",
+      "scenario": "worn",
+      "truth": "IN_ROSTER",
+      "expected_class": "product:v1:building-love",
+      "predicted_class": "product:v1:building-love",
+      "result_class": "EXACT",
+      "status": "OK"
+    },
+    {
+      "id": "folded-recoverable",
+      "scenario": "folded",
+      "truth": "IN_ROSTER",
+      "expected_class": "product:v1:building-love",
+      "predicted_class": "product:v1:building-love",
+      "result_class": "EXACT",
+      "status": "OK"
+    },
+    {
+      "id": "partially_hidden-recoverable",
+      "scenario": "partially_hidden",
+      "truth": "IN_ROSTER",
+      "expected_class": "product:v1:building-love",
+      "predicted_class": "product:v1:building-love",
+      "result_class": "EXACT",
+      "status": "OK"
+    },
+    {
+      "id": "poor_lighting-recoverable",
+      "scenario": "poor_lighting",
+      "truth": "IN_ROSTER",
+      "expected_class": "product:v1:building-love",
+      "predicted_class": "product:v1:building-love",
+      "result_class": "EXACT",
+      "status": "OK"
+    },
+    {
+      "id": "inside-out-unresolved",
+      "scenario": "inside_out",
+      "truth": "AMBIGUOUS",
+      "expected_class": "NONE",
+      "predicted_class": "NONE",
+      "result_class": null,
+      "status": "OK"
+    },
+    {
+      "id": "poor-light-unresolved",
+      "scenario": "poor_lighting",
+      "truth": "AMBIGUOUS",
+      "expected_class": "NONE",
+      "predicted_class": "NONE",
+      "result_class": null,
+      "status": "OK"
+    },
+    {
+      "id": "screen-image-other-discussed",
+      "scenario": "screen_vs_speech",
+      "truth": "IN_ROSTER",
+      "expected_class": "product:v1:building-love",
+      "predicted_class": "product:v1:building-love",
+      "result_class": "EXACT",
+      "status": "OK"
+    },
+    {
+      "id": "nearby-ocr-wrong-item",
+      "scenario": "nearby_ocr",
+      "truth": "OUT_OF_ROSTER",
+      "expected_class": "NONE",
+      "predicted_class": "NONE",
+      "result_class": null,
+      "status": "OK"
+    },
+    {
+      "id": "wrong-roster-entry",
+      "scenario": "wrong_roster",
+      "truth": "OUT_OF_ROSTER",
+      "expected_class": "NONE",
+      "predicted_class": "NONE",
+      "result_class": null,
+      "status": "OK"
+    },
+    {
+      "id": "colorway-unknown",
+      "scenario": "colorways",
+      "truth": "AMBIGUOUS",
+      "expected_class": "NONE",
+      "predicted_class": "NONE",
+      "result_class": null,
+      "status": "OK"
+    },
+    {
+      "id": "accessory-merged",
+      "scenario": "overlapping_accessories",
+      "truth": "AMBIGUOUS",
+      "expected_class": "NONE",
+      "predicted_class": "NONE",
+      "result_class": null,
+      "status": "OK"
+    },
+    {
+      "id": "accessory-recoverable",
+      "scenario": "overlapping_accessories",
+      "truth": "IN_ROSTER",
+      "expected_class": "product:v1:building-love",
+      "predicted_class": "product:v1:building-love",
+      "result_class": "EXACT",
+      "status": "OK"
+    },
+    {
+      "id": "white-alma-not-pochette",
+      "scenario": "alma_pochette",
+      "truth": "OUT_OF_ROSTER",
+      "expected_class": "NONE",
+      "predicted_class": "NONE",
+      "result_class": null,
+      "status": "OK"
+    },
+    {
+      "id": "partner-floral-neverfull-beats-family-lookalike",
+      "scenario": "partner_roster_variant",
+      "truth": "IN_ROSTER",
+      "expected_class": "lv:neverfull-roses-mm",
+      "predicted_class": "lv:neverfull-roses-mm",
+      "result_class": "EXACT",
+      "status": "OK"
+    },
+    {
+      "id": "partner-trunkie-beats-petite-malle-guess",
+      "scenario": "partner_roster_variant",
+      "truth": "IN_ROSTER",
+      "expected_class": "lv:trunkie-m14526",
+      "predicted_class": "lv:trunkie-m14526",
+      "result_class": "EXACT",
+      "status": "OK"
+    }
+  ],
+  "recorded_at": "2026-10-07T23:32:46.576345+00:00",
+  "source_parent_commit": "ebe5094a3d14278544462c6fbfffe99838022338",
+  "api_source_sha256": "0aaad6d162bd887c262c8cecbc623743974bfacde996e8efbf48bee56a469baf",
+  "limitations": [
+    "Deterministic evidence and orchestration validation only; not a live pixel recognition benchmark.",
+    "Frozen legacy evidence cases omit upstream retrieval coverage. HTTP tests separately enforce bounded retrieval and complete rival accounting."
+  ]
+}
