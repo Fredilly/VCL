@@ -27,7 +27,7 @@ const description = (overrides = {}) => ({
   ...overrides,
 });
 
-const rosterCandidate = ({ key, title, family, model = null, color = null, features = [], shape = [] }) => ({
+const rosterCandidate = ({ key, title, family, model = null, color = null, features = [], shape = [], track = true }) => ({
   mapping: {
     platform: 'youtube',
     content_ref: 'test-video',
@@ -41,7 +41,7 @@ const rosterCandidate = ({ key, title, family, model = null, color = null, featu
     destination: `https://merchant.test/${key}`,
     provenance: 'admin_verified',
     canonical_key: key,
-    track_id: key,
+    ...(track ? { track_id: key } : {}),
   },
   identity: {
     canonical_key: key,
@@ -126,4 +126,84 @@ test('specific visual subtype survives broad commerce query construction', () =>
   const queries = commerce.buildProductQueryVariants(retrieval);
   assert.ok(queries.some((row) => /Vanity Case/i.test(row.query)));
   assert.ok(queries.every((row) => !/^bag White$/i.test(row.query)));
+});
+
+
+const comparison = (similarity, details = ['matching construction and hardware']) => ({
+  source: { subtype: { value: 'bag', confidence: 0.98, basis: 'image' } },
+  candidate: { subtype: { value: 'bag', confidence: 0.98, basis: 'image' } },
+  similarity,
+  confidence: 0.98,
+  matching_details: details,
+});
+
+test('wrong model or color guesses cannot delete the correct roster SKU before visual verification', () => {
+  const source = description({
+    subcategory: 'Shoulder Bag',
+    model_candidate: 'Sibling Box',
+    color: 'Brown',
+    distinctive_features: ['box clasp'],
+  });
+  const staleSibling = rosterCandidate({
+    key: 'sku-sibling-box',
+    title: 'Acme Sibling Box Brown',
+    family: 'Sibling Box',
+    model: 'Sibling Box',
+    color: 'brown',
+    features: ['box clasp'],
+    shape: ['flat box bag'],
+    track: true,
+  });
+  const correct = rosterCandidate({
+    key: 'sku-soft-trunk',
+    title: 'Acme Soft Trunk Red',
+    family: 'Soft Trunk',
+    model: 'Soft Trunk',
+    color: 'red',
+    features: ['corner hardware', 'double strap'],
+    shape: ['soft trunk shoulder bag'],
+    track: false,
+  });
+
+  const eligible = reuse.eligibleSameVideoCanonicalCandidates({ description: source, candidates: [staleSibling, correct] });
+  assert.deepEqual(new Set(eligible.map((row) => row.identity.canonical_key)), new Set(['sku-sibling-box', 'sku-soft-trunk']));
+
+  const comparisons = new Map([
+    ['sku-sibling-box', comparison(0.45, ['different silhouette and hardware'])],
+    ['sku-soft-trunk', comparison(0.97, ['matching corner hardware and strap construction'])],
+  ]);
+  const decision = reuse.resolveSameVideoReuse({ description: source, candidates: [staleSibling, correct], comparisons });
+  assert.equal(decision.canonical_key, 'sku-soft-trunk');
+  assert.equal(decision.reason, 'visual_confirmed');
+});
+
+test('a previously promoted sibling does not become an exclusive answer set', () => {
+  const source = description({ model_candidate: 'Wrong Family', color: 'Brown' });
+  const promotedWrong = rosterCandidate({
+    key: 'sku-promoted-wrong',
+    title: 'Acme Wrong Family Brown',
+    family: 'Wrong Family',
+    model: 'Wrong Family',
+    color: 'brown',
+    track: true,
+  });
+  const unpromotedCorrect = rosterCandidate({
+    key: 'sku-correct',
+    title: 'Acme Correct Family White',
+    family: 'Correct Family',
+    model: 'Correct Family',
+    color: 'white',
+    track: false,
+  });
+
+  const comparisons = new Map([
+    ['sku-promoted-wrong', comparison(0.40, ['different shape and closure'])],
+    ['sku-correct', comparison(0.96, ['matching silhouette and closure hardware'])],
+  ]);
+  const decision = reuse.resolveSameVideoReuse({
+    description: source,
+    candidates: [promotedWrong, unpromotedCorrect],
+    comparisons,
+  });
+  assert.equal(decision.canonical_key, 'sku-correct');
 });
