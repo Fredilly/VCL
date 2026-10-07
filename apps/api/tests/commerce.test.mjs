@@ -24,15 +24,15 @@ test('verification rejects BOSS sweater versus BOSS polo', () => {
   assert.equal(verifyProductCandidate(description(), candidate('BOSS logo polo shirt')), null);
 });
 
-test('verification accepts matching type and brand as LIKELY', () => {
-  assert.equal(verifyProductCandidate(description(), candidate('BOSS black wool sweater'))?.result_class, 'LIKELY');
+test('verification accepts matching type and brand as SIMILAR', () => {
+  assert.equal(verifyProductCandidate(description(), candidate('BOSS black wool sweater'))?.result_class, 'SIMILAR');
 });
 
-test('verification limits correct type without brand to SIMILAR', () => {
-  assert.equal(verifyProductCandidate(description(), candidate('Black wool sweater'))?.result_class, 'SIMILAR');
+test('verification limits correct type without brand to RELATED', () => {
+  assert.equal(verifyProductCandidate(description(), candidate('Black wool sweater'))?.result_class, 'RELATED');
 });
 
-test('verification accepts strong brand and model agreement as LIKELY', () => {
+test('verification accepts strong brand and model agreement as SIMILAR', () => {
   assert.equal(verifyProductCandidate(description({ model_candidate: 'Half-Zip 101' }), candidate('BOSS Half-Zip 101'))?.result_class, 'LIKELY');
 });
 
@@ -220,7 +220,7 @@ test('eBay adapter normalizes candidates and never emits EXACT', async () => {
   const provider = new EbayCommerceProvider(makeMockAuth());
   const [candidate] = await provider.search({ query: 'Nike Air Max 90', category: 'Apparel', subcategory: 'Sneakers', brand: 'Nike', model: 'Air Max 90', attributes: [] });
   assert.equal(candidate.title, 'Nike Air Max 90 White');
-  assert.equal(candidate.result_class, 'LIKELY');
+  assert.equal(candidate.result_class, 'RELATED');
   assert.notEqual(candidate.result_class, 'EXACT');
   assert.equal(candidate.price, '99.00');
 });
