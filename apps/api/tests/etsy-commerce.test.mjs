@@ -172,7 +172,7 @@ test('adapter: normalizes candidates and never emits EXACT', async () => {
   const provider = new EtsyCommerceProvider(validCreds);
   const [candidate] = await provider.search(query);
   assert.equal(candidate.title, 'Handmade Silver Ring');
-  assert.equal(candidate.result_class, 'SIMILAR');
+  assert.equal(candidate.result_class, 'RELATED');
   assert.notEqual(candidate.result_class, 'EXACT');
   assert.equal(candidate.price, '45.00');
   assert.equal(candidate.currency, 'USD');
@@ -268,7 +268,7 @@ test('adapter: materials becomes material metadata', async () => {
   assert.equal(result.metadata.material, 'sterling silver');
 });
 
-test('adapter: result_class is LIKELY when brand and model in title', async () => {
+test('adapter: title overlap remains RELATED before verification', async () => {
   const brandQuery = { query: 'Nike Air Max', category: 'shoes', subcategory: 'sneakers', brand: 'Nike', model: 'Air Max', attributes: [] };
   const ctx = makeEtsyContext({
     fetch: async () => Response.json({
@@ -287,10 +287,10 @@ test('adapter: result_class is LIKELY when brand and model in title', async () =
 
   const provider = new EtsyCommerceProvider(validCreds);
   const [result] = await provider.search(brandQuery);
-  assert.equal(result.result_class, 'LIKELY');
+  assert.equal(result.result_class, 'RELATED');
 });
 
-test('adapter: result_class is SIMILAR when brand/model not in title', async () => {
+test('adapter: provider result remains RELATED before verification', async () => {
   const ctx = makeEtsyContext({
     fetch: async () => Response.json({
       count: 1,
@@ -308,7 +308,7 @@ test('adapter: result_class is SIMILAR when brand/model not in title', async () 
 
   const provider = new EtsyCommerceProvider(validCreds);
   const [result] = await provider.search(query);
-  assert.equal(result.result_class, 'SIMILAR');
+  assert.equal(result.result_class, 'RELATED');
 });
 
 // ── Freshness tests (live-fetched data is always fresh) ──
