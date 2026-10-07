@@ -591,7 +591,7 @@ export async function refreshVerifiedOffers(
     const relationship = classifyCanonicalRelationship(visual.description, product, comparison);
     return [{
       ...product,
-      result_class: 'SIMILAR',
+      result_class: relationship,
       relationship,
       verification_status: 'multimodal',
       verification_image_similarity: comparison.similarity,
