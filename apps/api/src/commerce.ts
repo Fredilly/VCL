@@ -18,7 +18,8 @@ export type ProductContext = {
   timestamp_ms?: number | null;
 };
 
-export type CanonicalRelationship = 'EXACT' | 'SIMILAR' | 'RELATED';
+export type ProductResultClass = 'EXACT' | 'SIMILAR' | 'RELATED';
+export type CanonicalRelationship = ProductResultClass;
 
 export type ProductCandidate = {
   id: string;
@@ -31,7 +32,7 @@ export type ProductCandidate = {
   destination: string | null;
   price: string | null;
   currency: string | null;
-  result_class: 'EXACT' | 'LIKELY' | 'SIMILAR';
+  result_class: ProductResultClass;
   /** Canonical product/design relationship. Separate from result_class confidence. */
   relationship?: CanonicalRelationship;
   metadata?: { brand?: string; model?: string; category?: string; description?: string; gender?: string; color?: string; sleeve?: string; material?: string; freshness?: string };
@@ -324,9 +325,9 @@ export function verifyProductCandidate(description: ObjectDescription, candidate
   }
 
   const identityStrong = modelMatches || (brandMatches && typeMatches);
-  const resultClass = identityStrong && score >= 55 ? 'LIKELY' : score >= 25 ? 'SIMILAR' : null;
+  const resultClass: ProductResultClass | null = identityStrong && score >= 55 ? 'SIMILAR' : score >= 25 ? 'RELATED' : null;
   if (!resultClass) return null;
-  return { ...candidate, result_class: resultClass, verification_score: score, verification_reasons: reasons };
+  return { ...candidate, result_class: resultClass, relationship: resultClass, verification_score: score, verification_reasons: reasons };
 }
 
 export function buildProductQuery(description: ObjectDescription, context?: ProductContext): ProductQuery {
