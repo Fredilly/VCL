@@ -20,7 +20,7 @@ export function rosterFallbackDescription(description: ObjectDescription): Objec
  *
  * This intentionally separates "what should we search for?" from
  * "what evidence is allowed to prove identity?". A wrong family guess can cost
- * one retrieval attempt; it cannot promote a candidate to LIKELY/EXACT.
+ * one retrieval attempt; it cannot promote a candidate to EXACT.
  */
 export function rosterFallbackRetrievalDescription(description: ObjectDescription): ObjectDescription {
   const safe = rosterFallbackDescription(description);
