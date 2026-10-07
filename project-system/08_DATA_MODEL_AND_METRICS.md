@@ -300,7 +300,7 @@ Identity mappings and merchant offers have different lifecycles. Product identit
 
 Issue #20 does not change matching or ranking.
 
-Before verified assertions influence `EXACT` / `LIKELY` classification:
+Before verified assertions influence `EXACT` / `SIMILAR` / `RELATED` classification:
 1. define provenance strength,
 2. add benchmark cases with correct and incorrect assertions,
 3. verify that false EXACT remains zero,
