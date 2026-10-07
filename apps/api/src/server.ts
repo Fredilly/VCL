@@ -229,7 +229,7 @@ function filterByCategory(providers: NamedCommerceProvider[], query: ProductQuer
   return providers.filter((p) => p.name !== 'etsy' || isEtsyEligible(query));
 }
 
-const LIKELY_CANDIDATE_THRESHOLD = 3;
+const SIMILAR_CANDIDATE_THRESHOLD = 3;
 const SUFFICIENT_CANDIDATE_THRESHOLD = 3;
 
 function verifiedIdentityKey(value: string | null | undefined): string {
@@ -1323,7 +1323,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       skipSerpApi = true;
     }
 
-    if (accepted.filter((product) => product.result_class === 'LIKELY').length >= LIKELY_CANDIDATE_THRESHOLD) return respond(query);
+    if (accepted.filter((product) => product.result_class === 'SIMILAR').length >= SIMILAR_CANDIDATE_THRESHOLD) return respond(query);
 
     const shouldSkipBrave = accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD;
     if (!shouldSkipBrave && braveProvider && eligibleProviders.some((a) => a.name === 'brave')) {
@@ -1395,7 +1395,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       serpapiTelemetry.skip_reason = 'not_configured';
     }
 
-    if (accepted.filter((product) => product.result_class === 'LIKELY').length >= 3) return respond(query);
+    if (accepted.filter((product) => product.result_class === 'SIMILAR').length >= 3) return respond(query);
 
     // SEARCH_NORMAL means normal-first, not normal-only. Stop after the first query
     // when it produces an acceptable candidate; otherwise continue to broader variants.
