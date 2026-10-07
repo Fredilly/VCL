@@ -608,3 +608,57 @@ test('visual verification preserves agreeing in-roster match and fails closed on
   assert.equal(unavailable.mapping, null);
   assert.equal(unavailable.reason, 'visual_unavailable');
 });
+
+
+test('unique model-family hypothesis narrows VPM image verification without granting Exact', () => {
+  const speedyIdentity = {
+    ...identity,
+    canonical_key: 'product:v1:speedy-soft-25',
+    title: 'Louis Vuitton Speedy Soft 25 - Damier Ebene / Monogram Rouge',
+    brand: 'Louis Vuitton',
+    model: null,
+    object_type: 'bag',
+    color: 'brown',
+  };
+  const pochetteIdentity = {
+    ...identity,
+    canonical_key: 'product:v1:pochette-metis',
+    title: 'Louis Vuitton Pochette Metis - Damier Ebene / Monogram Rouge',
+    brand: 'Louis Vuitton',
+    model: null,
+    object_type: 'bag',
+    color: 'brown',
+  };
+  const bagDescription = {
+    ...description,
+    category: 'Bags',
+    subcategory: 'Handbag',
+    brand_candidate: 'Louis Vuitton',
+    model_candidate: 'Speedy',
+    color: 'Brown',
+    visible_text: [],
+    logos_markings: ['Louis Vuitton monogram pattern'],
+  };
+  const candidates = [
+    {
+      mapping: { ...mapping, canonical_key: speedyIdentity.canonical_key, track_id: speedyIdentity.canonical_key, object_type: 'bag', brand: 'Louis Vuitton' },
+      identity: speedyIdentity,
+    },
+    {
+      mapping: { ...mapping, canonical_key: pochetteIdentity.canonical_key, track_id: pochetteIdentity.canonical_key, object_type: 'bag', brand: 'Louis Vuitton' },
+      identity: pochetteIdentity,
+    },
+  ];
+
+  const narrowed = mod.verifiedProductMemoryCandidates({ description: bagDescription, candidates });
+  assert.equal(narrowed.length, 1);
+  assert.equal(narrowed[0].identity.canonical_key, speedyIdentity.canonical_key);
+
+  const rejected = mod.resolveSameVideoReuse({
+    description: bagDescription,
+    candidates,
+    comparisons: new Map([[speedyIdentity.canonical_key, { source: {}, candidate: {}, similarity: 0.55, confidence: 0.97, matching_details: ['different bag geometry'] }]]),
+  });
+  assert.equal(rejected.mapping, null);
+  assert.equal(rejected.reason, 'visual_rejected');
+});
