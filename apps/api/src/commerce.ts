@@ -33,7 +33,7 @@ export type ProductCandidate = {
   price: string | null;
   currency: string | null;
   result_class: ProductResultClass;
-  /** Canonical product/design relationship. Separate from result_class confidence. */
+  /** Backward-compatible mirror of result_class. New code must keep the values identical. */
   relationship?: CanonicalRelationship;
   metadata?: { brand?: string; model?: string; category?: string; description?: string; gender?: string; color?: string; sleeve?: string; material?: string; freshness?: string };
   verification_status?: 'multimodal' | 'metadata_only';
