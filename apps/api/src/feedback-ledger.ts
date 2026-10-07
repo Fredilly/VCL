@@ -49,6 +49,8 @@ export type FeedbackReviewItem = {
   event_id: string;
   result_id: string;
   feedback_type: string;
+  review_action?: FeedbackReviewAction | null;
+  reviewed_canonical_key?: string | null;
   evidence_key: string;
   platform: string | null;
   content_ref: string | null;
@@ -549,7 +551,7 @@ export class FeedbackLedger {
       const resultId = bounded(body.result_id, 180);
       if (!eventId || !resultId) return Response.json({ item: null }, { status: 400 });
       const row = this.rows(`
-        SELECT f.event_id, f.result_id, f.feedback_type,
+        SELECT f.event_id, f.result_id, f.feedback_type, r.action AS review_action, r.canonical_key AS reviewed_canonical_key,
                l.evidence_key, l.platform, l.content_ref, l.timestamp_ms, l.category, l.subcategory, l.brand, l.model, l.color, l.material,
                l.visible_text_json, l.logos_markings_json, l.distinctive_features_json,
                l.shape_silhouette_json, l.style_attributes_json,
@@ -557,6 +559,7 @@ export class FeedbackLedger {
         FROM feedback f
         JOIN scoop_learning l ON l.event_id = f.event_id
         LEFT JOIN result_context c ON c.event_id = f.event_id AND c.result_id = f.result_id
+        LEFT JOIN feedback_review r ON r.event_id = f.event_id AND r.result_id = f.result_id
         WHERE f.event_id = ? AND f.result_id = ?
         LIMIT 1
       `, eventId, resultId)[0];
@@ -565,6 +568,8 @@ export class FeedbackLedger {
         event_id: String(row.event_id ?? ''),
         result_id: String(row.result_id ?? ''),
         feedback_type: String(row.feedback_type ?? ''),
+        review_action: (row.review_action ?? null) as FeedbackReviewAction | null,
+        reviewed_canonical_key: row.reviewed_canonical_key == null ? null : String(row.reviewed_canonical_key),
         evidence_key: String(row.evidence_key ?? ''),
         platform: row.platform == null ? null : String(row.platform),
         content_ref: row.content_ref == null ? null : String(row.content_ref),

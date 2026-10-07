@@ -38,6 +38,8 @@ import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemA
 import { fetchProductPageMetadata } from './product-page-enrichment.js';
 import { recoverVerifiedProductImage } from './verified-image-recovery.js';
 import { ALPHA_VERIFIED_PRODUCT_SEEDS, alphaVerifiedCanonicalRowsForContent, alphaVerifiedCanonicalIdentitiesExcludingContent } from './alpha-verified-product-seeds.js';
+import { preparePartnerRoster, ingestPartnerRoster, buildCorrectionBundle, cacheLearningImage, learningImage, persistCorrectionBundle, assetDigest, type RosterOfferInput, type CorrectionBundle } from './partner-learning.js';
+import { verifiedLedgerRequest } from './verified-product-ledger.js';
 import { verifiedRosterCanonicalRowsForContent } from './partner-roster.js';
 export { AlphaAccessLedger } from './alpha-access.js';
 export { VerifiedProductLedger } from './verified-product-ledger.js';
@@ -743,6 +745,7 @@ export async function refreshVerifiedOffers(
 }
 
 type SameVideoVisualCheck = {
+  comparisons?: Record<string, ImageComparison>;
   decision: SameVideoReuseDecision;
   compared: number;
   failures: number;
@@ -949,6 +952,7 @@ async function confirmSameVideoReuseWithImage(
 
   return {
     decision: resolveSameVideoReuse({ description, candidates: visualCandidates, comparisons }),
+    comparisons: Object.fromEntries(comparisons),
     compared: images.compared + (retryVerification?.compared ?? 0),
     failures: images.failures + (retryVerification?.failures ?? 0),
     failure_reasons: failureReasons,
@@ -1410,6 +1414,11 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
   }
   if (request.method === 'GET' && path === '/admin/status') {
     return jsonResponse(await authorizeAdminSession(env, request.headers.get('x-scoop-admin-session') ?? ''));
+  }
+  if (request.method === 'GET' && /^\/product-reference\/[a-f0-9]{64}$/.test(path)) {
+    const image = await learningImage(env, path.split('/').pop()!, true).catch(() => null);
+    if (!image) return jsonResponse({ error: 'Reference unavailable' }, 404);
+    return new Response(Uint8Array.from(atob(image.data), c => c.charCodeAt(0)), { headers: { ...corsHeaders, 'content-type': image.mimeType, 'cache-control': 'public, max-age=31536000, immutable', 'x-content-type-options': 'nosniff' } });
   }
   if (request.method !== 'POST') return jsonResponse({ error: 'Not found' }, 404);
   if (path === '/alpha/waitlist') {
@@ -1876,108 +1885,112 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         return jsonResponse({ error: 'Feedback report unavailable' }, 500);
       }
     }
-    if (path === '/feedback-review') {
+    if (path === '/partner-roster' || path === '/learning-export') {
+      const authorized = await authorizeAdminSession(env, request.headers.get('x-scoop-admin-session') ?? '');
+      if (!authorized.admin || !authorized.admin_id) return jsonResponse({ error: 'Unauthorized' }, 401);
+      try {
+        if (path === '/learning-export') return jsonResponse(await verifiedLedgerRequest(env, '/learning/export', {}));
+        const input = await request.json() as { platform: string; content_ref: string; offers: RosterOfferInput[] };
+        const rows = await preparePartnerRoster(env, new URL(request.url).origin, input);
+        await ingestPartnerRoster(env, rows);
+        await auditAdminAction(env, authorized.admin_id, 'partner_roster_ingested', { identities: rows.length, offers: input.offers.length, content_ref: input.content_ref });
+        return jsonResponse({ accepted: true, distinct_variants: rows.length, merchant_offers: input.offers.length, reference_ready: rows.length });
+      } catch (error) {
+        logSafeError(error);
+        return jsonResponse({ error: error instanceof Error ? error.message : 'Roster ingestion failed' }, 422);
+      }
+    }
+    if (path === '/feedback-review' || path === '/feedback-promote') {
       const authorized = await authorizeAdminSession(env, request.headers.get('x-scoop-admin-session') ?? '');
       if (!authorized.admin || !authorized.admin_id) return jsonResponse({ error: 'Unauthorized' }, 401);
       try {
         const body = await request.json() as Record<string, unknown>;
         const eventId = typeof body.event_id === 'string' ? body.event_id.slice(0, 160) : '';
         const resultId = typeof body.result_id === 'string' ? body.result_id.slice(0, 180) : '';
-        const action = body.action;
-        if (!eventId || !resultId || (action !== 'dismiss' && action !== 'hard_negative' && action !== 'verify_product')) {
+        let action = body.action;
+        if (!eventId || !resultId || (path !== '/feedback-promote' && action !== 'dismiss' && action !== 'hard_negative' && action !== 'verify_product')) {
           return jsonResponse({ error: 'Invalid review action' }, 400);
         }
         const item = await feedbackReviewItem(env, eventId, resultId);
         if (!item) return jsonResponse({ error: 'Review item not found' }, 404);
 
+        if (path === '/feedback-promote') {
+          action = item.review_action;
+          if (action !== 'verify_product' && action !== 'hard_negative') return jsonResponse({ error: 'Record must be reviewed before promotion' }, 409);
+        }
         let canonicalKey: string | null = null;
-        if (action === 'verify_product') {
+        let learned: CorrectionBundle | null = null;
+        if (action === 'verify_product' || (action === 'hard_negative' && body.product)) {
           const product = body.product && typeof body.product === 'object' && !Array.isArray(body.product)
             ? body.product as Record<string, unknown>
             : {};
-          const destinationInput = typeof product.destination === 'string' ? product.destination.trim() : '';
-          try { new URL(destinationInput); } catch { return jsonResponse({ error: 'Verified product needs a valid destination' }, 400); }
-          const sourceMetadata = await fetchProductPageMetadata(destinationInput);
-          const destination = (sourceMetadata.canonical_url || destinationInput).slice(0, 1200);
-          const suppliedId = typeof product.model === 'string' && product.model.trim()
-            ? product.model.trim()
-            : typeof product.id === 'string' ? product.id.trim() : '';
-          const productId = (suppliedId || sourceMetadata.sku || '').slice(0, 160);
-          if (!productId) return jsonResponse({ error: 'Verified product needs a SKU/model' }, 400);
-          const title = (sourceMetadata.title || (typeof product.title === 'string' ? product.title.trim() : '') || productId).slice(0, 300);
-          const imageReference = (sourceMetadata.image_reference || (typeof product.image_reference === 'string' ? product.image_reference.trim() : '') || '').slice(0, 1200) || null;
-          const brand = (typeof product.brand === 'string' ? product.brand.trim() : item.brand || '').slice(0, 120);
-          const hasSourceContext = Boolean(item.platform && item.content_ref);
-          const timestampMs = item.timestamp_ms != null && Number.isFinite(item.timestamp_ms)
-            ? Math.max(0, Math.round(item.timestamp_ms))
-            : null;
-          const mapping: VerifiedProductMapping = {
-            platform: hasSourceContext ? item.platform! : 'alpha-learning',
-            content_ref: hasSourceContext ? item.content_ref! : eventId,
-            scope: hasSourceContext && timestampMs != null ? 'time_window' : 'entire_video',
-            ...(hasSourceContext && timestampMs != null ? {
-              timestamp_start_ms: Math.max(0, timestampMs - 5000),
-              timestamp_end_ms: timestampMs + 5000,
-            } : {}),
-            object_type: item.subcategory || item.category,
-            brand,
-            product_id: productId,
-            title,
-            destination,
-            image_reference: imageReference,
-            price: sourceMetadata.price,
-            currency: sourceMetadata.currency,
-            provider: verifiedSourceProviderName(null, destination) || null,
-            provenance: 'admin_verified',
-          };
-          const canonical = canonicalProductIdentity({
-            mapping,
-            model: productId,
-            merchantItemId: productId,
-            visibleText: item.visible_text,
-            color: item.color,
-            material: item.material,
-            styleAttributes: item.style_attributes,
-            logosMarkings: item.logos_markings,
-            distinctiveFeatures: item.distinctive_features,
-            shapeSilhouette: item.shape_silhouette,
+          if (!item.platform || !item.content_ref || item.timestamp_ms == null) return jsonResponse({ error: 'Correction requires source video and exact timestamp' }, 422);
+          const crop = parseSourceImage(body.source_image);
+          if (!crop) return jsonResponse({ error: 'Promotion requires the reviewed selected crop (under 2 MB)' }, 422);
+          const baselineMappings = await durableVerifiedMappings(env, item.platform, item.content_ref);
+          const baselineRows = (await Promise.all(baselineMappings.map(async mapping => {
+            const identity = mapping.canonical_key ? await durableCanonicalProductIdentity(env, mapping.canonical_key) : null;
+            return identity ? { mapping, identity } : null;
+          }))).filter((row): row is NonNullable<typeof row> => Boolean(row));
+          const rosterRows = [
+            ...verifiedRosterCanonicalRowsForContent(parseVerifiedProductMappings(env.VERIFIED_PRODUCT_MAPPINGS_JSON), item.platform, item.content_ref),
+            ...alphaVerifiedCanonicalRowsForContent(item.platform, item.content_ref),
+            ...baselineRows,
+          ];
+          const description = normalizeObjectDescription({
+            category: item.category, subcategory: item.subcategory, brand_candidate: item.brand,
+            model_candidate: item.model, color: item.color, material: item.material,
+            visible_text: item.visible_text, logos_markings: item.logos_markings,
+            distinctive_features: item.distinctive_features, shape_silhouette: item.shape_silhouette,
+            style_attributes: item.style_attributes, search_terms: [], confidence: 0,
           });
-          const saved = await persistCanonicalProductIdentity(env, canonical);
+          const prepared = await preparePartnerRoster(env, new URL(request.url).origin, {
+            platform: item.platform, content_ref: item.content_ref,
+            offers: [{ ...product, sku: product.sku || product.variant_id || product.id,
+              brand: product.brand || item.brand, object_type: product.object_type || item.subcategory || item.category,
+            } as RosterOfferInput],
+          });
+          const corrected = prepared[0]!;
+          const wasKnown = Boolean(await durableCanonicalProductIdentity(env, corrected.identity.canonical_key));
+          // Freeze both paths before committing promotion. No supplied model score is trusted.
+          const saved = await persistCanonicalProductIdentity(env, corrected.identity);
           canonicalKey = saved.canonical_key;
-          await persistAdminVerifiedMapping(env, {
-            ...mapping,
-            canonical_key: saved.canonical_key,
-            track_id: saved.canonical_key,
-            trusted_observations: [{
-              observed_at: new Date().toISOString(),
-              timestamp_ms: timestampMs,
-              reason: 'promotion',
-              confidence: 1,
-              visible_text: item.visible_text,
-              logos_markings: item.logos_markings,
-              distinctive_features: item.distinctive_features,
-              shape_silhouette: item.shape_silhouette,
-              style_attributes: item.style_attributes,
-              color: item.color,
-              material: item.material,
-            }],
-          });
+          corrected.identity = saved;
+          corrected.mapping = { ...corrected.mapping, canonical_key: canonicalKey, track_id: canonicalKey,
+            trusted_observations: [{ observed_at: new Date().toISOString(), timestamp_ms: item.timestamp_ms, reason: 'promotion', confidence: 1,
+              visible_text: item.visible_text, logos_markings: item.logos_markings, distinctive_features: item.distinctive_features,
+              shape_silhouette: item.shape_silhouette, style_attributes: item.style_attributes, color: item.color, material: item.material }] };
+          const unique = new Map(rosterRows.map(row => [row.identity.canonical_key, row]));
+          unique.set(canonicalKey, corrected);
+          const rows = [...unique.values()];
+          const check = await confirmSameVideoReuseWithImage(env, description, { platform: item.platform, content_ref: item.content_ref, timestamp_ms: item.timestamp_ms }, crop, rows);
+          if (check.decision.canonical_key !== canonicalKey) return jsonResponse({ error: 'Correction replay did not pass visual trust gate', learned: false, reason: check.decision.reason }, 422);
+          const cropAsset = await cacheLearningImage(env, crop, 'observation');
+          const bundle = buildCorrectionBundle({ event_id: eventId, result_id: resultId,
+            action: action as 'hard_negative' | 'verify_product', reviewed_by: authorized.admin_id,
+            crop_asset: cropAsset, platform: item.platform, content_ref: item.content_ref, timestamp_ms: item.timestamp_ms,
+            canonical_product: saved, candidates: rows, description, comparisons: check.comparisons ?? {},
+            before: { id: 'before', scenario: 'reviewed_correction', timestamp_ms: item.timestamp_ms, candidates: rosterRows, description,
+              comparisons: check.comparisons ?? {}, expected_class: canonicalKey, truth: 'IN_ROSTER' }, newly_learned: !wasKnown });
+          learned = await persistCorrectionBundle(env, bundle);
+
         }
 
         await resolveFeedbackReview(env, {
           event_id: eventId,
           result_id: resultId,
-          action,
+          action: action as 'dismiss' | 'hard_negative' | 'verify_product',
           canonical_key: canonicalKey,
           note: typeof body.note === 'string' ? body.note : null,
         });
         await auditAdminAction(env, authorized.admin_id, 'feedback_review_resolved', {
           event_id: eventId,
           result_id: resultId,
-          action,
+          action: String(action),
           ...(canonicalKey ? { canonical_key: canonicalKey } : {}),
         });
-        return jsonResponse({ accepted: true, action, canonical_key: canonicalKey });
+        return jsonResponse({ accepted: true, action, canonical_key: canonicalKey, learned: Boolean(learned),
+          ...(learned ? { metrics: learned.metrics, promotion_id: learned.promotion_id } : { missing_assets: ['positive observation', 'canonical product', 'regression case', 'appearance', 'metrics'] }) });
       } catch (error) {
         logSafeError(error);
         return jsonResponse({ error: 'Could not resolve feedback review' }, 400);
@@ -2045,11 +2058,16 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       if (durableMappings.some((mapping) => mapping.provenance === 'admin_verified' && !mapping.canonical_key)) {
         durableMappings = await backfillLegacyAdminCanonicalMappings(env, durableMappings).catch(() => durableMappings);
       }
+      const reviewedNegatives = sourceImage && context?.platform && contentRef
+        ? (await verifiedLedgerRequest<{ canonical_keys: string[] }>(env, '/learning/negatives', {
+          crop_asset: await assetDigest(sourceImage), platform: context.platform, content_ref: contentRef,
+        }).catch(() => null))?.canonical_keys ?? [] : [];
+      const reviewedNegativeKeys = new Set(reviewedNegatives);
+      durableMappings = durableMappings.filter(mapping => !mapping.canonical_key || !reviewedNegativeKeys.has(mapping.canonical_key));
       let verifiedMapping = lookupVerifiedProductMapping({
-        rawRegistry: env.VERIFIED_PRODUCT_MAPPINGS_JSON,
         // Durable/admin mappings win. Alpha seed data is only the fallback until
         // a creator/brand-confirmed mapping is persisted for the same content.
-        mappings: [...durableMappings, ...ALPHA_VERIFIED_PRODUCT_SEEDS],
+        mappings: [...parseVerifiedProductMappings(env.VERIFIED_PRODUCT_MAPPINGS_JSON), ...durableMappings, ...ALPHA_VERIFIED_PRODUCT_SEEDS].filter(mapping => !mapping.canonical_key || !reviewedNegativeKeys.has(mapping.canonical_key)),
         allowTestFixtures: benchmarkMode || env.VERIFIED_PRODUCT_TEST_MODE === 'true',
         platform: context?.platform ?? null,
         contentRef,
@@ -2092,7 +2110,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         contentRef,
         context?.timestamp_ms ?? null,
       );
-      const partnerCanonicalRows = [...configuredCanonicalRows, ...alphaCanonicalRows];
+      const partnerCanonicalRows = [...configuredCanonicalRows, ...alphaCanonicalRows].filter(row => !reviewedNegativeKeys.has(row.identity.canonical_key));
       if (!verifiedMapping && (durableMappings.length || partnerCanonicalRows.length)) {
         const canonicalMappings = durableMappings.filter((mapping) => Boolean(mapping.canonical_key));
         const durableCanonicalRows = (await Promise.all(canonicalMappings.map(async (mapping) => {
@@ -2110,15 +2128,9 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         for (const row of [...durableCanonicalRows, ...partnerCanonicalRows]) {
           if (!canonicalRowMap.has(row.identity.canonical_key)) canonicalRowMap.set(row.identity.canonical_key, row);
         }
-        const hasPartnerWindow = partnerCanonicalRows.some(({ mapping }) =>
-          typeof mapping.candidate_window_start_ms === 'number' && typeof mapping.candidate_window_end_ms === 'number');
-        // A partner-mapped appearance window is a candidate prior, not an Exact assertion.
-        // While inside one, do not let stale whole-video admin tracks from earlier clicks
-        // outrank the partner roster. The visual verifier can still reject the roster item,
-        // after which normal retrieval returns Similar/Related rather than a false Exact.
-        const canonicalRows = hasPartnerWindow
-          ? partnerCanonicalRows
-          : [...canonicalRowMap.values()];
+        // Include durable variant imports and corrections even when seed rows have
+        // candidate windows. All identities still need the same strict visual check.
+        const canonicalRows = [...canonicalRowMap.values()].filter(row => !reviewedNegativeKeys.has(row.identity.canonical_key));
 
         sameVideoVisualCheck = await confirmSameVideoReuseWithImage(
           env,
@@ -2158,7 +2170,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
       if (!verifiedMapping) {
         const sameVideoCanonicalKeys = new Set(
-          durableMappings.map((mapping) => mapping.canonical_key).filter((key): key is string => Boolean(key)),
+          [...reviewedNegativeKeys, ...durableMappings.map((mapping) => mapping.canonical_key).filter((key): key is string => Boolean(key))],
         );
         crossVideoVisualCheck = await confirmCrossVideoReuseWithImage(
           env,
@@ -2274,6 +2286,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
               cost_usd: 0,
             },
           },
+          feedback_learning: { penalized: 0, suppressed: 0, signal_levels: { exact: 0, candidate_global: 0, family: 0 }, reviewed_roster_suppressed: reviewedNegatives.length },
           verified_mapping: {
             hit: true,
             provenance: verifiedMapping.provenance,
@@ -2378,6 +2391,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         penalized: 0,
         suppressed: 0,
         signal_levels: { exact: 0, candidate_global: 0, family: 0 },
+        reviewed_roster_suppressed: reviewedNegatives.length,
       };
       if (env.FEEDBACK_LEDGER && resolved.products.length) {
         try {
@@ -2388,6 +2402,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             penalized: adjusted.penalized,
             suppressed: adjusted.suppressed,
             signal_levels: adjusted.signal_levels,
+            reviewed_roster_suppressed: reviewedNegatives.length,
           };
         } catch (error) {
           logSafeError(error);

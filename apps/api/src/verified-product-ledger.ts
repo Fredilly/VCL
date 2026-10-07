@@ -1,5 +1,7 @@
+import type { CorrectionBundle } from './partner-learning.js';
+import { parseSourceImage, type CatalogImage } from './candidate-images.js';
 import type { VerifiedProductMapping, VpmTrustedObservation } from './verified-product-mapping.js';
-import { canonicalMerchantOfferKey, canonicalProductIdentity, canonicalProductsEquivalent, mergeCanonicalProductIdentity, normalizeIdentityText, type CanonicalProductIdentity } from './canonical-product-memory.js';
+import { canonicalMerchantOfferKey, canonicalProductIdentity, canonicalProductsEquivalent, mergeCanonicalProductIdentity, normalizeIdentityText, normalizeVariantId, type CanonicalProductIdentity } from './canonical-product-memory.js';
 
 type DurableObjectStubLike = { fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> };
 export type VerifiedProductLedgerNamespaceLike = {
@@ -20,7 +22,7 @@ function ledgerStub(env: VerifiedProductLedgerEnv): DurableObjectStubLike | null
   return env.VERIFIED_PRODUCT_LEDGER.get(env.VERIFIED_PRODUCT_LEDGER.idFromName('verified-products-v1'));
 }
 
-async function postJson<T>(env: VerifiedProductLedgerEnv, path: string, body: unknown): Promise<T | null> {
+export async function verifiedLedgerRequest<T>(env: VerifiedProductLedgerEnv, path: string, body: unknown): Promise<T | null> {
   const stub = ledgerStub(env);
   if (!stub) return null;
   const response = await stub.fetch(`https://verified-product-ledger${path}`, {
@@ -38,7 +40,7 @@ export async function durableVerifiedMappings(
   contentRef: string | null,
 ): Promise<VerifiedProductMapping[]> {
   if (!platform || !contentRef) return [];
-  const result = await postJson<{ mappings?: VerifiedProductMapping[] }>(env, '/lookup', { platform, content_ref: contentRef });
+  const result = await verifiedLedgerRequest<{ mappings?: VerifiedProductMapping[] }>(env, '/lookup', { platform, content_ref: contentRef });
   return Array.isArray(result?.mappings) ? result!.mappings! : [];
 }
 
@@ -46,7 +48,7 @@ export async function persistAdminVerifiedMapping(
   env: VerifiedProductLedgerEnv,
   mapping: VerifiedProductMapping,
 ): Promise<VerifiedProductMapping> {
-  const result = await postJson<{ mapping?: VerifiedProductMapping }>(env, '/verify', mapping);
+  const result = await verifiedLedgerRequest<{ mapping?: VerifiedProductMapping }>(env, '/verify', mapping);
   if (!result?.mapping) throw new Error('verified product ledger unavailable');
   return result.mapping;
 }
@@ -60,7 +62,7 @@ export async function persistTrustedVpmObservation(
     observation: VpmTrustedObservation;
   },
 ): Promise<VerifiedProductMapping | null> {
-  const result = await postJson<{ mapping?: VerifiedProductMapping | null }>(env, '/observe', input);
+  const result = await verifiedLedgerRequest<{ mapping?: VerifiedProductMapping | null }>(env, '/observe', input);
   return result?.mapping ?? null;
 }
 
@@ -68,7 +70,7 @@ export async function revokeAdminVerifiedMapping(
   env: VerifiedProductLedgerEnv,
   input: { platform: string; content_ref: string; product_id?: string; canonical_key?: string },
 ): Promise<boolean> {
-  const result = await postJson<{ revoked?: boolean }>(env, '/revoke', input);
+  const result = await verifiedLedgerRequest<{ revoked?: boolean }>(env, '/revoke', input);
   return Boolean(result?.revoked);
 }
 
@@ -76,7 +78,7 @@ export async function persistCanonicalProductIdentity(
   env: VerifiedProductLedgerEnv,
   identity: CanonicalProductIdentity,
 ): Promise<CanonicalProductIdentity> {
-  const result = await postJson<{ identity?: CanonicalProductIdentity }>(env, '/canonical/upsert', identity);
+  const result = await verifiedLedgerRequest<{ identity?: CanonicalProductIdentity }>(env, '/canonical/upsert', identity);
   if (!result?.identity) throw new Error('canonical product ledger unavailable');
   return result.identity;
 }
@@ -85,7 +87,7 @@ export async function consolidateCanonicalProducts(
   env: VerifiedProductLedgerEnv,
   canonicalKeys: string[],
 ): Promise<CanonicalProductIdentity | null> {
-  const result = await postJson<{ identity?: CanonicalProductIdentity | null }>(env, '/canonical/consolidate', {
+  const result = await verifiedLedgerRequest<{ identity?: CanonicalProductIdentity | null }>(env, '/canonical/consolidate', {
     canonical_keys: canonicalKeys,
   });
   return result?.identity ?? null;
@@ -96,14 +98,14 @@ export async function durableCanonicalProductIdentity(
   canonicalKey: string,
 ): Promise<CanonicalProductIdentity | null> {
   if (!canonicalKey) return null;
-  const result = await postJson<{ identity?: CanonicalProductIdentity | null }>(env, '/canonical/get', { canonical_key: canonicalKey });
+  const result = await verifiedLedgerRequest<{ identity?: CanonicalProductIdentity | null }>(env, '/canonical/get', { canonical_key: canonicalKey });
   return result?.identity ?? null;
 }
 
 export async function durableCanonicalProductIdentities(
   env: VerifiedProductLedgerEnv,
 ): Promise<CanonicalProductIdentity[]> {
-  const result = await postJson<{ identities?: CanonicalProductIdentity[] }>(env, '/canonical/list', {});
+  const result = await verifiedLedgerRequest<{ identities?: CanonicalProductIdentity[] }>(env, '/canonical/list', {});
   return Array.isArray(result?.identities) ? result!.identities! : [];
 }
 
@@ -122,7 +124,7 @@ export async function durableCanonicalCandidates(
     limit?: number;
   },
 ): Promise<CanonicalProductIdentity[]> {
-  const result = await postJson<{ identities?: CanonicalProductIdentity[] }>(env, '/canonical/search', input);
+  const result = await verifiedLedgerRequest<{ identities?: CanonicalProductIdentity[] }>(env, '/canonical/search', input);
   return Array.isArray(result?.identities) ? result!.identities! : [];
 }
 
@@ -212,6 +214,8 @@ function mergeSameOfferIdentity(existing: CanonicalProductIdentity, incoming: Ca
   }
   return {
     ...existing,
+    variant_id: existing.variant_id ?? incoming.variant_id ?? null,
+    family: existing.family ?? incoming.family ?? null,
     visible_text: [...new Set([...existing.visible_text, ...incoming.visible_text])].slice(0, 12),
     style_attributes: [...new Set([...(existing.style_attributes ?? []), ...(incoming.style_attributes ?? [])])].slice(0, 12),
     logos_markings: [...new Set([...(existing.logos_markings ?? []), ...(incoming.logos_markings ?? [])])].slice(0, 8),
@@ -220,7 +224,7 @@ function mergeSameOfferIdentity(existing: CanonicalProductIdentity, incoming: Ca
     color: existing.color ?? incoming.color ?? null,
     material: existing.material ?? incoming.material ?? null,
     verified_at: incoming.verified_at,
-    merchant_refs: merchantRefs.slice(0, 25),
+    merchant_refs: merchantRefs,
   };
 }
 
@@ -277,6 +281,7 @@ export class VerifiedProductLedger {
     get<T = unknown>(key: string): Promise<T | undefined>;
     put<T = unknown>(key: string, value: T): Promise<void>;
     delete?(key: string): Promise<boolean>;
+    transaction?<T>(operation: (storage: VerifiedProductLedger['storage']) => Promise<T>): Promise<T>;
     list?<T = unknown>(options?: { prefix?: string; limit?: number }): Promise<Map<string, T>>;
   };
   private canonicalWriteTail: Promise<void> = Promise.resolve();
@@ -337,9 +342,102 @@ export class VerifiedProductLedger {
     return [...rows.values()].filter((value): value is string => typeof value === 'string');
   }
 
+  private async readLarge<T>(key: string): Promise<T | null> {
+    const count = await this.storage.get<number>(`${key}:chunks`);
+    if (!count) return null;
+    let text = '';
+    for (let i = 0; i < count; i++) {
+      const chunk = await this.storage.get<string>(`${key}:${i}`);
+      if (chunk == null) return null;
+      text += chunk;
+    }
+    return JSON.parse(text) as T;
+  }
+
+  private async writeLarge(storage: VerifiedProductLedger['storage'], key: string, value: unknown): Promise<void> {
+    const text = JSON.stringify(value);
+    // 16K UTF-16 characters remain safely below a DO value's 128 KiB limit.
+    const count = Math.ceil(text.length / 16000);
+    for (let i = 0; i < count; i++) await storage.put(`${key}:${i}`, text.slice(i * 16000, (i + 1) * 16000));
+    await storage.put(`${key}:chunks`, count);
+  }
+
   async fetch(request: Request): Promise<Response> {
     if (request.method !== 'POST') return Response.json({ error: 'Not found' }, { status: 404 });
     const path = new URL(request.url).pathname;
+
+    if (path === '/learning/asset-put') {
+      const body = await request.json() as { key: string; image: CatalogImage; kind: string };
+      const image = parseSourceImage(`data:${body.image?.mimeType};base64,${body.image?.data}`);
+      if (!/^[a-f0-9]{64}$/.test(body.key) || !image || !['catalog', 'observation'].includes(body.kind)) return Response.json({ error: 'Invalid image asset' }, { status: 400 });
+      const bytes = Uint8Array.from(atob(image.data), c => c.charCodeAt(0));
+      const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(x => x.toString(16).padStart(2, '0')).join('');
+      if (digest !== body.key) return Response.json({ error: 'Image digest mismatch' }, { status: 400 });
+      await this.serializeCanonicalWrite(async () => {
+        const existing = await this.readLarge<{ image: CatalogImage; kind: string }>(`asset:${body.key}`);
+        // An observation crop may never become a publicly served catalog asset.
+        if (!existing) await this.writeLarge(this.storage, `asset:${body.key}`, { image, kind: body.kind });
+      });
+      return Response.json({ accepted: true });
+    }
+    if (path === '/learning/asset-get') {
+      const body = await request.json() as { key: string; public_only?: boolean };
+      if (!/^[a-f0-9]{64}$/.test(body.key)) return Response.json({ image: null });
+      const asset = await this.readLarge<{ image: CatalogImage; kind: string }>(`asset:${body.key}`);
+      return Response.json({ image: asset && (!body.public_only || asset.kind === 'catalog') ? asset.image : null });
+    }
+    if (path === '/learning/commit') {
+      const bundle = await request.json() as CorrectionBundle;
+      if (!bundle?.promotion_id || !bundle.positive_observation?.crop_asset || !bundle.regression_case || !bundle.canonical_product || !bundle.appearance || !bundle.metrics || !Array.isArray(bundle.hard_negatives)) return Response.json({ error: 'Incomplete correction assets' }, { status: 400 });
+      return await this.serializeCanonicalWrite(async () => {
+        const key = `promotion:${bundle.promotion_id}`;
+        const previous = await this.readLarge<CorrectionBundle>(key);
+        if (previous) {
+          if (previous.positive_observation.crop_asset !== bundle.positive_observation.crop_asset || previous.positive_observation.canonical_key !== bundle.positive_observation.canonical_key || previous.action !== bundle.action) return Response.json({ error: 'Reviewed correction is immutable' }, { status: 409 });
+          return Response.json({ bundle: previous, learned: true, duplicate: true });
+        }
+        const crop = await this.readLarge(`asset:${bundle.positive_observation.crop_asset}`);
+        const identity = await this.storage.get<CanonicalProductIdentity>(canonicalKey(bundle.canonical_product.canonical_key));
+        if (!crop || !identity) return Response.json({ error: 'Missing durable crop or canonical identity' }, { status: 409 });
+        const candidate = bundle.regression_case.candidates.find(row => row.identity.canonical_key === identity.canonical_key);
+        if (!candidate) return Response.json({ error: 'Missing appearance mapping' }, { status: 409 });
+        const save = async (storage: VerifiedProductLedger['storage']) => {
+          const content = contentKey(bundle.appearance.platform, bundle.appearance.content_ref);
+          const mappings = await storage.get<VerifiedProductMapping[]>(content) ?? [];
+          const current = mappings.find(row => row.canonical_key === identity.canonical_key);
+          const saved: VerifiedProductMapping = { ...candidate.mapping, canonical_key: identity.canonical_key, track_id: identity.canonical_key,
+            trusted_observations: [...(current?.trusted_observations ?? []), ...(candidate.mapping.trusted_observations ?? [])].slice(-20) };
+          await storage.put(content, [...mappings.filter(row => row.canonical_key !== identity.canonical_key), saved]);
+          await this.writeLarge(storage, key, bundle);
+          const index = await storage.get<string[]>('promotion:index') ?? [];
+          if (!index.includes(bundle.promotion_id)) index.push(bundle.promotion_id);
+          await storage.put('promotion:index', index);
+          const cropKey = `crop-promotions:${bundle.positive_observation.crop_asset}`;
+          const cropIndex = await storage.get<string[]>(cropKey) ?? [];
+          await storage.put(cropKey, [...new Set([...cropIndex, bundle.promotion_id])]);
+        };
+        if (this.storage.transaction) await this.storage.transaction(save);
+        else await save(this.storage);
+        return Response.json({ bundle, learned: true, duplicate: false });
+      });
+    }
+    if (path === '/learning/negatives') {
+      const body = await request.json() as { crop_asset: string; platform: string; content_ref: string };
+      const index = /^[a-f0-9]{64}$/.test(body.crop_asset) ? await this.storage.get<string[]>(`crop-promotions:${body.crop_asset}`) ?? [] : [];
+      const bundles = await Promise.all(index.map(id => this.readLarge<CorrectionBundle>(`promotion:${id}`)));
+      const keys = bundles.filter(bundle => bundle && contentKey(bundle.appearance.platform, bundle.appearance.content_ref) === contentKey(body.platform, body.content_ref)).flatMap(bundle => bundle!.hard_negatives);
+      return Response.json({ canonical_keys: [...new Set(keys)] });
+    }
+    if (path === '/learning/export') {
+      const index = await this.storage.get<string[]>('promotion:index') ?? [];
+      const bundles = (await Promise.all(index.map(id => this.readLarge<CorrectionBundle>(`promotion:${id}`)))).filter((bundle): bundle is CorrectionBundle => Boolean(bundle));
+      return Response.json({ bundles, fixtures: bundles.map(bundle => bundle.regression_case), metrics: {
+        promoted_corrections: bundles.length,
+        newly_learned_identities: bundles.reduce((n, bundle) => n + bundle.metrics.newly_learned_identities, 0),
+        hard_negatives: bundles.reduce((n, bundle) => n + bundle.hard_negatives.length, 0),
+        repeat_failures_prevented: bundles.filter(bundle => bundle.metrics.repeat_failure_prevented).length,
+      } });
+    }
 
     if (path === '/lookup') {
       const body = await request.json() as Record<string, unknown>;
@@ -543,6 +641,10 @@ export class VerifiedProductLedger {
         const resolvedOwners = await Promise.all(owners.map((owner) =>
           this.resolveCanonicalKey(owner)));
         const survivorKey = [...new Set(resolvedOwners)].sort()[0] || requestedKey;
+        const ownerIdentity = await this.storage.get<CanonicalProductIdentity>(canonicalKey(survivorKey));
+        if (ownerIdentity?.variant_id && incoming.variant_id && normalizeVariantId(ownerIdentity.variant_id) !== normalizeVariantId(incoming.variant_id)) {
+          return Response.json({ error: 'Merchant offer already belongs to a different variant' }, { status: 409 });
+        }
         const normalizedIncoming: CanonicalProductIdentity = {
           ...incoming,
           canonical_key: survivorKey,
@@ -591,6 +693,7 @@ export class VerifiedProductLedger {
     }
 
     if (path === '/verify') {
+      return await this.serializeCanonicalWrite(async () => {
       const mapping = await request.json() as VerifiedProductMapping;
       const platform = bounded(mapping.platform, 40);
       const contentRef = bounded(mapping.content_ref, 180);
@@ -622,11 +725,13 @@ export class VerifiedProductLedger {
         ...(previous?.trusted_observations?.length ? { trusted_observations: previous.trusted_observations } : {}),
       };
       next.unshift(saved);
-      await this.storage.put(key, next.slice(0, 100));
+      await this.storage.put(key, next);
       return Response.json({ accepted: true, mapping: saved });
+      });
     }
 
     if (path === '/observe') {
+      return await this.serializeCanonicalWrite(async () => {
       const body = await request.json() as Record<string, unknown>;
       const platform = bounded(body.platform, 40);
       const contentRef = bounded(body.content_ref, 180);
@@ -655,6 +760,7 @@ export class VerifiedProductLedger {
       current[index] = updated;
       await this.storage.put(key, current);
       return Response.json({ accepted: true, mapping: updated });
+      });
     }
 
     if (path === '/revoke') {

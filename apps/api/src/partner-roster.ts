@@ -1,4 +1,4 @@
-import { canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
+import { canonicalProductIdentity, mergeCanonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import type { VerifiedProductMapping } from './verified-product-mapping.js';
 
 function normalizeContentRef(platform: string | null | undefined, value: string | null | undefined): string {
@@ -57,7 +57,11 @@ export function verifiedRosterCanonicalRowsForContent(
       canonical_key: identity.canonical_key,
       track_id: identity.canonical_key,
     };
-    if (!unique.has(identity.canonical_key)) unique.set(identity.canonical_key, { mapping: effectiveMapping, identity });
+    const previous = unique.get(identity.canonical_key);
+    unique.set(identity.canonical_key, {
+      mapping: previous?.mapping ?? effectiveMapping,
+      identity: previous ? mergeCanonicalProductIdentity(previous.identity, identity) : identity,
+    });
   }
   return [...unique.values()];
 }

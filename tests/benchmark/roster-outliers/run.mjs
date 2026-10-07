@@ -3,10 +3,13 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { onDecision } from '../product-tracks/run.mjs';
 import { cases } from './corpus.mjs';
+import { promotedCases } from './promoted.mjs';
 import { gate, summarize } from './metrics.mjs';
 
 export function run() {
-  const rows = cases.map(c => {
+  const corpus = [...cases, ...promotedCases()];
+  if (new Set(corpus.map(c => c.id)).size !== corpus.length) throw new Error('Duplicate regression case ID');
+  const rows = corpus.map(c => {
     const decision = onDecision(c);
     return {
       id: c.id, scenario: c.scenario, truth: c.truth,

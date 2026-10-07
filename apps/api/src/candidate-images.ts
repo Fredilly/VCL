@@ -2,7 +2,8 @@ import type { ProductCandidate, ProductContext } from './commerce.js';
 import type { ObjectDescription } from './types.js';
 import { attributes, canonical, type Evidence, type ImageComparison } from './verification-evidence.js';
 
-type Image = { mimeType: string; data: string };
+export type CatalogImage = { mimeType: string; data: string };
+type Image = CatalogImage;
 // Shared across query broadening. Leave eight subrequests for retrieval/OAuth on Workers Free.
 export type ImageRequestBudget = { remaining: number };
 export const imageRequestBudget = (): ImageRequestBudget => ({ remaining: 42 });
@@ -105,6 +106,10 @@ async function fetchImage(url: string, failure: (reason: string) => void, budget
     } : { name: 'UnknownError' });
     return null;
   }
+}
+
+export async function fetchCatalogImage(url: string): Promise<CatalogImage | null> {
+  return fetchImage(url, () => {}, imageRequestBudget());
 }
 
 const INSTRUCTIONS = `Compare the selected object crop with each numbered candidate product image.
