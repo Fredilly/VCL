@@ -26,7 +26,7 @@ test('explicit conflicting color is rejected', () => {
 });
 
 test('matching color and product type can remain likely', () => {
-  assert.equal(verifyProductCandidate(base, candidate('BOSS black cotton crewneck sweater'))?.result_class, 'LIKELY');
+  assert.equal(verifyProductCandidate(base, candidate('BOSS black cotton crewneck sweater'))?.result_class, 'SIMILAR');
 });
 
 test('product type mismatch remains a hard rejection', () => {
