@@ -26,7 +26,7 @@ Acceptance:
 - query broadening/fallback works,
 - one provider failure does not become a raw user-facing error where an alternate path exists,
 - product retrieval latency is measured,
-- exact/likely/similar classification is evidence-based,
+- exact/similar/related classification is evidence-based,
 - known-product benchmark exists for exact-match evaluation.
 
 Initial performance targets:
@@ -70,7 +70,7 @@ Create a reproducible benchmark:
 Record:
 - object description quality,
 - exact precision,
-- likely precision,
+- similar relevance,
 - false-exact rate,
 - useful result rate,
 - no-result rate,
@@ -107,7 +107,7 @@ Target:
 Continue only if:
 - users repeat the action,
 - useful-result rate is strong,
-- exact/likely identification is improving without false-exact trust failures,
+- exact identification and similar/related relevance are improving without false-exact trust failures,
 - product resolution is meaningfully better than manual screenshot/search friction,
 - costs are low,
 - platform fragility is manageable,
