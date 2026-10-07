@@ -109,7 +109,7 @@ test('verified commerce mapping hydrates its thumbnail and collapses same-SKU se
         destination: 'https://www.ebay.com/itm/ITEM-EXACT',
         price: '30.00',
         currency: 'USD',
-        result_class: 'LIKELY',
+        result_class: 'RELATED',
         provider: 'ebay',
       };
     },
@@ -127,7 +127,7 @@ test('verified commerce mapping hydrates its thumbnail and collapses same-SKU se
           destination: 'https://www.ebay.com/itm/ITEM-EXACT',
           price: '30.00',
           currency: 'USD',
-          result_class: 'LIKELY',
+          result_class: 'RELATED',
           provider: 'ebay',
         },
         {
@@ -141,7 +141,7 @@ test('verified commerce mapping hydrates its thumbnail and collapses same-SKU se
           destination: 'https://www.ebay.com/itm/ITEM-EXACT-2',
           price: '28.00',
           currency: 'USD',
-          result_class: 'LIKELY',
+          result_class: 'RELATED',
           provider: 'ebay',
         },
         {
