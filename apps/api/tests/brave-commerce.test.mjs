@@ -638,7 +638,7 @@ test('adapter: handles missing description gracefully', async () => {
 
 // ── Conservative classification tests ──
 
-test('adapter: does not upgrade to LIKELY from title match alone', async () => {
+test('adapter: keeps search hits RELATED until verification', async () => {
   const brandQuery = { query: 'Nike Air Max', category: 'shoes', subcategory: 'sneakers', brand: 'Nike', model: 'Air Max', attributes: [] };
   const ctx = makeBraveContext({
     fetch: async () => Response.json({
@@ -659,7 +659,7 @@ test('adapter: does not upgrade to LIKELY from title match alone', async () => {
 
   const provider = new BraveCommerceProvider(apiKey);
   const [result] = await provider.search(brandQuery);
-  assert.equal(result.result_class, 'SIMILAR', 'Brave must not upgrade to LIKELY from search rank or title match');
+  assert.equal(result.result_class, 'RELATED', 'Brave search rank is retrieval evidence only');
 });
 
 test('adapter: all candidates default to SIMILAR', async () => {
