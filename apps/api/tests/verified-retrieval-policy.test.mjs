@@ -36,7 +36,7 @@ function requestFor(contentRef = 'youtube:VIDEO') {
   });
 }
 
-test('verified source page supplies a missing thumbnail without broad commerce retrieval', async () => {
+test('verified appearance window supplies a missing thumbnail without broad commerce retrieval', async () => {
   const fetches = [];
   const worker = loadModule(serverFile, {
     fetch: async (url) => {
@@ -52,7 +52,9 @@ test('verified source page supplies a missing thumbnail without broad commerce r
   const mapping = [{
     platform: 'youtube',
     content_ref: 'youtube:VIDEO',
-    scope: 'entire_video',
+    scope: 'time_window',
+    timestamp_start_ms: 9000,
+    timestamp_end_ms: 11000,
     object_type: 'shirt',
     brand: 'Brand',
     product_id: 'SKU-1',
@@ -109,7 +111,7 @@ test('verified commerce mapping hydrates its thumbnail and collapses same-SKU se
         destination: 'https://www.ebay.com/itm/ITEM-EXACT',
         price: '30.00',
         currency: 'USD',
-        result_class: 'LIKELY',
+        result_class: 'RELATED',
         provider: 'ebay',
       };
     },
@@ -127,7 +129,7 @@ test('verified commerce mapping hydrates its thumbnail and collapses same-SKU se
           destination: 'https://www.ebay.com/itm/ITEM-EXACT',
           price: '30.00',
           currency: 'USD',
-          result_class: 'LIKELY',
+          result_class: 'RELATED',
           provider: 'ebay',
         },
         {
@@ -141,7 +143,7 @@ test('verified commerce mapping hydrates its thumbnail and collapses same-SKU se
           destination: 'https://www.ebay.com/itm/ITEM-EXACT-2',
           price: '28.00',
           currency: 'USD',
-          result_class: 'LIKELY',
+          result_class: 'RELATED',
           provider: 'ebay',
         },
         {

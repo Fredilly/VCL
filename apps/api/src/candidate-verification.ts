@@ -267,7 +267,7 @@ export function verifyCandidate(
   if (detailCount) reasons.push(...details.slice(0, 3).map((detail) => `visual detail: ${detail}`));
   // Experiment: use already-extracted OCR/logo evidence only as a bounded
   // verification/reranking bonus. It cannot create candidates, add provider/model
-  // calls, override contradictions, or independently qualify a result as LIKELY.
+  // calls, override contradictions, or independently qualify a result as Similar.
   if (useMarkingEvidence) {
     const marking = markingEvidenceScore(description, candidate, comparison);
     score += marking.score;
@@ -281,19 +281,18 @@ export function verifyCandidate(
   if ((!usefulMetadata && visual < 0.65) || score < 20) return { product: null, reasons: ['insufficient positive relevance evidence'] };
   const identityGrounded = groundedIdentity(description, observed, comparison);
   const strongVisual = visual >= IDENTITY_VISUAL && (comparison?.confidence ?? 0) >= IDENTITY_VISUAL;
-  const likely = !brandDisagrees && !identityConflict && strongVisual && identityGrounded && matched.has('subtype') && score >= 60;
-  if (!identityGrounded) reasons.push('readable source brand/model and independent candidate identity corroboration required for LIKELY');
-  if (!strongVisual) reasons.push('strong visual agreement and comparison confidence required for LIKELY');
-  // Search IDs and model guesses are not verified SKU evidence. Never manufacture EXACT.
-  const result_class = likely ? 'LIKELY' : 'SIMILAR';
-  const relationship = canonicalRelationshipFromEvidence(description, candidate, comparison, matched, identityGrounded, identityConflict);
+  if (!identityGrounded) reasons.push('identity is not independently grounded; result cannot be Exact');
+  if (!strongVisual) reasons.push('strong visual agreement is absent; result cannot be Exact');
+  // Search IDs and model guesses are not verified SKU evidence. Use the same
+  // canonical Exact / Similar / Related classes throughout the resolver.
+  const result_class = canonicalRelationshipFromEvidence(description, candidate, comparison, matched, identityGrounded, identityConflict);
   if (!comparison) reasons.push('image comparison unavailable; identity remains uncertain');
   const identity = matched.has('brand') && matched.has('model')
     ? [expected.brand?.value, expected.model?.value, expected.subtype?.value, expected.color?.value, expected.gender?.value].map(normalize).join(':')
     : `${candidate.provenance}:${candidate.id}`;
   return { product: { ...candidate, result_class, verification_score: Math.round(score / 125 * 100), verification_reasons: reasons,
     verification_image_similarity: comparison?.similarity, verification_image_confidence: comparison?.confidence,
-    verification_status: comparison ? 'multimodal' : 'metadata_only', identity_key: identity, relationship }, reasons };
+    verification_status: comparison ? 'multimodal' : 'metadata_only', identity_key: identity, relationship: result_class }, reasons };
 }
 
 export function rankVerified(products: ProductCandidate[]): ProductCandidate[] {

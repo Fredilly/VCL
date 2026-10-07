@@ -1,0 +1,64 @@
+{
+  "recorded_at": "2026-10-07T23:32:46.576345+00:00",
+  "source_parent_commit": "ebe5094a3d14278544462c6fbfffe99838022338",
+  "api_source_sha256": "0aaad6d162bd887c262c8cecbc623743974bfacde996e8efbf48bee56a469baf",
+  "runtime": {
+    "node": "v24.19.0",
+    "pnpm": "10.15.1"
+  },
+  "checks": {
+    "typecheck": "PASS",
+    "build": "PASS",
+    "deterministic_tests": {
+      "total": 693,
+      "passed": 693,
+      "failed": 0
+    },
+    "roster_gate": {
+      "cases": 28,
+      "passed": true,
+      "false_exact": 0,
+      "top1_accuracy": 1,
+      "none_recall": 1,
+      "ambiguity_abstention": 1
+    },
+    "roster_order_gate": {
+      "observations": 66,
+      "passed": true,
+      "false_exact": 0,
+      "unstable_cases": []
+    },
+    "spike4f": {
+      "decision": "PASS (static evidence gate only)",
+      "gates": {
+        "no_false_or_unverified_exact": true,
+        "useful_at_least_70_percent": true,
+        "no_request_failures": true,
+        "classification_ceiling": true
+      },
+      "useful_results": {
+        "numerator": 24,
+        "denominator": 30,
+        "value": 0.8
+      },
+      "all_returned_exact": {
+        "claims": 0,
+        "false": 0,
+        "unknown": 0
+      }
+    },
+    "live_golden": "BLOCKED_BEFORE_EXECUTION"
+  },
+  "frozen_inputs_unchanged_from_main": [
+    "tests/benchmark/roster-outliers/corpus.mjs",
+    "tests/benchmark/roster-outliers/metrics.mjs",
+    "tests/benchmark/spike-4f/corpus.mjs",
+    "tests/golden/cases.json"
+  ],
+  "production_seed_additions": 0,
+  "limitations": [
+    "No live Golden measurements or multi-catalog pixel accuracy claim.",
+    "Dense rosters can abstain when unexamined rivals cannot be excluded within the 24-candidate budget.",
+    "Ambiguous or incomplete merchant metadata requires explicit catalog input; import does not guess identity."
+  ]
+}

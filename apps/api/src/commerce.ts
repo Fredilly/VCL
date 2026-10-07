@@ -18,7 +18,8 @@ export type ProductContext = {
   timestamp_ms?: number | null;
 };
 
-export type CanonicalRelationship = 'EXACT' | 'SIMILAR' | 'RELATED';
+export type ProductResultClass = 'EXACT' | 'SIMILAR' | 'RELATED';
+export type CanonicalRelationship = ProductResultClass;
 
 export type ProductCandidate = {
   id: string;
@@ -31,8 +32,8 @@ export type ProductCandidate = {
   destination: string | null;
   price: string | null;
   currency: string | null;
-  result_class: 'EXACT' | 'LIKELY' | 'SIMILAR';
-  /** Canonical product/design relationship. Separate from result_class confidence. */
+  result_class: ProductResultClass;
+  /** Backward-compatible mirror of result_class. New code must keep the values identical. */
   relationship?: CanonicalRelationship;
   metadata?: { brand?: string; model?: string; category?: string; description?: string; gender?: string; color?: string; sleeve?: string; material?: string; freshness?: string };
   verification_status?: 'multimodal' | 'metadata_only';
@@ -324,13 +325,20 @@ export function verifyProductCandidate(description: ObjectDescription, candidate
   }
 
   const identityStrong = modelMatches || (brandMatches && typeMatches);
-  const resultClass = identityStrong && score >= 55 ? 'LIKELY' : score >= 25 ? 'SIMILAR' : null;
+  const resultClass: ProductResultClass | null = identityStrong && score >= 55 ? 'SIMILAR' : score >= 25 ? 'RELATED' : null;
   if (!resultClass) return null;
-  return { ...candidate, result_class: resultClass, verification_score: score, verification_reasons: reasons };
+  return { ...candidate, result_class: resultClass, relationship: resultClass, verification_score: score, verification_reasons: reasons };
+}
+
+function retrievalProductType(description: ObjectDescription, inferredType: string | null): string | null {
+  const subtype = description.subcategory?.trim();
+  const generic = /^(top|tops|apparel|clothing|accessory|accessories|object|product|unknown)$/i;
+  return subtype && !generic.test(subtype) ? subtype : inferredType || subtype || null;
 }
 
 export function buildProductQuery(description: ObjectDescription, context?: ProductContext): ProductQuery {
   const type = primaryType(description, context);
+  const retrievalType = retrievalProductType(description, type);
   const evidence = identityEvidence(description);
   const groundedContextualText = (description.evidence_confidence?.contextual_text ?? 0) >= 0.8
     ? (description.contextual_text ?? [])
@@ -348,7 +356,7 @@ export function buildProductQuery(description: ObjectDescription, context?: Prod
     ? uniqueNonEmpty([
         description.brand_candidate,
         description.model_candidate,
-        type,
+        retrievalType,
         description.color,
         description.material,
         ...strongestEvidence,
@@ -370,6 +378,7 @@ export function buildProductQuery(description: ObjectDescription, context?: Prod
     brand: description.brand_candidate,
     model: description.model_candidate,
     attributes: uniqueNonEmpty([
+      retrievalType,
       type,
       description.color,
       description.material,
@@ -382,6 +391,7 @@ export function buildProductQuery(description: ObjectDescription, context?: Prod
 export function buildProductQueryVariants(description: ObjectDescription, context?: ProductContext, visibleTextFirst = false): ProductQuery[] {
   const base = buildProductQuery(description, context);
   const type = primaryType(description, context);
+  const retrievalType = retrievalProductType(description, type);
   const readableText = description.visible_text.map((value) => value.trim()).filter(Boolean).slice(0, 2);
   const contextualText = (description.contextual_text ?? []).map((value) => value.trim()).filter(Boolean).slice(0, 3);
   const groundedReadableText = (description.evidence_confidence?.visible_text ?? 0) >= 0.8 ? readableText : [];
@@ -398,7 +408,7 @@ export function buildProductQueryVariants(description: ObjectDescription, contex
         ...retrievalText.filter((text) => ![description.brand_candidate, description.model_candidate].some(
           (identity) => identity && normalized(identity) === normalized(text),
         )),
-        type,
+        retrievalType,
         description.color,
       ]).join(' ')
     : null;
@@ -409,7 +419,7 @@ export function buildProductQueryVariants(description: ObjectDescription, contex
     description.model_candidate,
     ...groundedContextualText,
     ...groundedIdentityText,
-    type || description.subcategory,
+    retrievalType || type,
   ]).join(' ');
   if (identity) variants.push(identity);
 
@@ -419,7 +429,7 @@ export function buildProductQueryVariants(description: ObjectDescription, contex
   // visually similar but wrong identities.
   if (!groundedIdentityText.length && !groundedContextualText.length) {
     const visual = uniqueNonEmpty([
-      type || description.subcategory,
+      retrievalType || type,
       description.color,
     ]).join(' ');
     if (visual) variants.push(visual);

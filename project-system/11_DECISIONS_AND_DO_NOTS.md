@@ -357,7 +357,7 @@ Latency optimizations must preserve:
 - useful results
 - truthful no-result behavior
 - false EXACT = 0
-- unsupported LIKELY = 0
+- unsupported SIMILAR = 0
 
 Future consideration:
 Provider overlap may be revisited only with stronger eligibility gates that avoid unnecessary commerce retrieval.

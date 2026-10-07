@@ -192,7 +192,7 @@ Process:
 4. reject explicit contradictions,
 5. score remaining evidence agreement,
 6. resolve the best canonical product hypothesis,
-7. classify conservatively as `EXACT`, `LIKELY`, or `SIMILAR`,
+7. classify conservatively as `EXACT`, `SIMILAR`, or `RELATED`,
 8. only then apply merchant/commercial ranking.
 
 Do not mark a candidate `EXACT` because:
@@ -231,7 +231,7 @@ Create a benchmark containing known products where ground truth is available.
 
 Measure separately:
 - exact precision,
-- likely precision,
+- similar relevance,
 - useful-result rate,
 - false-exact rate,
 - no-result rate,
@@ -240,7 +240,7 @@ Measure separately:
 Exact-match ambition:
 increase the share of correctly identified original products over time without increasing false-exact claims.
 
-A correct `LIKELY` or `SIMILAR` label is better than a false `EXACT`.
+A correct `SIMILAR` or `RELATED` label is better than a false `EXACT`.
 
 ---
 

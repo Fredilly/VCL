@@ -8,7 +8,7 @@ const {
   feedbackCandidateKey,
 } = loadModule(new URL('../src/feedback-ledger.ts', import.meta.url).pathname);
 
-function candidate(id, score = 80, result_class = 'LIKELY') {
+function candidate(id, score = 80, result_class = 'SIMILAR') {
   return {
     id,
     title: id,
@@ -47,7 +47,7 @@ const description = {
 };
 
 test('one comparable wrong correction only demotes and never strengthens identity class', () => {
-  const a = candidate('a', 80, 'LIKELY');
+  const a = candidate('a', 80, 'SIMILAR');
   const b = candidate('b', 70, 'SIMILAR');
   const penalties = new Map([
     [feedbackCandidateKey(a), {
@@ -64,7 +64,7 @@ test('one comparable wrong correction only demotes and never strengthens identit
   assert.equal(result.penalized, 1);
   assert.equal(result.suppressed, 0);
   assert.equal(adjusted.verification_score, 60);
-  assert.equal(adjusted.result_class, 'LIKELY');
+  assert.equal(adjusted.result_class, 'SIMILAR');
   assert.match(adjusted.verification_reasons.at(-1), /prior exact-mapping user correction/);
 });
 
@@ -113,7 +113,7 @@ test('evidence fingerprint is deterministic and changes with derived object evid
 
 
 test('cross-evidence repeated candidate corrections downrank but never suppress', () => {
-  const a = candidate('a', 80, 'LIKELY');
+  const a = candidate('a', 80, 'SIMILAR');
   const penalties = new Map([
     [feedbackCandidateKey(a), {
       candidate_key: feedbackCandidateKey(a),
@@ -128,7 +128,7 @@ test('cross-evidence repeated candidate corrections downrank but never suppress'
   assert.equal(result.penalized, 1);
   assert.equal(result.signal_levels.candidate_global, 1);
   assert.equal(result.products[0].verification_score, 68);
-  assert.equal(result.products[0].result_class, 'LIKELY');
+  assert.equal(result.products[0].result_class, 'SIMILAR');
 });
 
 test('comparable family corrections downrank conservatively', () => {
@@ -151,7 +151,7 @@ test('comparable family corrections downrank conservatively', () => {
 });
 
 test('single unrelated correction cannot trigger broad learning', () => {
-  const a = candidate('a', 80, 'LIKELY');
+  const a = candidate('a', 80, 'SIMILAR');
   const penalties = new Map([
     [feedbackCandidateKey(a), {
       candidate_key: feedbackCandidateKey(a),

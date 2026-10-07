@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
-export const CLASSES = ['EXACT', 'LIKELY', 'SIMILAR', 'NO_RESULT'];
+// Retain LIKELY for immutable historical fixture/run input only. Current runtime
+// classes are EXACT/SIMILAR/RELATED; RELATED carries no original-identity claim.
+export const CLASSES = ['EXACT', 'LIKELY', 'SIMILAR', 'RELATED', 'NO_RESULT'];
 export const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const ratio = (numerator, denominator) => ({ numerator, denominator, value: denominator ? numerator / denominator : null });
 const count = (rows, predicate) => rows.filter(predicate).length;

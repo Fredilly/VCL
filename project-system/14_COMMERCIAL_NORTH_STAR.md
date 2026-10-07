@@ -55,7 +55,7 @@ Customer value:
 - make video or visual content commercially actionable,
 - resolve against first-party inventory where available,
 - fall back to external merchant/catalog sources where permitted,
-- receive confidence-calibrated EXACT / LIKELY / SIMILAR results,
+- receive confidence-calibrated EXACT / SIMILAR / RELATED results,
 - gain analytics on what viewers actually select.
 
 Possible commercial structures:
@@ -283,7 +283,7 @@ Exact identity should improve through evidence accumulation:
 
 Return:
 - EXACT when evidence strongly supports the same product,
-- LIKELY when meaningful uncertainty remains,
+- SIMILAR when the candidate is plausibly the same product/design family but exact identity is not established,
 - SIMILAR when commercially useful but not represented as the original.
 
 First-party inventories and platform metadata are evidence sources, not automatic truth. Contradictions still go through the normal verification pipeline.
@@ -344,7 +344,7 @@ The moat must compound from assets that are slower and more expensive to reprodu
 
 1. visual-intent graph,
 2. canonical product graph across merchants,
-3. exact/likely/similar evidence history,
+3. exact/similar/related evidence history,
 4. product-image and metadata normalization across providers,
 5. user corrections and confirmed matches,
 6. conversion/outcome data,
@@ -380,7 +380,7 @@ A future recurring-revenue product can expose aggregate demand hidden inside vid
 - objects/categories viewers select,
 - selection rate by content/timestamp,
 - products with repeated unresolved demand,
-- exact/likely/similar distribution,
+- exact/similar/related distribution,
 - merchant outbound rate,
 - conversion where observable,
 - revenue per intent event.
@@ -428,7 +428,7 @@ Possible pilot:
 - defined number of videos/assets or API events,
 - fixed duration,
 - measured visual selections,
-- clear exact/likely/similar behavior,
+- clear exact/similar/related behavior,
 - analytics summary.
 
 Do not require a full enterprise platform to run the pilot.
@@ -453,7 +453,7 @@ Only after measurable commerce value:
 - Do not assume brands will pay merely because Scoop can add interactivity to a video.
 - Do not sell a feature that customers can reproduce in an afternoon as though it is a moat.
 - Do not promise universal exact matching.
-- Do not allow merchant payouts to affect EXACT / LIKELY / SIMILAR classification.
+- Do not allow merchant payouts to affect EXACT / SIMILAR / RELATED classification.
 - Do not integrate every affiliate network before one route proves value.
 - Do not build separate commerce logic for every network.
 - Do not pay for broad infrastructure before measured usage requires it.

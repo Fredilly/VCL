@@ -50,7 +50,7 @@ Read these project-system files before making architectural or product decisions
 - Do not bypass DRM, protected media, browser security controls, access controls, or platform restrictions.
 - Do not claim support for protected video unless an explicitly permitted capture path works.
 - Never let sponsorship alter identification truth.
-- Label exact, likely, similar, and sponsored results separately.
+- Label exact, similar, related, and sponsored results separately.
 - Store as little video/frame data as possible. Prefer transient processing.
 - Build provider adapters behind stable internal interfaces.
 - Every external integration must have a fallback or a documented degraded mode.
@@ -66,7 +66,7 @@ A user on a supported non-protected video can:
 3. click a visible product,
 4. receive a plausible object identification,
 5. see useful purchasable matches,
-6. understand whether each result is exact, likely, similar, or sponsored,
+6. understand whether each result is exact, similar, related, or sponsored,
 7. complete the flow without the extension misleading them.
 
 The MVP is not complete merely because a vision model can describe an object.

@@ -66,7 +66,7 @@ A future Apple client should evaluate whether local models can reliably produce 
 
 Local output is still hypothesis generation, not exact product identity.
 
-Do not weaken the existing `EXACT` / `LIKELY` / `SIMILAR` evidence rules merely because the signal came from Apple hardware or an Apple model.
+Do not weaken the existing `EXACT` / `SIMILAR` / `RELATED` evidence rules merely because the signal came from Apple hardware or an Apple model.
 
 ### 3. Privacy-preserving visual intent
 
@@ -151,7 +151,7 @@ Measure the same selections through local and current cloud-assisted paths.
 Record:
 - object isolation quality,
 - commercially searchable description rate,
-- exact/likely/useful-result downstream impact,
+- exact/similar/useful-result downstream impact,
 - false-exact rate,
 - local preprocessing latency,
 - total end-to-end latency,

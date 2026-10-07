@@ -53,7 +53,7 @@ test('alpha learning persists reusable evidence and candidate relationships with
       destination: 'https://merchant.example/item',
       price: '99',
       currency: 'USD',
-      result_class: 'LIKELY',
+      result_class: 'SIMILAR',
       provider: 'brave',
     }],
     query: {

@@ -25,7 +25,7 @@ const candidate = (title) => ({ id: title, title, brand: null, model: null, cate
 test('clear visual product type stays authoritative over matching-brand video title', () => {
   assert.equal(verifyProductCandidate(description, candidate("HUGO BOSS Men's Boss Polo Shirt"), surface), null);
   assert.equal(verifyProductCandidate(description, candidate('Hugo Boss black crewneck sweater'), surface), null);
-  assert.equal(verifyProductCandidate(description, candidate('Hugo Boss black long sleeve t-shirt'), surface)?.result_class, 'LIKELY');
+  assert.equal(verifyProductCandidate(description, candidate('Hugo Boss black long sleeve t-shirt'), surface)?.result_class, 'SIMILAR');
 });
 
 test('commerce query keeps clear visual product type instead of video title type', () => {

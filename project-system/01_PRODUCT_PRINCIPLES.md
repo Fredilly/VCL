@@ -7,8 +7,8 @@ The system must never present a paid result as the identified object merely beca
 Required result classes:
 
 - `EXACT`: evidence strongly supports exact product/SKU.
-- `LIKELY`: strong candidate, but not enough evidence for exact claim.
-- `SIMILAR`: visually or functionally comparable.
+- `SIMILAR`: not the asserted original, but a close visual/product substitute.
+- `RELATED`: useful to the same intent/category, but not close enough for `SIMILAR`.
 - `SPONSORED`: commercially promoted and clearly labeled.
 
 Sponsored results must also pass minimum relevance rules.
@@ -38,8 +38,8 @@ Do not fabricate precision.
 
 Examples:
 - "Exact match"
-- "Likely match"
 - "Similar"
+- "Related"
 - "Unable to identify confidently"
 
 A correct refusal is better than a confident wrong answer.
@@ -50,9 +50,9 @@ Old, unavailable, custom, luxury, and costume products may not be purchasable.
 
 The product resolver should support:
 - exact item,
-- likely original,
-- secondhand/resale,
-- current equivalent,
+- exact/original item,
+- close similar item,
+- related current equivalent,
 - budget alternative.
 
 ## 6. Neutrality
@@ -88,7 +88,7 @@ The overlay must:
 ## 9. Build for graceful degradation
 
 If exact product matching fails:
-`exact -> likely -> similar -> descriptive search`
+`exact -> similar -> related -> descriptive search`
 
 If one merchant fails:
 use another adapter.

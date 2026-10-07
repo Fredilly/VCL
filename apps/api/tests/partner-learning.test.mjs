@@ -5,6 +5,7 @@ const learning = loadModule(new URL('../src/partner-learning.ts', import.meta.ur
 const ledgerMod = loadModule(new URL('../src/verified-product-ledger.ts', import.meta.url).pathname);
 const memory = loadModule(new URL('../src/canonical-product-memory.ts', import.meta.url).pathname);
 const reuse = loadModule(new URL('../src/same-video-verified-reuse.ts', import.meta.url).pathname);
+const catalogMod = loadModule(new URL('../src/partner-catalog.ts', import.meta.url).pathname);
 const cross = loadModule(new URL('../src/cross-video-verified-reuse.ts', import.meta.url).pathname);
 
 function environment() {
@@ -158,4 +159,96 @@ test('API imports and promotes a reviewed correction using cached pixels and rea
   assert.equal(repeat.status, 200, await repeat.clone().text());
   const result = await repeat.json();
   assert.equal(result.verified_mapping.canonical_key, outcome.canonical_key);
+});
+
+test('URL-only roster preserves 73 variants, duplicate offers and durable references without SKU code edits', async () => {
+  const { env } = environment();
+  const urls = Array.from({ length: 73 }, (_, i) => `https://catalog.shop/bag?variant=${i}`);
+  urls.push(`${urls[72]}&utm_source=creator`);
+  const metadata = async url => {
+    const id = new URL(url).searchParams.get('variant');
+    return catalogMod.extractPartnerCatalogMetadata(`<script type="application/ld+json">${JSON.stringify({
+      '@type': 'Product', sku: `A-${id}`, brand: { name: 'Acme' }, name: `Orbit ${id} bag`, category: 'bag',
+      image: `https://images.shop/${id}.png`, offers: { url: `https://catalog.shop/bag?variant=${id}` },
+    })}</script>`, url);
+  };
+  const rows = await learning.preparePartnerRoster(env, 'https://api.scoop.shop', input(urls), { metadata, image: deps.image });
+  assert.equal(rows.length, 73);
+  await learning.ingestPartnerRoster(env, rows);
+  const mappings = await ledgerMod.durableVerifiedMappings(env, 'youtube', 'video-A');
+  assert.equal(mappings.length, 73);
+  assert.ok(mappings.every(row => row.image_reference.includes('/product-reference/')));
+  assert.ok(rows.every(row => row.identity.variant_id && row.identity.model === null));
+});
+
+test('single-SKU imported roster cannot bypass pixels or turn an outside item into Exact', async () => {
+  const { env } = environment();
+  const rows = await learning.preparePartnerRoster(env, 'https://api.scoop.shop', input([offer('Orbit', 'ONLY')]), deps);
+  await learning.ingestPartnerRoster(env, rows);
+  env.GEMINI_API_KEY = 'test-only';
+  let comparisons = 0;
+  let server;
+  const mockFetch = async (url, options) => {
+    const host = new URL(String(url)).hostname;
+    if (host === 'api.scoop.shop') return server.default.fetch(new Request(url, options), env);
+    if (host === 'generativelanguage.googleapis.com') {
+      comparisons++;
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: visual(.4).source,
+        candidates: [{ index: 0, attributes: visual(.4).candidate, similarity: .4, confidence: .98, matching_details: [] }] }) }] } }] });
+    }
+    throw Error(`Unexpected fetch ${host}`);
+  };
+  server = loadModule(new URL('../src/server.ts', import.meta.url).pathname, { fetch: mockFetch, console: { error() {}, warn() {} } });
+  for (const source_image of [undefined, `data:${crop.mimeType};base64,${crop.data}`]) {
+    const response = await server.default.fetch(new Request('https://api.scoop.shop/resolve-products', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description,
+        context: { platform: 'youtube', content_ref: 'video-A', timestamp_ms: 9000 }, source_image }),
+    }), env);
+    const result = await response.json();
+    assert.ok(!(result.products ?? []).some(row => row.result_class === 'EXACT'));
+    assert.ok(!result.verified_mapping?.hit);
+  }
+  assert.equal(comparisons, 1, 'the roster goes through the independent verifier');
+});
+
+test('HTTP resolver compares at most 24 of 73 same-family variants and exposes unresolved coverage', async () => {
+  const { env } = environment();
+  const rows = await learning.preparePartnerRoster(env, 'https://api.scoop.shop', input(
+    Array.from({ length: 73 }, (_, i) => offer('Orbit', `SKU-${i}`))), deps);
+  await learning.ingestPartnerRoster(env, rows);
+  env.GEMINI_API_KEY = 'test-only'; env.BRAVE_SEARCH_API_KEY = 'test-only';
+  const title = reuse.retrieveSameVideoRosterCandidates({ description, candidates: rows })[0].identity.title;
+  let verified = 0, modelCalls = 0, server;
+  server = loadModule(new URL('../src/server.ts', import.meta.url).pathname, { console: { error() {}, warn() {} },
+    fetch: async (url, options) => {
+      const host = new URL(String(url)).hostname;
+      if (host === 'api.scoop.shop') return server.default.fetch(new Request(url, options), env);
+      if (host === 'api.search.brave.com') return Response.json({ web: { results: [] } });
+      if (host === 'generativelanguage.googleapis.com') {
+        modelCalls++;
+        const request = JSON.parse(options.body);
+        const products = request.contents[0].parts.flatMap(part => {
+          try { const value = JSON.parse(part.text); return typeof value.index === 'number' ? [value] : []; } catch { return []; }
+        });
+        verified += products.length;
+        return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: visual(.98).source,
+          candidates: products.map(row => ({ index: row.index, attributes: visual(.98).candidate, confidence: .98,
+            similarity: row.title === title ? .98 : .4, matching_details: ['matching panel and clasp construction'] })) }) }] } }] });
+      }
+      throw Error(`Unexpected fetch ${host}`);
+    } });
+  const response = await server.default.fetch(new Request('https://api.scoop.shop/resolve-products', { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, source_image: `data:${crop.mimeType};base64,${crop.data}`,
+      context: { platform: 'youtube', content_ref: 'video-A', timestamp_ms: 9000 } }),
+  }), env);
+  const result = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(result));
+  assert.equal(verified, 24);
+  assert.equal(modelCalls, 4);
+  assert.equal(result.verified_mapping.hit, false);
+  assert.equal(result.verified_mapping.same_video_reason, 'incomplete_comparison');
+  assert.equal(result.verified_mapping.roster_retrieval.roster_count, 73);
+  assert.equal(result.verified_mapping.roster_retrieval.retrieved_keys.length, 24);
+  assert.equal(result.verified_mapping.roster_retrieval.unresolved_keys.length, 49);
+  assert.ok(!result.products.some(row => row.result_class === 'EXACT'));
 });

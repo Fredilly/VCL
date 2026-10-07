@@ -101,13 +101,13 @@ test('adapter: normalizes candidates and never emits EXACT', async () => {
   const provider = new BraveCommerceProvider(apiKey);
   const [candidate] = await provider.search(query);
   assert.equal(candidate.title, 'Nike Air Max 90 - Buy Online');
-  assert.equal(candidate.result_class, 'SIMILAR');
+  assert.equal(candidate.result_class, 'RELATED');
   assert.notEqual(candidate.result_class, 'EXACT');
   assert.equal(candidate.provenance, 'brave:web-search');
   assert.equal(candidate.provider, 'brave');
 });
 
-test('adapter: result_class is always SIMILAR even with brand and model match', async () => {
+test('adapter: result_class is RELATED even with brand and model search terms', async () => {
   const ctx = makeBraveContext({
     fetch: async () => Response.json({
       type: 'search',
@@ -128,7 +128,7 @@ test('adapter: result_class is always SIMILAR even with brand and model match', 
 
   const provider = new BraveCommerceProvider(apiKey);
   const [result] = await provider.search(query);
-  assert.equal(result.result_class, 'SIMILAR', 'Brave results must always default to SIMILAR');
+  assert.equal(result.result_class, 'RELATED', 'Retrieval cannot establish visual similarity or identity');
   assert.notEqual(result.result_class, 'EXACT');
 });
 
@@ -638,7 +638,7 @@ test('adapter: handles missing description gracefully', async () => {
 
 // ── Conservative classification tests ──
 
-test('adapter: does not upgrade to LIKELY from title match alone', async () => {
+test('adapter: keeps search hits RELATED until verification', async () => {
   const brandQuery = { query: 'Nike Air Max', category: 'shoes', subcategory: 'sneakers', brand: 'Nike', model: 'Air Max', attributes: [] };
   const ctx = makeBraveContext({
     fetch: async () => Response.json({
@@ -659,10 +659,10 @@ test('adapter: does not upgrade to LIKELY from title match alone', async () => {
 
   const provider = new BraveCommerceProvider(apiKey);
   const [result] = await provider.search(brandQuery);
-  assert.equal(result.result_class, 'SIMILAR', 'Brave must not upgrade to LIKELY from search rank or title match');
+  assert.equal(result.result_class, 'RELATED', 'Brave search rank is retrieval evidence only');
 });
 
-test('adapter: all candidates default to SIMILAR', async () => {
+test('adapter: all candidates default to RELATED', async () => {
   const ctx = makeBraveContext({
     fetch: async () => Response.json({
       type: 'search',
@@ -683,7 +683,7 @@ test('adapter: all candidates default to SIMILAR', async () => {
   const provider = new BraveCommerceProvider(apiKey);
   const results = await provider.search(query);
   for (const result of results) {
-    assert.equal(result.result_class, 'SIMILAR');
+    assert.equal(result.result_class, 'RELATED');
   }
 });
 

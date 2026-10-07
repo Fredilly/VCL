@@ -33,7 +33,7 @@ test('high similarity cannot compensate for missing readable source identity or 
     assert.equal(verify(f)?.result_class, 'SIMILAR');
   }
 });
-test('titles, copied guesses, brand-only geometry and provider choice cannot establish LIKELY', () => {
+test('titles, copied guesses, brand-only geometry and provider choice cannot establish Exact', () => {
   for (const provider of ['ebay', 'etsy', 'brave', 'serpapi']) {
     const f = fixture(); f.candidate.provider = provider; f.candidate.provenance = `${provider}:fixture`;
     f.comparison.similarity = 1;
@@ -51,15 +51,15 @@ test('strong grounded identity survives without construction details, across nam
       const f = fixture(brand, model); f.comparison.matching_details = [];
       if (path === 'catalog') { delete f.comparison.candidate.brand; delete f.comparison.candidate.model; }
       else { f.candidate.metadata = { color: 'blue' }; f.candidate.title = 'Blue sneakers'; }
-      assert.equal(verify(f)?.result_class, 'LIKELY');
+      assert.equal(verify(f)?.result_class, 'SIMILAR');
     }
   }
 });
 test('strong visual floor is conjunctive with comparison confidence, never a replacement for identity', () => {
   const f = fixture(); f.comparison.similarity = .9; f.comparison.confidence = .9;
-  assert.equal(verify(f)?.result_class, 'LIKELY');
+  assert.equal(verify(f)?.result_class, 'EXACT');
   f.comparison.confidence = .89;
   assert.equal(verify(f)?.result_class, 'SIMILAR');
   f.comparison.confidence = .99; f.candidate.metadata.model = 'different model';
-  assert.equal(verify(f)?.result_class, 'SIMILAR');
+  assert.equal(verify(f)?.result_class, 'RELATED');
 });

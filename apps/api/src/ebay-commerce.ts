@@ -88,10 +88,6 @@ function normalizeItem(
 ): ProductCandidate {
   const title = item.title ?? '';
   const model = ebayModel(item);
-  const isLikely = Boolean(query.brand && query.model
-    && title.toLowerCase().includes(query.brand.toLowerCase())
-    && (title.toLowerCase().includes(query.model.toLowerCase()) || model?.toLowerCase() === query.model.toLowerCase()));
-
   return {
     id: item.itemId ?? crypto.randomUUID(),
     title,
@@ -108,7 +104,9 @@ function normalizeItem(
     })),
     price: item.price?.value ?? null,
     currency: item.price?.currency ?? null,
-    result_class: isLikely ? 'LIKELY' : 'SIMILAR',
+    // Provider rank/title overlap is retrieval evidence, not identity proof.
+    result_class: 'RELATED',
+    relationship: 'RELATED',
     provider: 'ebay',
   };
 }

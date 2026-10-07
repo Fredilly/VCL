@@ -13,3 +13,22 @@ export function rosterFallbackDescription(description: ObjectDescription): Objec
     search_terms: [], distinctive_features: grounded(description.distinctive_features),
     style_attributes: grounded(description.style_attributes), shape_silhouette: grounded(description.shape_silhouette) };
 }
+
+/**
+ * Retrieval may use the model's family guess as one bounded search hypothesis,
+ * but verification must continue to use rosterFallbackDescription().
+ *
+ * This intentionally separates "what should we search for?" from
+ * "what evidence is allowed to prove identity?". A wrong family guess can cost
+ * one retrieval attempt; it cannot promote a candidate to EXACT.
+ */
+export function rosterFallbackRetrievalDescription(description: ObjectDescription): ObjectDescription {
+  const safe = rosterFallbackDescription(description);
+  if (safe.model_candidate || !description.model_candidate) return safe;
+  return {
+    ...safe,
+    model_candidate: description.model_candidate,
+    // Retrieval-only hypothesis. Do not restore identity authority.
+    identity_confidence: 0,
+  };
+}

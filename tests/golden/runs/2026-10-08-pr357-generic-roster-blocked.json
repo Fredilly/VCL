@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "suite": "golden",
+  "session_id": "2026-10-08-pr357-generic-roster",
+  "run_date": "2026-10-08",
+  "run_timezone": "Asia/Shanghai",
+  "recorded_at": "2026-10-07T23:32:46.576345+00:00",
+  "source_parent_commit": "ebe5094a3d14278544462c6fbfffe99838022338",
+  "api_source_sha256": "0aaad6d162bd887c262c8cecbc623743974bfacde996e8efbf48bee56a469baf",
+  "status": "BLOCKED_BEFORE_EXECUTION",
+  "notes": "The changed backend was not exercised by live Golden selections. GEMINI_API_KEY and OPENROUTER_API_KEY are absent, and no complete set of saved Golden selections is available in this workspace. No cases, clicks, expectations or thresholds were modified. This is not a Golden pass. AGENTS.md requires live Golden evidence before merge.",
+  "comparison": {
+    "previous_session": "2026-10-07-pr353-partner-learning",
+    "pass_rate_change": null,
+    "latency_change": null,
+    "reason": "No new live measurements; prior session was also blocked before execution."
+  },
+  "cases": [
+    {
+      "case_id": "golden-001-billions-tie",
+      "url_at_time": "https://youtu.be/T-bpMn0VMYk?t=157",
+      "target_object": "tie on the left",
+      "click_point": "tie knot",
+      "runs": [],
+      "required_runs": 3,
+      "blocked_reason": "MISSING_LIVE_PROVIDER_CREDENTIALS_AND_COMPLETE_SAVED_SELECTIONS"
+    },
+    {
+      "case_id": "golden-002-casio-f91w",
+      "url_at_time": "https://youtu.be/CT0mvnFbOYQ?t=2",
+      "target_object": "Casio watch",
+      "click_point": "center of watch face",
+      "runs": [],
+      "required_runs": 3,
+      "blocked_reason": "MISSING_LIVE_PROVIDER_CREDENTIALS_AND_COMPLETE_SAVED_SELECTIONS"
+    },
+    {
+      "case_id": "golden-003-hugo-boss-bottled",
+      "url_at_time": "https://youtu.be/jndGRB5Il3k?t=7",
+      "target_object": "perfume bottle",
+      "click_point": "center/body of perfume bottle",
+      "runs": [],
+      "required_runs": 3,
+      "blocked_reason": "MISSING_LIVE_PROVIDER_CREDENTIALS_AND_COMPLETE_SAVED_SELECTIONS"
+    },
+    {
+      "case_id": "golden-004-white-denim-jacket",
+      "url_at_time": "https://youtu.be/Fr8xhEDNhfU?t=121",
+      "target_object": "white denim jacket",
+      "click_point": "side of jacket",
+      "runs": [],
+      "required_runs": 3,
+      "blocked_reason": "MISSING_LIVE_PROVIDER_CREDENTIALS_AND_COMPLETE_SAVED_SELECTIONS"
+    },
+    {
+      "case_id": "golden-005-dior-book-tote",
+      "url_at_time": "https://youtu.be/4Gmrv8KEuTo?t=504",
+      "target_object": "handbag",
+      "click_point": "bag surface",
+      "runs": [],
+      "required_runs": 3,
+      "blocked_reason": "MISSING_LIVE_PROVIDER_CREDENTIALS_AND_COMPLETE_SAVED_SELECTIONS"
+    }
+  ]
+}

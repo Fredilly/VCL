@@ -122,12 +122,6 @@ function normalizeListing(listing: EtsyListingResult, query: ProductQuery, fetch
   const title = (listing.title ?? '').trim();
   if (!title || hasAudienceContradiction(listing, query)) return null;
   const { price, currency } = parsePrice(listing.price);
-  const isLikely = Boolean(
-    query.brand && query.model &&
-    title.toLowerCase().includes(query.brand.toLowerCase()) &&
-    title.toLowerCase().includes(query.model.toLowerCase()),
-  );
-
   const listingTs = freshnessTimestamp(listing);
 
   return {
@@ -147,7 +141,9 @@ function normalizeListing(listing: EtsyListingResult, query: ProductQuery, fetch
     destination: listing.url ?? null,
     price,
     currency,
-    result_class: isLikely ? 'LIKELY' : 'SIMILAR',
+    // Provider rank/title overlap is retrieval evidence, not identity proof.
+    result_class: 'RELATED',
+    relationship: 'RELATED',
     provider: 'etsy',
   };
 }
