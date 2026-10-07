@@ -361,3 +361,47 @@ test('Handbagholic High Rise Bumbag can resolve from explicit model evidence', (
   assert.equal(hit?.product_id, 'M46784');
   assert.equal(hit?.provenance, 'creator_verified');
 });
+
+
+test('Handbagholic partner roster narrows candidates by appearance window without turning time into identity', () => {
+  const flower = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 288420);
+  assert.deepEqual(flower.map(({ mapping }) => mapping.product_id), ['FP-1925620']);
+  assert.ok(flower[0]?.mapping.image_reference?.includes('42edbf9959473e53ec1c92e1c8327770.jpg'));
+
+  const trunkie = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 620046);
+  assert.deepEqual(trunkie.map(({ mapping }) => mapping.product_id), ['M14526']);
+  assert.ok(trunkie[0]?.mapping.image_reference?.includes('M14526_PM1_Worn'));
+
+  const gap = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 320000);
+  assert.deepEqual(gap, []);
+});
+
+test('candidate appearance windows remain candidate-only: generic frame evidence does not become direct Exact', () => {
+  const hit = mappingMod.lookupVerifiedProductMapping({
+    mappings: seedMod.ALPHA_VERIFIED_PRODUCT_SEEDS,
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: 'n9u8ynhBdSo',
+    timestampMs: 620046,
+    description: {
+      category: 'accessories',
+      subcategory: 'bag',
+      brand_candidate: 'Louis Vuitton',
+      model_candidate: 'Petite Malle',
+      color: 'brown',
+      material: 'coated canvas',
+      style_attributes: ['monogram canvas'],
+      visible_text: [],
+      logos_markings: ['Louis Vuitton monogram'],
+      distinctive_features: ['S-lock'],
+      hardware_details: ['gold-tone hardware'],
+      shape_silhouette: ['trunk-style shoulder bag'],
+      search_terms: ['Louis Vuitton trunk bag'],
+      confidence: 0.95,
+      identity_confidence: 0.7,
+    },
+  });
+  // scope remains entire_video and multiple partner identities exist, so timestamp
+  // cannot directly assert M14526; Product Memory + image verification must earn it.
+  assert.equal(hit, null);
+});
