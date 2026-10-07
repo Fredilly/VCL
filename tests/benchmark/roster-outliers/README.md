@@ -98,3 +98,23 @@ credentials and saved frames. Its immutable blocked record is under
 `tests/golden/runs/`. Passing deterministic gates is not live Golden evidence.
 Additional image verification may increase provider calls, cost and latency;
 those effects require a live controlled run before production promotion.
+
+
+## Repeatable partner-roster path
+
+The production path accepts multi-product verified mappings through the existing
+`VERIFIED_PRODUCT_MAPPINGS_JSON` registry. The same generic roster builder used
+by alpha seeds converts those mappings into canonical same-video candidates.
+
+For each request:
+1. match platform + content,
+2. optionally narrow by `candidate_window_start_ms/end_ms`,
+3. hydrate missing product imagery from the verified destination when possible,
+4. compare the selected video pixels against the bounded roster,
+5. run the normal contradiction/visual verifier,
+6. return Exact only when earned; otherwise continue to Similar/Related/NONE.
+
+Candidate windows are priors, never truth. A wrong creator/partner roster item
+must still be rejectable. The frozen gate now includes partner-family confusion
+cases modeled on a floral Neverfull vs plain Neverfull and Trunkie vs Petite
+Malle. No brand- or SKU-specific resolver exceptions are allowed.

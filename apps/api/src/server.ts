@@ -29,7 +29,7 @@ export { FeedbackLedger } from './feedback-ledger.js';
 import { persistAlphaLearning } from './alpha-learning.js';
 import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerceClick, verifyAttributionToken } from './commerce-attribution.js';
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
-import { lookupVerifiedProductMapping, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
+import { lookupVerifiedProductMapping, parseVerifiedProductMappings, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { backfillLegacyAdminCanonicalMappings, consolidateCanonicalProducts, durableCanonicalCandidates, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
 import { eligibleSameVideoCanonicalCandidates, resolveSameVideoReuse, verifiedProductMemoryCandidates, identityWithTrustedVpmObservations, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
@@ -38,6 +38,7 @@ import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemA
 import { fetchProductPageMetadata } from './product-page-enrichment.js';
 import { recoverVerifiedProductImage } from './verified-image-recovery.js';
 import { ALPHA_VERIFIED_PRODUCT_SEEDS, alphaVerifiedCanonicalRowsForContent, alphaVerifiedCanonicalIdentitiesExcludingContent } from './alpha-verified-product-seeds.js';
+import { verifiedRosterCanonicalRowsForContent } from './partner-roster.js';
 export { AlphaAccessLedger } from './alpha-access.js';
 export { VerifiedProductLedger } from './verified-product-ledger.js';
 export { AdminAccessLedger } from './admin-access.js';
@@ -2079,11 +2080,20 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         failures: 0,
         failure_reasons: {},
       };
+      const configuredRosterMappings = parseVerifiedProductMappings(env.VERIFIED_PRODUCT_MAPPINGS_JSON);
       const alphaCanonicalRows = alphaVerifiedCanonicalRowsForContent(
         context?.platform ?? null,
         contentRef,
+        context?.timestamp_ms ?? null,
       );
-      if (!verifiedMapping && (durableMappings.length || alphaCanonicalRows.length)) {
+      const configuredCanonicalRows = verifiedRosterCanonicalRowsForContent(
+        configuredRosterMappings,
+        context?.platform ?? null,
+        contentRef,
+        context?.timestamp_ms ?? null,
+      );
+      const partnerCanonicalRows = [...configuredCanonicalRows, ...alphaCanonicalRows];
+      if (!verifiedMapping && (durableMappings.length || partnerCanonicalRows.length)) {
         const canonicalMappings = durableMappings.filter((mapping) => Boolean(mapping.canonical_key));
         const durableCanonicalRows = (await Promise.all(canonicalMappings.map(async (mapping) => {
           const identity = mapping.canonical_key
@@ -2097,10 +2107,18 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         // video can be resolved from its verified product list without manual
         // timestamps. Visual verification still decides which product is on screen.
         const canonicalRowMap = new Map<string, SameVideoCanonicalCandidate>();
-        for (const row of [...durableCanonicalRows, ...alphaCanonicalRows]) {
+        for (const row of [...durableCanonicalRows, ...partnerCanonicalRows]) {
           if (!canonicalRowMap.has(row.identity.canonical_key)) canonicalRowMap.set(row.identity.canonical_key, row);
         }
-        const canonicalRows = [...canonicalRowMap.values()];
+        const hasPartnerWindow = partnerCanonicalRows.some(({ mapping }) =>
+          typeof mapping.candidate_window_start_ms === 'number' && typeof mapping.candidate_window_end_ms === 'number');
+        // A partner-mapped appearance window is a candidate prior, not an Exact assertion.
+        // While inside one, do not let stale whole-video admin tracks from earlier clicks
+        // outrank the partner roster. The visual verifier can still reject the roster item,
+        // after which normal retrieval returns Similar/Related rather than a false Exact.
+        const canonicalRows = hasPartnerWindow
+          ? partnerCanonicalRows
+          : [...canonicalRowMap.values()];
 
         sameVideoVisualCheck = await confirmSameVideoReuseWithImage(
           env,

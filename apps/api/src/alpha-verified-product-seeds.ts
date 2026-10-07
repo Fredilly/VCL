@@ -1,5 +1,6 @@
 import type { VerifiedProductMapping } from './verified-product-mapping.js';
 import { canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
+import { verifiedRosterCanonicalRowsForContent } from './partner-roster.js';
 
 /**
  * Small alpha-only verified registry for creator demos.
@@ -10,8 +11,9 @@ import { canonicalProductIdentity, type CanonicalProductIdentity } from './canon
  */
 export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
   // Partner-roster pilot: Handbagholic "Top 10 BEST Louis Vuitton Bags To Buy Right Now".
-  // Treat these as creator-provided candidates for the whole video, not timestamp truth.
-  // The existing same-video visual verifier must still earn Exact; wrong variants should
+  // Treat these as creator-provided candidates. candidate_window_* narrows the relevant
+  // roster at each moment but is not identity truth. The same-video visual verifier must
+  // still earn Exact; wrong variants should
   // fall through to Similar/Related commerce results rather than being forced Exact.
   {
     platform: 'youtube',
@@ -20,6 +22,8 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     object_type: 'bag',
     brand: 'Louis Vuitton',
     product_id: 'FP-1977706',
+    candidate_window_start_ms: 24000,
+    candidate_window_end_ms: 161000,
     title: 'Louis Vuitton Monogram Side Trunk PM',
     destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-side-trunk-pm-1977706',
     provider: 'fashionphile.com',
@@ -44,6 +48,8 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     object_type: 'bag',
     brand: 'Louis Vuitton',
     product_id: 'M28392',
+    candidate_window_start_ms: 163000,
+    candidate_window_end_ms: 228000,
     title: 'Louis Vuitton Vagabond Hobo Bag',
     destination: 'https://uk.louisvuitton.com/eng-gb/products/vagabond-hobo-bag-h39-nvprod7260131v/M28392',
     provider: 'louisvuitton.com',
@@ -68,8 +74,11 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     object_type: 'bag',
     brand: 'Louis Vuitton',
     product_id: 'FP-1925620',
+    candidate_window_start_ms: 284000,
+    candidate_window_end_ms: 305000,
     title: 'Louis Vuitton Monogram Roses Neverfull MM',
     destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-roses-neverfull-mm-1925620',
+    image_reference: 'https://www.fashionphile.com/cdn/shop/files/42edbf9959473e53ec1c92e1c8327770.jpg?v=1783789851&width=1946',
     provider: 'fashionphile.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
@@ -77,9 +86,9 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
       confidence: 0.8,
       visible_text: [],
       logos_markings: ['Louis Vuitton monogram'],
-      distinctive_features: ['Neverfull MM', 'open tote'],
+      distinctive_features: ['Neverfull MM', 'open tote', 'large painted pink and orange rose print overlay'],
       shape_silhouette: ['tote'],
-      style_attributes: ['Monogram Roses', 'MM size'],
+      style_attributes: ['Monogram Roses', 'MM size', 'bright floral overlay'],
       color: 'brown multicolor',
       material: 'coated canvas',
     }],
@@ -92,6 +101,8 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     object_type: 'bag',
     brand: 'Louis Vuitton',
     product_id: 'FP-1981368',
+    candidate_window_start_ms: 335000,
+    candidate_window_end_ms: 399000,
     title: 'Louis Vuitton Monogram CarryAll MM',
     destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-carryall-mm-1981368',
     provider: 'fashionphile.com',
@@ -116,6 +127,8 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     object_type: 'bag',
     brand: 'Louis Vuitton',
     product_id: 'FP-1983129',
+    candidate_window_start_ms: 402000,
+    candidate_window_end_ms: 522000,
     title: 'Louis Vuitton Monogram NeoNoe MM Black',
     destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-neonoe-mm-black-1983129',
     provider: 'fashionphile.com',
@@ -140,6 +153,8 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     object_type: 'bag',
     brand: 'Louis Vuitton',
     product_id: 'M2A078',
+    candidate_window_start_ms: 524000,
+    candidate_window_end_ms: 607000,
     title: 'Louis Vuitton Multipass',
     destination: 'https://us.louisvuitton.com/eng-us/products/Multipass-G81-nvprod7770009v/M2A078',
     provider: 'louisvuitton.com',
@@ -164,8 +179,11 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     object_type: 'bag',
     brand: 'Louis Vuitton',
     product_id: 'M14526',
+    candidate_window_start_ms: 610000,
+    candidate_window_end_ms: 671000,
     title: 'Louis Vuitton Trunkie Bag Monogram',
     destination: 'https://uk.louisvuitton.com/eng-gb/products/trunkie-bag-monogram-nvprod6090072v/M14526',
+    image_reference: 'https://uk.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-trunkie-bag--M14526_PM1_Worn%20view.jpg',
     provider: 'louisvuitton.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
@@ -188,6 +206,8 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     object_type: 'bag',
     brand: 'Louis Vuitton',
     product_id: 'POSH-6a3f49685919e011180b400c',
+    candidate_window_start_ms: 682000,
+    candidate_window_end_ms: 741000,
     title: 'Louis Vuitton Vanity Chain Pouch Monogram Brown',
     destination: 'https://poshmark.com/listing/Louis-Vuitton-Monogram-Vanity-Chain-Pouch-Brown-6a3f49685919e011180b400c',
     provider: 'poshmark',
@@ -212,6 +232,8 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     object_type: 'bag',
     brand: 'Louis Vuitton',
     product_id: 'M46784',
+    candidate_window_start_ms: 744000,
+    candidate_window_end_ms: 805000,
     title: 'Louis Vuitton High Rise Monogram Bumbag',
     destination: 'https://poshmark.com/listing/Louis-Vuitton-High-Rise-Monogram-Bumbag-M46784-Full-Set-Receipt-6abd335f046d1f7c1de21801',
     provider: 'poshmark',
@@ -236,6 +258,8 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     object_type: 'bag',
     brand: 'Louis Vuitton',
     product_id: 'FP-1985008',
+    candidate_window_start_ms: 805000,
+    candidate_window_end_ms: 955000,
     title: 'Louis Vuitton Monogram Speedy Bandouliere 25',
     destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-speedy-bandouliere-25-1985008',
     provider: 'fashionphile.com',
@@ -485,23 +509,17 @@ function canonicalizeAlphaSeed(mapping: VerifiedProductMapping): {
 export function alphaVerifiedCanonicalRowsForContent(
   platform: string | null | undefined,
   contentRef: string | null | undefined,
+  timestampMs?: number | null,
 ): Array<{ mapping: VerifiedProductMapping; identity: CanonicalProductIdentity }> {
-  const normalizedPlatform = (platform ?? '').trim().toLowerCase();
   const normalizedRef = normalizeSeedContentRef(platform, contentRef);
-  if (!normalizedPlatform || !normalizedRef) return [];
+  if (!normalizedRef) return [];
   const rosterRef = ALPHA_VERIFIED_ROSTER_ALIASES[normalizedRef] ?? normalizedRef;
 
-  const unique = new Map<string, { mapping: VerifiedProductMapping; identity: CanonicalProductIdentity }>();
-  for (const mapping of ALPHA_VERIFIED_PRODUCT_SEEDS) {
-    if (mapping.platform.trim().toLowerCase() !== normalizedPlatform) continue;
-    if (normalizeSeedContentRef(mapping.platform, mapping.content_ref) !== rosterRef) continue;
-    const effectiveMapping = rosterRef === normalizedRef
-      ? mapping
-      : { ...mapping, content_ref: contentRef ?? normalizedRef };
-    const row = canonicalizeAlphaSeed(effectiveMapping);
-    if (!unique.has(row.identity.canonical_key)) unique.set(row.identity.canonical_key, row);
-  }
-  return [...unique.values()];
+  const sourceMappings = ALPHA_VERIFIED_PRODUCT_SEEDS
+    .filter((mapping) => normalizeSeedContentRef(mapping.platform, mapping.content_ref) === rosterRef)
+    .map((mapping) => rosterRef === normalizedRef ? mapping : { ...mapping, content_ref: contentRef ?? normalizedRef });
+
+  return verifiedRosterCanonicalRowsForContent(sourceMappings, platform, contentRef, timestampMs);
 }
 
 export function alphaVerifiedCanonicalIdentitiesExcludingContent(

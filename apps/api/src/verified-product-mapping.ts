@@ -24,6 +24,10 @@ export type VerifiedProductMapping = {
   scope: 'entire_video' | 'time_window';
   timestamp_start_ms?: number;
   timestamp_end_ms?: number;
+  /** Optional candidate-only appearance window for partner rosters. Unlike scope=time_window,
+   * this narrows which identities are visually compared without asserting identity by time. */
+  candidate_window_start_ms?: number;
+  candidate_window_end_ms?: number;
   object_type: string;
   brand: string;
   product_id: string;
@@ -111,6 +115,10 @@ export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProd
       scope: record.scope,
       ...(start !== undefined ? { timestamp_start_ms: start } : {}),
       ...(end !== undefined ? { timestamp_end_ms: end } : {}),
+      ...(typeof record.candidate_window_start_ms === 'number' && Number.isFinite(record.candidate_window_start_ms) && record.candidate_window_start_ms >= 0
+        ? { candidate_window_start_ms: record.candidate_window_start_ms } : {}),
+      ...(typeof record.candidate_window_end_ms === 'number' && Number.isFinite(record.candidate_window_end_ms) && record.candidate_window_end_ms >= 0
+        ? { candidate_window_end_ms: record.candidate_window_end_ms } : {}),
       object_type: (record.object_type as string).trim(),
       brand: (record.brand as string).trim(),
       product_id: (record.product_id as string).trim(),

@@ -361,3 +361,90 @@ test('Handbagholic High Rise Bumbag can resolve from explicit model evidence', (
   assert.equal(hit?.product_id, 'M46784');
   assert.equal(hit?.provenance, 'creator_verified');
 });
+
+
+test('Handbagholic partner roster narrows candidates by appearance window without turning time into identity', () => {
+  const flower = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 288420);
+  assert.equal(flower.map(({ mapping }) => mapping.product_id).join(','), 'FP-1925620');
+  assert.ok(flower[0]?.mapping.image_reference?.includes('42edbf9959473e53ec1c92e1c8327770.jpg'));
+
+  const trunkie = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 620046);
+  assert.equal(trunkie.map(({ mapping }) => mapping.product_id).join(','), 'M14526');
+  assert.ok(trunkie[0]?.mapping.image_reference?.includes('M14526_PM1_Worn'));
+
+  const gap = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 320000);
+  assert.equal(gap.length, 0);
+});
+
+test('candidate appearance windows remain candidate-only: generic frame evidence does not become direct Exact', () => {
+  const hit = mappingMod.lookupVerifiedProductMapping({
+    mappings: seedMod.ALPHA_VERIFIED_PRODUCT_SEEDS,
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: 'n9u8ynhBdSo',
+    timestampMs: 620046,
+    description: {
+      category: 'accessories',
+      subcategory: 'bag',
+      brand_candidate: 'Louis Vuitton',
+      model_candidate: 'Petite Malle',
+      color: 'brown',
+      material: 'coated canvas',
+      style_attributes: ['monogram canvas'],
+      visible_text: [],
+      logos_markings: ['Louis Vuitton monogram'],
+      distinctive_features: ['S-lock'],
+      hardware_details: ['gold-tone hardware'],
+      shape_silhouette: ['trunk-style shoulder bag'],
+      search_terms: ['Louis Vuitton trunk bag'],
+      confidence: 0.95,
+      identity_confidence: 0.7,
+    },
+  });
+  // scope remains entire_video and multiple partner identities exist, so timestamp
+  // cannot directly assert M14526; Product Memory + image verification must earn it.
+  assert.equal(hit, null);
+});
+
+
+test('configured multi-product roster can be canonicalized without code-specific seed logic', () => {
+  const partner = loadModule(resolve(here, '../src/partner-roster.ts'));
+  const mappings = mappingMod.parseVerifiedProductMappings(JSON.stringify([
+    {
+      platform: 'youtube',
+      content_ref: 'https://www.youtube.com/watch?v=partner-video',
+      scope: 'entire_video',
+      candidate_window_start_ms: 1000,
+      candidate_window_end_ms: 5000,
+      object_type: 'bag',
+      brand: 'Louis Vuitton',
+      product_id: 'A',
+      title: 'Partner Product A',
+      destination: 'https://example.com/a',
+      provenance: 'creator_verified'
+    },
+    {
+      platform: 'youtube',
+      content_ref: 'partner-video',
+      scope: 'entire_video',
+      candidate_window_start_ms: 6000,
+      candidate_window_end_ms: 9000,
+      object_type: 'bag',
+      brand: 'Louis Vuitton',
+      product_id: 'B',
+      title: 'Partner Product B',
+      destination: 'https://example.com/b',
+      provenance: 'creator_verified'
+    }
+  ]));
+
+  const aRows = partner.verifiedRosterCanonicalRowsForContent(mappings, 'youtube', 'partner-video', 3000);
+  assert.equal(aRows.map(({ mapping }) => mapping.product_id).join(','), 'A');
+  assert.equal(aRows[0].mapping.track_id, aRows[0].identity.canonical_key);
+
+  const bRows = partner.verifiedRosterCanonicalRowsForContent(mappings, 'youtube', 'https://www.youtube.com/watch?v=partner-video', 7000);
+  assert.equal(bRows.map(({ mapping }) => mapping.product_id).join(','), 'B');
+
+  const allRows = partner.verifiedRosterCanonicalRowsForContent(mappings, 'youtube', 'partner-video');
+  assert.equal([...allRows.map(({ mapping }) => mapping.product_id)].sort().join(','), 'A,B');
+});
