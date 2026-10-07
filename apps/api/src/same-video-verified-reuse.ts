@@ -292,6 +292,73 @@ function vpmTrackCompatible(identity: CanonicalProductIdentity, description: Obj
   return true;
 }
 
+/**
+ * Order a chaotic roster by retrieval evidence without changing identity truth.
+ *
+ * This is candidate retrieval only. No score here can produce EXACT. The normal
+ * multimodal verifier still decides whether a candidate is Exact, Similar, Related,
+ * or rejected. Stable canonical-key tie breaking makes results independent of the
+ * partner's input order.
+ */
+export function rankSameVideoRosterCandidates(input: {
+  description: ObjectDescription;
+  candidates: SameVideoCanonicalCandidate[];
+}): SameVideoCanonicalCandidate[] {
+  const observedBrand = normalizeIdentityText(input.description.brand_candidate);
+  const observedFamily = objectFamily(input.description.subcategory || input.description.category);
+  const groundedContext = (input.description.evidence_confidence?.contextual_text ?? 0) >= 0.8
+    ? (input.description.contextual_text ?? [])
+    : [];
+  const retrievalWords = distinctiveWords([
+    input.description.model_candidate,
+    ...input.description.visible_text,
+    ...groundedContext,
+    ...input.description.logos_markings,
+    ...input.description.distinctive_features,
+    ...input.description.style_attributes,
+    ...input.description.shape_silhouette,
+    ...input.description.search_terms,
+  ]);
+
+  return input.candidates
+    .map((candidate) => {
+      const { identity } = candidate;
+      let score = 0;
+      const candidateBrand = normalizeIdentityText(identity.brand);
+      const candidateFamily = objectFamily(identity.object_type);
+
+      if (observedBrand && candidateBrand) score += observedBrand === candidateBrand ? 40 : -500;
+      if (observedFamily && candidateFamily) score += observedFamily === candidateFamily ? 45 : -500;
+
+      const signals = candidateSignals(identity, input.description);
+      score += Math.min(signals.identityOverlap.shared, 6) * 12;
+      score += signals.secondarySignals * 8;
+      if (signals.color === true) score += 16;
+      else if (signals.color === false) score -= 8;
+
+      const familyWords = distinctiveWords([identity.family, identity.model, identity.title]);
+      const familyOverlap = overlap(familyWords, retrievalWords);
+      score += Math.min(familyOverlap.shared, 6) * 10;
+      if (familyOverlap.shared >= 2 && familyOverlap.ratio >= 0.5) score += 20;
+
+      const observedModel = normalizeIdentityText(input.description.model_candidate);
+      const candidateModel = normalizeIdentityText(identity.model);
+      if (observedModel && candidateModel && observedModel === candidateModel) score += 60;
+
+      const variant = normalizeIdentityText(identity.variant_id);
+      const readable = normalizeIdentityText([
+        ...input.description.visible_text,
+        ...groundedContext,
+      ].join(' '));
+      if (variant && readable.includes(variant)) score += 100;
+
+      return { candidate, score };
+    })
+    .sort((a, b) => b.score - a.score
+      || a.candidate.identity.canonical_key.localeCompare(b.candidate.identity.canonical_key))
+    .map(({ candidate }) => candidate);
+}
+
 export function verifiedProductMemoryCandidates(input: {
   description: ObjectDescription;
   candidates: SameVideoCanonicalCandidate[];
