@@ -405,3 +405,46 @@ test('candidate appearance windows remain candidate-only: generic frame evidence
   // cannot directly assert M14526; Product Memory + image verification must earn it.
   assert.equal(hit, null);
 });
+
+
+test('configured multi-product roster can be canonicalized without code-specific seed logic', () => {
+  const partner = loadModule(resolve(here, '../src/partner-roster.ts'));
+  const mappings = mappingMod.parseVerifiedProductMappings(JSON.stringify([
+    {
+      platform: 'youtube',
+      content_ref: 'https://www.youtube.com/watch?v=partner-video',
+      scope: 'entire_video',
+      candidate_window_start_ms: 1000,
+      candidate_window_end_ms: 5000,
+      object_type: 'bag',
+      brand: 'Louis Vuitton',
+      product_id: 'A',
+      title: 'Partner Product A',
+      destination: 'https://example.com/a',
+      provenance: 'creator_verified'
+    },
+    {
+      platform: 'youtube',
+      content_ref: 'partner-video',
+      scope: 'entire_video',
+      candidate_window_start_ms: 6000,
+      candidate_window_end_ms: 9000,
+      object_type: 'bag',
+      brand: 'Louis Vuitton',
+      product_id: 'B',
+      title: 'Partner Product B',
+      destination: 'https://example.com/b',
+      provenance: 'creator_verified'
+    }
+  ]));
+
+  const aRows = partner.verifiedRosterCanonicalRowsForContent(mappings, 'youtube', 'partner-video', 3000);
+  assert.deepEqual(aRows.map(({ mapping }) => mapping.product_id), ['A']);
+  assert.equal(aRows[0].mapping.track_id, aRows[0].identity.canonical_key);
+
+  const bRows = partner.verifiedRosterCanonicalRowsForContent(mappings, 'youtube', 'https://www.youtube.com/watch?v=partner-video', 7000);
+  assert.deepEqual(bRows.map(({ mapping }) => mapping.product_id), ['B']);
+
+  const allRows = partner.verifiedRosterCanonicalRowsForContent(mappings, 'youtube', 'partner-video');
+  assert.deepEqual(new Set(allRows.map(({ mapping }) => mapping.product_id)), new Set(['A', 'B']));
+});
