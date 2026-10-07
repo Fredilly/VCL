@@ -135,7 +135,7 @@ test('a secondary logo color is not evidence of a contradictory dominant color',
   assert.ok(verifyCandidate(description, candidate).product);
 });
 
-test('matching a guessed model to catalog metadata does not establish LIKELY', () => {
+test('matching a guessed model to catalog metadata does not establish EXACT', () => {
   const { description, candidate, comparison } = example(apparelCases[0]);
   description.model_candidate = 'Family 123'; candidate.metadata.model = 'Family 123';
   comparison.matching_details = [];
