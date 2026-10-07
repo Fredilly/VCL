@@ -1,5 +1,6 @@
 import type { VerifiedProductMapping } from './verified-product-mapping.js';
 import { canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
+import { verifiedRosterCanonicalRowsForContent } from './partner-roster.js';
 
 /**
  * Small alpha-only verified registry for creator demos.
@@ -510,27 +511,15 @@ export function alphaVerifiedCanonicalRowsForContent(
   contentRef: string | null | undefined,
   timestampMs?: number | null,
 ): Array<{ mapping: VerifiedProductMapping; identity: CanonicalProductIdentity }> {
-  const normalizedPlatform = (platform ?? '').trim().toLowerCase();
   const normalizedRef = normalizeSeedContentRef(platform, contentRef);
-  if (!normalizedPlatform || !normalizedRef) return [];
+  if (!normalizedRef) return [];
   const rosterRef = ALPHA_VERIFIED_ROSTER_ALIASES[normalizedRef] ?? normalizedRef;
 
-  const unique = new Map<string, { mapping: VerifiedProductMapping; identity: CanonicalProductIdentity }>();
-  for (const mapping of ALPHA_VERIFIED_PRODUCT_SEEDS) {
-    if (mapping.platform.trim().toLowerCase() !== normalizedPlatform) continue;
-    if (normalizeSeedContentRef(mapping.platform, mapping.content_ref) !== rosterRef) continue;
-    if (typeof timestampMs === 'number') {
-      const start = mapping.candidate_window_start_ms;
-      const end = mapping.candidate_window_end_ms;
-      if (typeof start === 'number' && typeof end === 'number' && (timestampMs < start || timestampMs > end)) continue;
-    }
-    const effectiveMapping = rosterRef === normalizedRef
-      ? mapping
-      : { ...mapping, content_ref: contentRef ?? normalizedRef };
-    const row = canonicalizeAlphaSeed(effectiveMapping);
-    if (!unique.has(row.identity.canonical_key)) unique.set(row.identity.canonical_key, row);
-  }
-  return [...unique.values()];
+  const sourceMappings = ALPHA_VERIFIED_PRODUCT_SEEDS
+    .filter((mapping) => normalizeSeedContentRef(mapping.platform, mapping.content_ref) === rosterRef)
+    .map((mapping) => rosterRef === normalizedRef ? mapping : { ...mapping, content_ref: contentRef ?? normalizedRef });
+
+  return verifiedRosterCanonicalRowsForContent(sourceMappings, platform, contentRef, timestampMs);
 }
 
 export function alphaVerifiedCanonicalIdentitiesExcludingContent(
