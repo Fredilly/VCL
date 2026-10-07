@@ -40,7 +40,7 @@ import { recoverVerifiedProductImage } from './verified-image-recovery.js';
 import { ALPHA_VERIFIED_PRODUCT_SEEDS, alphaVerifiedCanonicalRowsForContent, alphaVerifiedCanonicalIdentitiesExcludingContent } from './alpha-verified-product-seeds.js';
 import { preparePartnerRoster, ingestPartnerRoster, buildCorrectionBundle, cacheLearningImage, learningImage, persistCorrectionBundle, assetDigest, type RosterOfferInput, type CorrectionBundle } from './partner-learning.js';
 import { verifiedLedgerRequest } from './verified-product-ledger.js';
-import { rosterFallbackDescription } from './roster-fallback.js';
+import { rosterFallbackDescription, rosterFallbackRetrievalDescription } from './roster-fallback.js';
 import { scopedPartnerRosterCandidates, verifiedRosterCanonicalRowsForContent } from './partner-roster.js';
 export { AlphaAccessLedger } from './alpha-access.js';
 export { VerifiedProductLedger } from './verified-product-ledger.js';
@@ -2341,8 +2341,12 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           })
         : null;
       const visibleTextQueryV2 = env.VISIBLE_TEXT_QUERY_V2 === 'true' || record.benchmark_visible_text_query_v2 === true;
+      // Keep identity proof conservative after a roster miss, but do not throw away
+      // useful family/subtype hypotheses before retrieval. Retrieval and verification
+      // are deliberately different evidence roles.
       const fallbackDescription = partnerCanonicalRows.length ? rosterFallbackDescription(description) : description;
-      const baseQueries = buildProductQueryVariants(fallbackDescription, context, visibleTextQueryV2);
+      const retrievalDescription = partnerCanonicalRows.length ? rosterFallbackRetrievalDescription(description) : description;
+      const baseQueries = buildProductQueryVariants(retrievalDescription, context, visibleTextQueryV2);
       // Catalog titles nominate purchase candidates; they never change visual identity evidence.
       const rosterQueries = partnerCanonicalRows.slice(0, 4).map(row => ({
         ...baseQueries[0], query: row.identity.title, model: null,
