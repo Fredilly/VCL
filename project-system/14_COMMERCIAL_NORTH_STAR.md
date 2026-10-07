@@ -283,7 +283,7 @@ Exact identity should improve through evidence accumulation:
 
 Return:
 - EXACT when evidence strongly supports the same product,
-- LIKELY when meaningful uncertainty remains,
+- SIMILAR when the candidate is plausibly the same product/design family but exact identity is not established,
 - SIMILAR when commercially useful but not represented as the original.
 
 First-party inventories and platform metadata are evidence sources, not automatic truth. Contradictions still go through the normal verification pipeline.
