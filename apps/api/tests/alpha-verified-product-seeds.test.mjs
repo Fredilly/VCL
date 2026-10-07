@@ -365,15 +365,15 @@ test('Handbagholic High Rise Bumbag can resolve from explicit model evidence', (
 
 test('Handbagholic partner roster narrows candidates by appearance window without turning time into identity', () => {
   const flower = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 288420);
-  assert.deepEqual(flower.map(({ mapping }) => mapping.product_id), ['FP-1925620']);
+  assert.equal(flower.map(({ mapping }) => mapping.product_id).join(','), 'FP-1925620');
   assert.ok(flower[0]?.mapping.image_reference?.includes('42edbf9959473e53ec1c92e1c8327770.jpg'));
 
   const trunkie = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 620046);
-  assert.deepEqual(trunkie.map(({ mapping }) => mapping.product_id), ['M14526']);
+  assert.equal(trunkie.map(({ mapping }) => mapping.product_id).join(','), 'M14526');
   assert.ok(trunkie[0]?.mapping.image_reference?.includes('M14526_PM1_Worn'));
 
   const gap = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 320000);
-  assert.deepEqual(gap, []);
+  assert.equal(gap.length, 0);
 });
 
 test('candidate appearance windows remain candidate-only: generic frame evidence does not become direct Exact', () => {
@@ -439,12 +439,12 @@ test('configured multi-product roster can be canonicalized without code-specific
   ]));
 
   const aRows = partner.verifiedRosterCanonicalRowsForContent(mappings, 'youtube', 'partner-video', 3000);
-  assert.deepEqual(aRows.map(({ mapping }) => mapping.product_id), ['A']);
+  assert.equal(aRows.map(({ mapping }) => mapping.product_id).join(','), 'A');
   assert.equal(aRows[0].mapping.track_id, aRows[0].identity.canonical_key);
 
   const bRows = partner.verifiedRosterCanonicalRowsForContent(mappings, 'youtube', 'https://www.youtube.com/watch?v=partner-video', 7000);
-  assert.deepEqual(bRows.map(({ mapping }) => mapping.product_id), ['B']);
+  assert.equal(bRows.map(({ mapping }) => mapping.product_id).join(','), 'B');
 
   const allRows = partner.verifiedRosterCanonicalRowsForContent(mappings, 'youtube', 'partner-video');
-  assert.deepEqual(new Set(allRows.map(({ mapping }) => mapping.product_id)), new Set(['A', 'B']));
+  assert.equal([...allRows.map(({ mapping }) => mapping.product_id)].sort().join(','), 'A,B');
 });
