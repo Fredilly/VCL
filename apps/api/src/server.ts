@@ -794,12 +794,12 @@ async function confirmSameVideoReuseWithImage(
   // OCR/model matches nominate identities; they cannot bypass the visual check.
   // Unavailable comparison evidence keeps this production path fail-closed.
   const eligible = eligibleSameVideoCanonicalCandidates({ description, candidates });
-  const vpm = verifiedProductMemoryCandidates({ description, candidates });
-  // Explicit VPM tracks are the authoritative memory set. Historical canonical
-  // mappings remain a legacy fallback only when this video has no compatible VPM.
+  // Product Memory is evidence, not an exclusive answer set. A stale or previously
+  // promoted sibling must never hide another canonical roster identity before
+  // visual comparison. Rank the whole structurally valid roster instead.
   const visualCandidates = rankSameVideoRosterCandidates({
     description,
-    candidates: vpm.length ? vpm : eligible,
+    candidates: eligible,
   });
   if (!visualCandidates.length || !sourceImage) {
     return { ...empty, decision: { ...noDecision, reason: visualCandidates.length ? 'visual_unavailable' : 'no_candidate' } };
