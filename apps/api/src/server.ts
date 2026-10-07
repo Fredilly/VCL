@@ -852,7 +852,8 @@ async function confirmSameVideoReuseWithImage(
         destination: merchantRef.destination,
         price: null,
         currency: null,
-        result_class: 'SIMILAR',
+        result_class: 'RELATED',
+        relationship: 'RELATED',
         metadata: {
           ...(identity.brand ? { brand: identity.brand } : {}),
           ...(identity.model ? { model: identity.model } : {}),
@@ -1065,7 +1066,8 @@ async function confirmCrossVideoReuseWithImage(
         destination: merchant.destination,
         price: null,
         currency: null,
-        result_class: 'SIMILAR',
+        result_class: 'RELATED',
+        relationship: 'RELATED',
       } as ProductCandidate,
     }];
   });
