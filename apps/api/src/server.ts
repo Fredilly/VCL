@@ -2082,6 +2082,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       const alphaCanonicalRows = alphaVerifiedCanonicalRowsForContent(
         context?.platform ?? null,
         contentRef,
+        context?.timestamp_ms ?? null,
       );
       if (!verifiedMapping && (durableMappings.length || alphaCanonicalRows.length)) {
         const canonicalMappings = durableMappings.filter((mapping) => Boolean(mapping.canonical_key));
@@ -2100,7 +2101,15 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         for (const row of [...durableCanonicalRows, ...alphaCanonicalRows]) {
           if (!canonicalRowMap.has(row.identity.canonical_key)) canonicalRowMap.set(row.identity.canonical_key, row);
         }
-        const canonicalRows = [...canonicalRowMap.values()];
+        const hasPartnerWindow = alphaCanonicalRows.some(({ mapping }) =>
+          typeof mapping.candidate_window_start_ms === 'number' && typeof mapping.candidate_window_end_ms === 'number');
+        // A partner-mapped appearance window is a candidate prior, not an Exact assertion.
+        // While inside one, do not let stale whole-video admin tracks from earlier clicks
+        // outrank the partner roster. The visual verifier can still reject the roster item,
+        // after which normal retrieval returns Similar/Related rather than a false Exact.
+        const canonicalRows = hasPartnerWindow
+          ? alphaCanonicalRows
+          : [...canonicalRowMap.values()];
 
         sameVideoVisualCheck = await confirmSameVideoReuseWithImage(
           env,
