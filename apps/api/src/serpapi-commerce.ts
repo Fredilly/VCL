@@ -33,14 +33,6 @@ export type SerpApiQuotaInfo = {
 
 const DEFAULT_TIMEOUT_MS = 2500;
 
-function classify(query: ProductQuery, title: string): 'LIKELY' | 'SIMILAR' {
-  if (!query.brand || !query.model) return 'SIMILAR';
-  const haystack = title.toLowerCase();
-  return haystack.includes(query.brand.toLowerCase()) && haystack.includes(query.model.toLowerCase())
-    ? 'LIKELY'
-    : 'SIMILAR';
-}
-
 function isNoResultsMessage(message: string): boolean {
   const normalized = message.toLowerCase();
   return normalized.includes("hasn't returned any results")
@@ -145,7 +137,9 @@ export class SerpApiCommerceProvider implements CommerceProvider {
       destination: item.product_link ?? null,
       price: typeof item.extracted_price === 'number' ? String(item.extracted_price) : item.price ?? null,
       currency: typeof item.extracted_price === 'number' ? 'USD' : null,
-      result_class: classify(query, item.title ?? ''),
+      // Search rank is candidate generation only.
+      result_class: 'RELATED',
+      relationship: 'RELATED',
       provider: 'serpapi',
     }));
   }
