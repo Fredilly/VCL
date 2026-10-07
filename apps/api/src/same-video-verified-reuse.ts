@@ -384,22 +384,14 @@ export function eligibleSameVideoCanonicalCandidates(input: {
 }): SameVideoCanonicalCandidate[] {
   const unique = new Map<string, SameVideoCanonicalCandidate>();
 
+  // Roster retrieval is recall-first. Model-produced brand/model/color/type
+  // observations may rank candidates, but they must not delete a canonical SKU
+  // before the independent visual verifier sees it. This prevents one wrong
+  // family guess (for example a sibling model) from making the correct roster
+  // identity unreachable.
   for (const candidate of input.candidates) {
     const { mapping, identity } = candidate;
     if (!mapping.canonical_key || mapping.canonical_key !== identity.canonical_key) continue;
-    if (!objectCompatible(identity, input.description)) continue;
-
-    const expectedBrand = normalizeIdentityText(identity.brand);
-    const observedBrand = normalizeIdentityText(input.description.brand_candidate);
-    if (expectedBrand && observedBrand && expectedBrand !== observedBrand) continue;
-
-    const expectedModel = normalizeIdentityText(identity.model);
-    const observedModel = normalizeIdentityText(input.description.model_candidate);
-    if (expectedModel && observedModel && expectedModel !== observedModel) continue;
-
-    const color = sameColor(identity, input.description);
-    if (color === false) continue;
-
     if (!unique.has(identity.canonical_key)) unique.set(identity.canonical_key, candidate);
   }
 
@@ -557,8 +549,10 @@ export function resolveSameVideoReuse(input: {
   comparisons?: Map<string, ImageComparison>;
 }): SameVideoReuseDecision {
   if (input.comparisons !== undefined) {
-    const vpm = verifiedProductMemoryCandidates(input);
-    const eligible = vpm.length ? vpm : eligibleSameVideoCanonicalCandidates(input);
+    // A previously promoted track is evidence, not an exclusive answer set.
+    // Compare every canonical roster candidate that survived structural validity;
+    // the visual winner decides identity.
+    const eligible = eligibleSameVideoCanonicalCandidates(input);
     return selectSameVideoVisualWinner({ candidates: eligible, comparisons: input.comparisons });
   }
   const model = exactModelSameVideoReuse(input);
