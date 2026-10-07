@@ -480,6 +480,33 @@ export function canonicalVisualExactOfferIds(input: {
   return exact;
 }
 
+/**
+ * Keep the strict visual veto introduced by the roster-outlier gate, but avoid
+ * visually verifying the entire same-video roster when model/OCR evidence has
+ * already nominated one unique candidate. The nomination only narrows the work;
+ * it never grants Exact without the normal image verifier.
+ */
+export function sameVideoVisualVerificationCandidates(input: {
+  description: ObjectDescription;
+  candidates: SameVideoCanonicalCandidate[];
+}): SameVideoCanonicalCandidate[] {
+  const vpm = verifiedProductMemoryCandidates(input);
+  const eligible = vpm.length ? vpm : eligibleSameVideoCanonicalCandidates(input);
+  if (!eligible.length) return [];
+
+  const model = exactModelSameVideoReuse({ description: input.description, candidates: eligible });
+  if (model.mapping && model.canonical_key) {
+    return eligible.filter(({ identity }) => identity.canonical_key === model.canonical_key);
+  }
+
+  const distinctive = distinctiveTextSameVideoReuse({ description: input.description, candidates: eligible });
+  if (distinctive.mapping && distinctive.canonical_key) {
+    return eligible.filter(({ identity }) => identity.canonical_key === distinctive.canonical_key);
+  }
+
+  return eligible;
+}
+
 /** Resolve recorded evidence in one place. Once image verification has been
  * attempted, text/model nomination cannot override rejection or missing images.
  * Omitted comparisons retain the evidence-only shortcut API for legacy callers.
