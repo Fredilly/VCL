@@ -89,27 +89,27 @@ test('adapter: normalizes candidates from SerpAPI shopping results', async () =>
   assert.equal(results[0].image_reference, 'https://img.example.com/1.jpg');
 });
 
-test('adapter: result_class is LIKELY when brand and model match title', async () => {
+test('adapter: search result remains RELATED when brand and model match title', async () => {
   const ctx = makeSerpapiContext();
   loadModule(serpapiSource, ctx);
   const { SerpApiCommerceProvider } = ctx.exports;
 
   const provider = new SerpApiCommerceProvider(apiKey);
   const results = await provider.search(query);
-  assert.equal(results[0].result_class, 'LIKELY');
+  assert.equal(results[0].result_class, 'RELATED');
 });
 
-test('adapter: result_class is SIMILAR when brand/model do not match', async () => {
+test('adapter: search result remains RELATED when brand/model do not match', async () => {
   const ctx = makeSerpapiContext();
   loadModule(serpapiSource, ctx);
   const { SerpApiCommerceProvider } = ctx.exports;
 
   const provider = new SerpApiCommerceProvider(apiKey);
   const results = await provider.search(query);
-  assert.equal(results[1].result_class, 'SIMILAR');
+  assert.equal(results[1].result_class, 'RELATED');
 });
 
-test('adapter: result_class is SIMILAR when query has no brand/model', async () => {
+test('adapter: search result remains RELATED when query has no brand/model', async () => {
   const ctx = makeSerpapiContext();
   loadModule(serpapiSource, ctx);
   const { SerpApiCommerceProvider } = ctx.exports;
@@ -117,7 +117,7 @@ test('adapter: result_class is SIMILAR when query has no brand/model', async () 
   const provider = new SerpApiCommerceProvider(apiKey);
   const results = await provider.search(genericQuery);
   for (const r of results) {
-    assert.equal(r.result_class, 'SIMILAR');
+    assert.equal(r.result_class, 'RELATED');
   }
 });
 
