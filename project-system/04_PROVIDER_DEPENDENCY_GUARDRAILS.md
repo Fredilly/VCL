@@ -185,7 +185,7 @@ Rules:
 
 Rules:
 - no network is mandatory,
-- no provider may influence `EXACT`/`LIKELY` classification,
+- no provider may influence `EXACT`/`SIMILAR`/`RELATED` classification,
 - commercial economics apply only after relevance,
 - record attribution terms and cookie windows separately from product relevance.
 
