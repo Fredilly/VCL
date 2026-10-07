@@ -118,3 +118,121 @@ Candidate windows are priors, never truth. A wrong creator/partner roster item
 must still be rejectable. The frozen gate now includes partner-family confusion
 cases modeled on a floral Neverfull vs plain Neverfull and Trunkie vs Petite
 Malle. No brand- or SKU-specific resolver exceptions are allowed.
+
+## General catalog reliability (version 2)
+
+The 28 frozen evidence cases remain unchanged. CI now also runs every cyclic
+candidate order and reversal against the production resolver. That gate must
+have zero false Exact, perfect existing SKU/NONE/ambiguity outcomes and no
+order-dependent identity. Repeated permutations are not independent quality
+samples. `pnpm benchmark:outliers:order NEW-report.json` saves this evidence.
+
+`pnpm benchmark:outliers:chaos manifest-v2.json adapter.mjs NEW-report.json`
+adds a stricter **real-pixel** protocol for arbitrary SKU rosters. Version 1
+replay remains available for historical comparisons. Version 2 requires:
+
+- Independent, reviewed SKU labels and explicit empty/ambiguous cases.
+- Frozen source **and catalog reference** bytes, checked before inference.
+- Development/holdout splits with no shared source group, catalog, or exact
+  source image hash. Related crops/frames must share a source group; hash checks
+  cannot detect every near-duplicate. Use a reviewer independent of model output.
+- At least three held-out catalogs and three categories; two independent source
+  groups per catalog. No generalization claim from a single luxury bag video.
+- Each catalog, category and roster-size slice (1, 2–16, 17–64, 65+) has at least
+  five positive, five outside-roster and two ambiguous observations. Also test
+  an empty roster. These are provisional minimums, not statistical proof.
+- Every scenario in `chaosScenarios`: clean, family lookalikes, visible variants,
+  unobservable variants, mixed categories, multiple objects, misleading text,
+  wrong roster, missing references, duplicate offers, stale memory, scene cuts,
+  occlusion, and outside-roster selections.
+
+A representative case (hash strings below are placeholders, not runnable data):
+
+```json
+{
+  "version": 2,
+  "cases": [{
+    "id": "internal-case-id",
+    "scenario": "family_lookalike",
+    "truth": "IN_ROSTER",
+    "expected_class": "catalog:sku-a",
+    "catalog_id": "heldout-catalog-1",
+    "source_group": "independent-video-1",
+    "category": "bags",
+    "split": "holdout",
+    "reviewed_by": "reviewer-id",
+    "roster": [{
+      "canonical_key": "catalog:sku-a",
+      "title": "Catalog title",
+      "attributes": {"brand": "Brand", "size": "Small"},
+      "offers": [{"merchant": "Merchant", "title": "Listing title"}],
+      "references": [{"path": "catalog/a.png", "sha256": "64 lowercase hex characters"}]
+    }],
+    "input": {
+      "click": {"x": 0.5, "y": 0.5},
+      "context": {"video_title": "Original title", "spoken_text": "Original speech"},
+      "frames": [{"path": "frames/selected.png", "sha256": "64 lowercase hex characters", "timestamp_ms": 4500}]
+    }
+  }]
+}
+```
+
+Use separate canonical keys for distinct SKUs. Group multiple merchant offers
+under a single SKU. A family label cannot substitute for variant truth. If the
+clicked image cannot distinguish size/edition and no reliable selected-object
+evidence establishes it, label AMBIGUOUS, even if a reviewer knows the SKU.
+`references: []` explicitly represents unavailable reference imagery. Never
+fabricate comparisons or use merchant titles as ground truth. Wrong family
+names and nearby labels belong in input evidence when actually observed.
+
+Adapters export `predict(input, {signal})`, honoring cancellation. Input includes
+image bytes, click, allowlisted context/catalog fields and NONE/UNKNOWN; it
+excludes case IDs, scenario, split, reviewer, expected answers and file paths.
+Use a stateless request or reset case-specific caches between calls. Exercise
+production retrieval, verification and resolution, including its bounded
+candidate shortlist. Do not return the full supplied roster as a fabricated
+retrieval trace. Catalog keys/titles themselves must not encode evaluation truth.
+
+Successful output:
+
+```js
+return {
+  status: 'OK', predicted_class: 'catalog:sku-a', result_class: 'EXACT',
+  retrieved_keys: ['catalog:sku-b', 'catalog:sku-a'], // actual pre-verification order
+  verified_keys: ['catalog:sku-b', 'catalog:sku-a'], // actually verified candidates
+  provider_calls: 2, cost_usd: 0.002 // measured example shape, not a cost estimate
+};
+```
+
+Use NONE/UNKNOWN with a null class, or explicit PROVIDER_BLOCKED/SYSTEM_FAIL.
+Invalid traces count as SYSTEM_FAIL. Exact requires the key to appear in both
+retrieval and verification traces. Trace validation establishes consistency,
+not honesty; review the adapter and record its production revision, provider,
+model and settings alongside the run. The report pins manifest and adapter-file
+hashes; the adapter hash alone does not pin imported dependencies.
+
+The report separates recall@1/@5 and reciprocal rank from final SKU accuracy,
+Exact precision, NONE recall and ambiguity abstention. It identifies retrieval
+misses versus verification/ranking misses, reports per-catalog/category/size
+slices, and measures wall time, provider calls and cost. The runner executes up
+to three unique roster orders, including answer-space order. Any inconsistent
+identity or class fails. Timeout aborts the run and prevents further calls;
+provider adapters must enforce their own per-request spending bounds. Up to
+three orders means up to three times the replay cost. No live inference in CI.
+
+Promotion requires zero false Exact across all cases/orders, >=95% aggregate
+and per-slice accuracy and NONE recall, >=95% recall@5, full ambiguity abstention,
+complete coverage, no provider/system failures, and no failing scenario. At
+least 60 independent baseline Exact observations are required; permutations
+never inflate that count. The zero-error 95% upper bound is reported under an
+independent-trials assumption, which correlated frames violate. Even 60 correct
+Exact observations only bound error near 4.9%, not zero production risk.
+
+**Current evidence status:** no reviewed multi-catalog real-pixel corpus or
+production end-to-end adapter is bundled. Version 2 cannot honestly report a
+promotion pass yet. Synthetic tests exercise the evaluator's failure detection;
+they are not recognition benchmarks. Existing CI success certifies deterministic
+policy behavior only. Freeze reviewed captures and reference images in approved
+private storage, connect a production adapter, and run both this protocol and
+Golden before claiming broader retrieval reliability. Harness-only changes do
+not change production recognition, model thresholds or the original fixtures.
