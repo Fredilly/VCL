@@ -126,7 +126,7 @@ age_group is adult/child/null from explicit product designation only, never infe
 brand/model must have readable logo/text or explicit candidate metadata. Do not guess from style, search query, the source description, or video context. Never transfer source brand to candidate.
 matching_details must list up to 3 specific shared visual construction/marking/silhouette details, not generic category/color/brand matches.
 similarity is visual agreement of the actual selected object and candidate, independent of price/merchant/search rank. confidence measures how well the images support that comparison.
-Do not assign EXACT/LIKELY/SIMILAR; the application applies those thresholds. Do not claim identical SKU from image similarity.`;
+Do not assign EXACT/SIMILAR/RELATED; the application applies those decisions. Do not claim identical SKU from image similarity.`;
 
 const observationSchema = { type: 'OBJECT', properties: {
   value: { type: 'STRING', nullable: true }, confidence: { type: 'NUMBER' }, basis: { type: 'STRING', enum: ['image', 'metadata'] },
