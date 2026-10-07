@@ -50,12 +50,17 @@ jobs:
       - name: Roster outlier trust gate
         run: node tests/benchmark/roster-outliers/run.mjs roster-outlier-report.json
 
+      - name: Roster order stress gate
+        run: node tests/benchmark/roster-outliers/order-stress.mjs roster-order-report.json
+
       - name: Upload roster outlier evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: roster-outlier-report
-          path: roster-outlier-report.json
+          path: |
+            roster-outlier-report.json
+            roster-order-report.json
           if-no-files-found: warn
 
       - name: Deterministic tests

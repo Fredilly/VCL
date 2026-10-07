@@ -19,7 +19,9 @@
     "dev:auto": "node tools/dev-auto-sync.mjs",
     "setup:dev-auto": "bash tools/install-scoop-autosync-macos.sh",
     "benchmark:outliers": "node tests/benchmark/roster-outliers/run.mjs",
-    "benchmark:outliers:replay": "node tests/benchmark/roster-outliers/replay.mjs"
+    "benchmark:outliers:replay": "node tests/benchmark/roster-outliers/replay.mjs",
+    "benchmark:outliers:chaos": "node tests/benchmark/roster-outliers/chaos-replay.mjs",
+    "benchmark:outliers:order": "node tests/benchmark/roster-outliers/order-stress.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.131.0"

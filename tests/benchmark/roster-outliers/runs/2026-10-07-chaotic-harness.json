@@ -1,0 +1,264 @@
+{
+  "mode": "harness_validation_not_pixel_retrieval_accuracy",
+  "base_commit": "858f19ab13dc200a9b704742d99cf4d883ab9e5d",
+  "frozen_gate": {
+    "observations": 28,
+    "metrics": {
+      "observations": 28,
+      "top1_accuracy": 1,
+      "in_roster_accuracy": 1,
+      "false_exact": 0,
+      "false_exact_ids": [],
+      "none_recall": 1,
+      "none_precision": 0.38461538461538464,
+      "ambiguity_abstention": 1,
+      "exact_coverage": 0.5357142857142857,
+      "false_assignment": 0,
+      "provider_blocked": 0,
+      "system_failures": 0,
+      "by_scenario": {
+        "single_sku": {
+          "cases": 2,
+          "false_exact": 0,
+          "correct": 2
+        },
+        "multi_sku": {
+          "cases": 2,
+          "false_exact": 0,
+          "correct": 2
+        },
+        "colorways": {
+          "cases": 2,
+          "false_exact": 0,
+          "correct": 2
+        },
+        "near_size": {
+          "cases": 2,
+          "false_exact": 0,
+          "correct": 2
+        },
+        "comparison_outside_roster": {
+          "cases": 1,
+          "false_exact": 0,
+          "correct": 1
+        },
+        "near_trim": {
+          "cases": 1,
+          "false_exact": 0,
+          "correct": 1
+        },
+        "near_season": {
+          "cases": 1,
+          "false_exact": 0,
+          "correct": 1
+        },
+        "old_new": {
+          "cases": 2,
+          "false_exact": 0,
+          "correct": 2
+        },
+        "reversed": {
+          "cases": 1,
+          "false_exact": 0,
+          "correct": 1
+        },
+        "worn": {
+          "cases": 1,
+          "false_exact": 0,
+          "correct": 1
+        },
+        "folded": {
+          "cases": 1,
+          "false_exact": 0,
+          "correct": 1
+        },
+        "partially_hidden": {
+          "cases": 1,
+          "false_exact": 0,
+          "correct": 1
+        },
+        "poor_lighting": {
+          "cases": 2,
+          "false_exact": 0,
+          "correct": 2
+        },
+        "inside_out": {
+          "cases": 1,
+          "false_exact": 0,
+          "correct": 1
+        },
+        "screen_vs_speech": {
+          "cases": 1,
+          "false_exact": 0,
+          "correct": 1
+        },
+        "nearby_ocr": {
+          "cases": 1,
+          "false_exact": 0,
+          "correct": 1
+        },
+        "wrong_roster": {
+          "cases": 1,
+          "false_exact": 0,
+          "correct": 1
+        },
+        "overlapping_accessories": {
+          "cases": 2,
+          "false_exact": 0,
+          "correct": 2
+        },
+        "alma_pochette": {
+          "cases": 1,
+          "false_exact": 0,
+          "correct": 1
+        },
+        "partner_roster_variant": {
+          "cases": 2,
+          "false_exact": 0,
+          "correct": 2
+        }
+      }
+    },
+    "gate": {
+      "passed": true,
+      "failures": []
+    }
+  },
+  "order_stress": {
+    "unique_cases": 28,
+    "observations": 66,
+    "metrics": {
+      "observations": 66,
+      "top1_accuracy": 1,
+      "in_roster_accuracy": 1,
+      "false_exact": 0,
+      "false_exact_ids": [],
+      "none_recall": 1,
+      "none_precision": 0.36,
+      "ambiguity_abstention": 1,
+      "exact_coverage": 0.6212121212121212,
+      "false_assignment": 0,
+      "provider_blocked": 0,
+      "system_failures": 0,
+      "by_scenario": {
+        "single_sku": {
+          "cases": 2,
+          "false_exact": 0,
+          "correct": 2
+        },
+        "multi_sku": {
+          "cases": 10,
+          "false_exact": 0,
+          "correct": 10
+        },
+        "colorways": {
+          "cases": 7,
+          "false_exact": 0,
+          "correct": 7
+        },
+        "near_size": {
+          "cases": 7,
+          "false_exact": 0,
+          "correct": 7
+        },
+        "comparison_outside_roster": {
+          "cases": 5,
+          "false_exact": 0,
+          "correct": 5
+        },
+        "near_trim": {
+          "cases": 2,
+          "false_exact": 0,
+          "correct": 2
+        },
+        "near_season": {
+          "cases": 2,
+          "false_exact": 0,
+          "correct": 2
+        },
+        "old_new": {
+          "cases": 4,
+          "false_exact": 0,
+          "correct": 4
+        },
+        "reversed": {
+          "cases": 2,
+          "false_exact": 0,
+          "correct": 2
+        },
+        "worn": {
+          "cases": 2,
+          "false_exact": 0,
+          "correct": 2
+        },
+        "folded": {
+          "cases": 2,
+          "false_exact": 0,
+          "correct": 2
+        },
+        "partially_hidden": {
+          "cases": 2,
+          "false_exact": 0,
+          "correct": 2
+        },
+        "poor_lighting": {
+          "cases": 4,
+          "false_exact": 0,
+          "correct": 4
+        },
+        "inside_out": {
+          "cases": 2,
+          "false_exact": 0,
+          "correct": 2
+        },
+        "screen_vs_speech": {
+          "cases": 2,
+          "false_exact": 0,
+          "correct": 2
+        },
+        "nearby_ocr": {
+          "cases": 1,
+          "false_exact": 0,
+          "correct": 1
+        },
+        "wrong_roster": {
+          "cases": 1,
+          "false_exact": 0,
+          "correct": 1
+        },
+        "overlapping_accessories": {
+          "cases": 4,
+          "false_exact": 0,
+          "correct": 4
+        },
+        "alma_pochette": {
+          "cases": 1,
+          "false_exact": 0,
+          "correct": 1
+        },
+        "partner_roster_variant": {
+          "cases": 4,
+          "false_exact": 0,
+          "correct": 4
+        }
+      }
+    },
+    "gate": {
+      "passed": true,
+      "failures": []
+    },
+    "unstable_case_ids": []
+  },
+  "deterministic_tests": {
+    "passed": 670,
+    "failed": 0
+  },
+  "real_pixel_promotion": {
+    "status": "NOT_RUN",
+    "reason": "Reviewed held-out multi-catalog image corpus and production adapter are not connected; no recognition accuracy claimed."
+  },
+  "golden": {
+    "status": "NOT_RUN",
+    "reason": "Harness-only change; no runtime capture, perception, retrieval, identity or commerce code changed. Live Golden remains required before product-quality promotion."
+  }
+}
