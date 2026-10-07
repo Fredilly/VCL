@@ -217,7 +217,7 @@ test('eBay adapter: normalizes candidates and never emits EXACT', async () => {
   const provider = new EbayCommerceProvider(makeMockAuth());
   const [candidate] = await provider.search(query);
   assert.equal(candidate.title, 'Nike Air Max 90 White');
-  assert.equal(candidate.result_class, 'LIKELY');
+  assert.equal(candidate.result_class, 'RELATED');
   assert.notEqual(candidate.result_class, 'EXACT');
   assert.equal(candidate.price, '99.00');
   assert.equal(candidate.currency, 'USD');
@@ -315,7 +315,7 @@ test('eBay adapter: items without title are filtered out', async () => {
   assert.equal(results[0].title, 'Valid Item');
 });
 
-test('eBay adapter: result_class is SIMILAR when brand/model not in title', async () => {
+test('eBay adapter: result_class is RELATED before verification', async () => {
   const ctx = makeEbayContext(makeMockAuth(), {
     fetch: async () => Response.json({
       itemSummaries: [{ itemId: '1', title: 'Generic Running Shoe', price: { value: '49.99', currency: 'USD' } }],
@@ -326,10 +326,10 @@ test('eBay adapter: result_class is SIMILAR when brand/model not in title', asyn
 
   const provider = new EbayCommerceProvider(makeMockAuth());
   const [result] = await provider.search(query);
-  assert.equal(result.result_class, 'SIMILAR');
+  assert.equal(result.result_class, 'RELATED');
 });
 
-test('eBay adapter: result_class is LIKELY when both brand and model in title', async () => {
+test('eBay adapter: title overlap remains RELATED before verification', async () => {
   const ctx = makeEbayContext(makeMockAuth(), {
     fetch: async () => Response.json({
       itemSummaries: [{ itemId: '1', title: 'Nike Air Max 90 Mens Sneakers', price: { value: '120.00', currency: 'USD' } }],
@@ -340,7 +340,7 @@ test('eBay adapter: result_class is LIKELY when both brand and model in title', 
 
   const provider = new EbayCommerceProvider(makeMockAuth());
   const [result] = await provider.search(query);
-  assert.equal(result.result_class, 'LIKELY');
+  assert.equal(result.result_class, 'RELATED');
 });
 
 test('eBay adapter: missing price/currency defaults to null', async () => {
@@ -453,7 +453,7 @@ test('eBay adapter: searchByImage normalizes candidates from image search', asyn
   assert.equal(result.price, '150.00');
   assert.equal(result.currency, 'USD');
   assert.equal(result.provenance, 'ebay:browse');
-  assert.equal(result.result_class, 'LIKELY');
+  assert.equal(result.result_class, 'RELATED');
 });
 
 test('eBay adapter: searchByImage falls back to keyword on Sandbox error', async () => {
