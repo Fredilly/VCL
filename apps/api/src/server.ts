@@ -31,7 +31,7 @@ import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerc
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, parseVerifiedProductMappings, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { backfillLegacyAdminCanonicalMappings, consolidateCanonicalProducts, durableCanonicalCandidates, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
-import { eligibleSameVideoCanonicalCandidates, resolveSameVideoReuse, verifiedProductMemoryCandidates, identityWithTrustedVpmObservations, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
+import { eligibleSameVideoCanonicalCandidates, resolveSameVideoReuse, verifiedProductMemoryCandidates, identityWithTrustedVpmObservations, rankSameVideoRosterCandidates, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
@@ -797,7 +797,10 @@ async function confirmSameVideoReuseWithImage(
   const vpm = verifiedProductMemoryCandidates({ description, candidates });
   // Explicit VPM tracks are the authoritative memory set. Historical canonical
   // mappings remain a legacy fallback only when this video has no compatible VPM.
-  const visualCandidates = vpm.length ? vpm : eligible;
+  const visualCandidates = rankSameVideoRosterCandidates({
+    description,
+    candidates: vpm.length ? vpm : eligible,
+  });
   if (!visualCandidates.length || !sourceImage) {
     return { ...empty, decision: { ...noDecision, reason: visualCandidates.length ? 'visual_unavailable' : 'no_candidate' } };
   }
@@ -2347,8 +2350,11 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       const fallbackDescription = partnerCanonicalRows.length ? rosterFallbackDescription(description) : description;
       const retrievalDescription = partnerCanonicalRows.length ? rosterFallbackRetrievalDescription(description) : description;
       const baseQueries = buildProductQueryVariants(retrievalDescription, context, visibleTextQueryV2);
-      // Catalog titles nominate purchase candidates; they never change visual identity evidence.
-      const rosterQueries = partnerCanonicalRows.slice(0, 4).map(row => ({
+      // Rank the entire roster independent of partner input order, then spend the
+      // bounded open-world query budget on the strongest roster hypotheses.
+      // These queries nominate candidates only and never assert identity.
+      const rankedRosterRows = rankSameVideoRosterCandidates({ description, candidates: partnerCanonicalRows });
+      const rosterQueries = rankedRosterRows.slice(0, 4).map(row => ({
         ...baseQueries[0], query: row.identity.title, model: null,
       }));
       const queries = [...rosterQueries, ...baseQueries].filter((query, index, all) =>
