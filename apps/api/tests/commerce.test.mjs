@@ -33,7 +33,7 @@ test('verification limits correct type without brand to RELATED', () => {
 });
 
 test('verification accepts strong brand and model agreement as SIMILAR', () => {
-  assert.equal(verifyProductCandidate(description({ model_candidate: 'Half-Zip 101' }), candidate('BOSS Half-Zip 101'))?.result_class, 'LIKELY');
+  assert.equal(verifyProductCandidate(description({ model_candidate: 'Half-Zip 101' }), candidate('BOSS Half-Zip 101'))?.result_class, 'SIMILAR');
 });
 
 test('verification rejects weak unrelated candidates and never emits EXACT', () => {
