@@ -4,27 +4,66 @@ import { loadModule } from './helpers/load-ts.mjs';
 
 const fallback = loadModule(new URL('../src/roster-fallback.ts', import.meta.url).pathname);
 const commerce = loadModule(new URL('../src/commerce.ts', import.meta.url).pathname);
-const seeds = loadModule(new URL('../src/alpha-verified-product-seeds.ts', import.meta.url).pathname);
+const reuse = loadModule(new URL('../src/same-video-verified-reuse.ts', import.meta.url).pathname);
 
 const description = (overrides = {}) => ({
   category: 'Bags',
   subcategory: 'Vanity Case',
-  brand_candidate: 'Louis Vuitton',
+  brand_candidate: 'Acme',
   model_candidate: 'Cannes',
   color: 'White',
   material: 'Leather',
   style_attributes: ['Monogram', 'Structured'],
   visible_text: [],
   contextual_text: [],
-  logos_markings: ['LV monogram pattern', 'LV logo on lock'],
-  distinctive_features: ['All-over monogram pattern in light blue'],
+  logos_markings: ['Acme monogram pattern'],
+  distinctive_features: ['light blue monogram', 'front padlock'],
   hardware_details: ['Gold-tone padlock'],
-  shape_silhouette: [],
-  search_terms: ['Louis Vuitton Cannes Vanity Case', 'White LV Monogram Vanity Case'],
+  shape_silhouette: ['structured vanity case'],
+  search_terms: ['Acme Cannes Vanity Case'],
   confidence: 0.9,
   identity_confidence: 0.9,
   evidence_confidence: { model_candidate: 0.8, contextual_text: 0, visible_text: 0 },
   ...overrides,
+});
+
+const rosterCandidate = ({ key, title, family, model = null, color = null, features = [], shape = [] }) => ({
+  mapping: {
+    platform: 'youtube',
+    content_ref: 'test-video',
+    scope: 'entire_video',
+    object_type: 'bag',
+    brand: 'Acme',
+    product_id: key,
+    variant_id: key,
+    family,
+    title,
+    destination: `https://merchant.test/${key}`,
+    provenance: 'admin_verified',
+    canonical_key: key,
+    track_id: key,
+  },
+  identity: {
+    canonical_key: key,
+    title,
+    brand: 'Acme',
+    model,
+    variant_id: key,
+    family,
+    object_type: 'bag',
+    visible_text: [],
+    color,
+    material: 'leather',
+    style_attributes: [],
+    logos_markings: ['Acme monogram'],
+    distinctive_features: features,
+    shape_silhouette: shape,
+    normalized_fingerprint: key,
+    relationship: 'EXACT',
+    provenance: 'admin_verified',
+    verified_at: '2026-10-07T00:00:00Z',
+    merchant_refs: [],
+  },
 });
 
 test('roster miss separates retrieval hypothesis from identity proof', () => {
@@ -42,26 +81,49 @@ test('roster miss separates retrieval hypothesis from identity proof', () => {
   assert.ok(queries.every((row) => !/^bag White$/i.test(row.query)));
 });
 
-test('red Speedy retrieval keeps the specific subtype and family hypothesis', () => {
+test('chaotic roster ranking is evidence-driven and independent of input order', () => {
   const source = description({
     subcategory: 'Handbag',
-    model_candidate: 'Speedy',
+    model_candidate: 'Carry 40',
     color: 'Red',
-    material: 'Canvas',
-    distinctive_features: ['Red monogram canvas', 'Tan leather luggage tag'],
-    hardware_details: ['Padlock'],
-    search_terms: ['Louis Vuitton Speedy Red Monogram Handbag'],
+    distinctive_features: ['red monogram', 'tan luggage tag', 'double top handles'],
+    shape_silhouette: ['duffle handbag'],
+    search_terms: ['Acme Carry 40 red monogram handbag'],
   });
-  const retrieval = fallback.rosterFallbackRetrievalDescription(source);
-  const queries = commerce.buildProductQueryVariants(retrieval);
-  assert.ok(queries.some((row) => /Louis Vuitton.*Speedy/i.test(row.query)));
-  assert.ok(queries.some((row) => /Handbag/i.test(row.query)));
+  const correct = rosterCandidate({
+    key: 'sku-red-carry-40',
+    title: 'Acme Carry 40 Red Monogram Handbag',
+    family: 'Carry 40',
+    color: 'red',
+    features: ['red monogram', 'tan luggage tag', 'double top handles'],
+    shape: ['duffle handbag'],
+  });
+  const sibling = rosterCandidate({
+    key: 'sku-brown-carry-25',
+    title: 'Acme Carry 25 Brown Monogram Handbag',
+    family: 'Carry 25',
+    color: 'brown',
+    features: ['brown monogram', 'double top handles'],
+    shape: ['duffle handbag'],
+  });
+  const other = rosterCandidate({
+    key: 'sku-trunk',
+    title: 'Acme Petite Trunk Brown Bag',
+    family: 'Petite Trunk',
+    color: 'brown',
+    features: ['corner protectors', 'box clasp'],
+    shape: ['flat trunk bag'],
+  });
+
+  const first = reuse.rankSameVideoRosterCandidates({ description: source, candidates: [other, sibling, correct] });
+  const second = reuse.rankSameVideoRosterCandidates({ description: source, candidates: [correct, other, sibling] });
+  assert.equal(first[0].identity.canonical_key, correct.identity.canonical_key);
+  assert.deepEqual(first.map((row) => row.identity.canonical_key), second.map((row) => row.identity.canonical_key));
 });
 
-test('Handbagholic roster includes the Milky White vanity and supplied red P9 variant at their frames', () => {
-  const white = seeds.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 739808);
-  assert.ok(white.some((row) => row.mapping.product_id === 'M27744'));
-
-  const red = seeds.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 836786);
-  assert.ok(red.some((row) => row.mapping.product_id === 'FP-1961012'));
+test('specific visual subtype survives broad commerce query construction', () => {
+  const retrieval = fallback.rosterFallbackRetrievalDescription(description({ model_candidate: null }));
+  const queries = commerce.buildProductQueryVariants(retrieval);
+  assert.ok(queries.some((row) => /Vanity Case/i.test(row.query)));
+  assert.ok(queries.every((row) => !/^bag White$/i.test(row.query)));
 });
