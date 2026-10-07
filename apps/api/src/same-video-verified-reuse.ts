@@ -308,7 +308,26 @@ export function verifiedProductMemoryCandidates(input: {
     if (!vpmTrackCompatible(identity, input.description)) continue;
     if (!unique.has(identity.canonical_key)) unique.set(identity.canonical_key, candidate);
   }
-  return [...unique.values()];
+  const candidates = [...unique.values()];
+
+  // A model-family hypothesis can cheaply nominate one roster entry before the
+  // expensive image verifier. This is only a work-bounding hint: the nominated
+  // candidate must still pass strict visual verification before Exact.
+  const observedModel = normalizeIdentityText(input.description.model_candidate);
+  if (observedModel && observedModel.length >= 4 && candidates.length > 1) {
+    const familyMatches = candidates.filter(({ identity }) => {
+      const model = normalizeIdentityText(identity.model);
+      const title = normalizeIdentityText(identity.title);
+      return model === observedModel
+        || title === observedModel
+        || title.startsWith(`${observedModel} `)
+        || title.endsWith(` ${observedModel}`)
+        || title.includes(` ${observedModel} `);
+    });
+    if (familyMatches.length === 1) return familyMatches;
+  }
+
+  return candidates;
 }
 
 export function eligibleSameVideoCanonicalCandidates(input: {
