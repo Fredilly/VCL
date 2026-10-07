@@ -83,11 +83,11 @@ for (const environment of ['sandbox', 'production']) test(`${environment} creden
   assert.equal(body.products[0].result_class, 'SIMILAR', 'brand-only tee fixture has no readable model identity');
 });
 
-test('readable source model plus independently compared candidate pixels retain LIKELY through the HTTP route', async () => {
+test('readable source model plus independently compared distinctive pixels can earn EXACT through the HTTP route', async () => {
   const { response, body } = await resolve({ readableModel: true });
   assert.equal(response.status, 200);
   assert.equal(body.products.length, 1);
-  assert.equal(body.products[0].result_class, 'LIKELY');
+  assert.equal(body.products[0].result_class, 'EXACT');
   assert.equal(body.products[0].provenance, 'ebay:browse');
 });
 
@@ -103,7 +103,7 @@ for (const contradiction of [['brand', 'Adidas'], ['gender', 'women'], ['color',
   });
 }
 
-test('Production eBay metadata-only results retain provenance but cannot become LIKELY or EXACT', async () => {
+test('Production eBay metadata-only results retain provenance but cannot become EXACT', async () => {
   const { body } = await resolve({ withImage: false });
   assert.equal(body.products.length, 1);
   assert.equal(body.products[0].provider, 'ebay');
