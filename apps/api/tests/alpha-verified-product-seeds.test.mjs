@@ -283,3 +283,81 @@ test('current LV review video inherits the verified roster as candidates without
   assert.deepEqual(ids, new Set(['M3A350', 'N48280', 'N40952', 'N48279', 'M2A904', 'M3A947']));
   assert.ok(rows.every(({ mapping }) => mapping.content_ref === 'KbWTwHNR0_E'));
 });
+
+
+test('Handbagholic partner roster exposes ten creator-verified LV candidates for the video', () => {
+  const rows = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo');
+  const ids = new Set(rows.map(({ mapping }) => mapping.product_id));
+  assert.deepEqual(ids, new Set([
+    'FP-1977706',
+    'M28392',
+    'FP-1925620',
+    'FP-1981368',
+    'FP-1983129',
+    'M2A078',
+    'M14526',
+    'POSH-6a3f49685919e011180b400c',
+    'M46784',
+    'FP-1985008',
+  ]));
+  assert.ok(rows.every(({ mapping }) => mapping.scope === 'entire_video'));
+  assert.ok(rows.every(({ mapping }) => mapping.provenance === 'creator_verified'));
+  assert.ok(rows.every(({ mapping, identity }) => mapping.track_id === identity.canonical_key));
+});
+
+test('Handbagholic roster does not turn a generic Louis Vuitton bag description into an automatic verified hit', () => {
+  const hit = mappingMod.lookupVerifiedProductMapping({
+    mappings: seedMod.ALPHA_VERIFIED_PRODUCT_SEEDS,
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: 'n9u8ynhBdSo',
+    timestampMs: 500000,
+    description: {
+      category: 'accessories',
+      subcategory: 'bag',
+      brand_candidate: 'Louis Vuitton',
+      model_candidate: null,
+      color: 'brown',
+      material: 'coated canvas',
+      style_attributes: ['monogram canvas'],
+      visible_text: [],
+      logos_markings: ['Louis Vuitton monogram'],
+      distinctive_features: [],
+      hardware_details: [],
+      shape_silhouette: ['bag'],
+      search_terms: ['Louis Vuitton monogram bag'],
+      confidence: 0.95,
+      identity_confidence: 0.2,
+    },
+  });
+  assert.equal(hit, null);
+});
+
+test('Handbagholic High Rise Bumbag can resolve from explicit model evidence', () => {
+  const hit = mappingMod.lookupVerifiedProductMapping({
+    mappings: seedMod.ALPHA_VERIFIED_PRODUCT_SEEDS,
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: 'n9u8ynhBdSo',
+    timestampMs: 760000,
+    description: {
+      category: 'accessories',
+      subcategory: 'bag',
+      brand_candidate: 'Louis Vuitton',
+      model_candidate: 'High Rise Bumbag M46784',
+      color: 'brown',
+      material: 'coated canvas',
+      style_attributes: ['monogram canvas', 'belt bag'],
+      visible_text: [],
+      logos_markings: ['Louis Vuitton monogram'],
+      distinctive_features: ['front zipper', 'adjustable canvas strap'],
+      hardware_details: [],
+      shape_silhouette: ['bumbag'],
+      search_terms: ['Louis Vuitton High Rise Bumbag M46784'],
+      confidence: 0.99,
+      identity_confidence: 0.98,
+    },
+  });
+  assert.equal(hit?.product_id, 'M46784');
+  assert.equal(hit?.provenance, 'creator_verified');
+});
