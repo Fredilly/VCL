@@ -1,0 +1,299 @@
+{
+  "source": "network-log(20261007-103415).har",
+  "mode": "recorded_production_evidence_not_new_code_replay",
+  "selections": [
+    {
+      "har_entry_index": 28,
+      "timestamp_ms": 351840,
+      "source_crop_sha256": "c7d66925dd54b4258fc24743b6e08b7d296520cb0ae6c7271f24a71e2477b9e2",
+      "description": {
+        "evidence_confidence": {
+          "category": 0.9,
+          "subcategory": 0.8,
+          "brand_candidate": 0.9,
+          "model_candidate": 0.7,
+          "color": 0.9,
+          "material": 0.8,
+          "style_attributes": 0.9,
+          "visible_text": 0,
+          "contextual_text": 0.9,
+          "logos_markings": 0.9,
+          "distinctive_features": 0.9,
+          "hardware_details": 0,
+          "shape_silhouette": 0.8,
+          "search_terms": 0.9,
+          "confidence": 0.9,
+          "identity_confidence": 0.9
+        },
+        "category": "Bags",
+        "subcategory": "Shoulder Bag",
+        "brand_candidate": "Louis Vuitton",
+        "model_candidate": "Noe",
+        "color": "Brown",
+        "material": "Canvas",
+        "style_attributes": [
+          "Monogram"
+        ],
+        "visible_text": [],
+        "logos_markings": [
+          "LV monogram pattern",
+          "LV logo on tag"
+        ],
+        "distinctive_features": [
+          "Drawstring closure",
+          "Leather trim",
+          "Detachable leather tag"
+        ],
+        "hardware_details": [],
+        "shape_silhouette": [],
+        "search_terms": [
+          "Louis Vuitton Noe shoulder bag",
+          "Monogram canvas shoulder bag"
+        ],
+        "confidence": 0.9,
+        "identity_confidence": 0.9
+      },
+      "observed_mapping": {
+        "hit": false,
+        "reuse": "cross_video",
+        "confidence": 0,
+        "reason": "visual_rejected",
+        "same_video_reason": "visual_rejected",
+        "cross_video_reason": "visual_rejected",
+        "visual_similarity": 0.6,
+        "visual_confidence": 0.8,
+        "candidates_compared": 15,
+        "visual_failures": 0
+      },
+      "observed_top_results": [
+        {
+          "title": "Authentic - LOUIS VUITTON LV Monogram Noe Shoulder Bag Brown",
+          "result_class": "SIMILAR"
+        }
+      ]
+    },
+    {
+      "har_entry_index": 43,
+      "timestamp_ms": 538772,
+      "source_crop_sha256": "9c7adb47920ab73114a5687e03f0f477c63cbab93a9a6d62035c9162748c00b2",
+      "description": {
+        "evidence_confidence": {
+          "category": 0.9,
+          "subcategory": 0.8,
+          "brand_candidate": 0.8,
+          "model_candidate": 0.7,
+          "color": 0.9,
+          "material": 0.9,
+          "style_attributes": 0.8,
+          "visible_text": 0,
+          "contextual_text": 0,
+          "logos_markings": 0.8,
+          "distinctive_features": 0.9,
+          "hardware_details": 0.8,
+          "shape_silhouette": 0.8,
+          "search_terms": 0.9
+        },
+        "category": "Bags",
+        "subcategory": "Shoulder Bag",
+        "brand_candidate": "Louis Vuitton",
+        "model_candidate": "Capucines",
+        "color": "Tan",
+        "material": "Leather",
+        "style_attributes": [
+          "Chain strap",
+          "Top handle"
+        ],
+        "visible_text": [],
+        "logos_markings": [
+          "LV logo"
+        ],
+        "distinctive_features": [
+          "Textured leather",
+          "Braided chain strap"
+        ],
+        "hardware_details": [
+          "Gold-tone hardware",
+          "Clasp closure"
+        ],
+        "shape_silhouette": [],
+        "search_terms": [
+          "Louis Vuitton Capucines shoulder bag",
+          "Tan leather hobo bag",
+          "LV chain strap bag"
+        ],
+        "confidence": 0.9,
+        "identity_confidence": 0.8
+      },
+      "observed_mapping": {
+        "hit": false,
+        "reuse": "same_video",
+        "confidence": 0,
+        "reason": "visual_rejected",
+        "same_video_reason": "visual_rejected",
+        "cross_video_reason": "no_candidate",
+        "visual_similarity": 0.2,
+        "visual_confidence": 0.7,
+        "candidates_compared": 14,
+        "visual_failures": 0
+      },
+      "observed_top_results": [
+        {
+          "title": "AUTH LOUIS VUITTON LV Capucines MM Beige Leather Top Handle Bag.",
+          "result_class": "SIMILAR"
+        }
+      ]
+    },
+    {
+      "har_entry_index": 48,
+      "timestamp_ms": 572838,
+      "source_crop_sha256": "b22cf9fc7eb6d0425c92313b4e9296ed16c2e6ccd6a8517c12e1612b409b7c87",
+      "description": {
+        "evidence_confidence": {
+          "category": 0.9,
+          "subcategory": 0.8,
+          "brand_candidate": 0.9,
+          "model_candidate": 0.8,
+          "color": 0.9,
+          "material": 0.9,
+          "style_attributes": 0.9,
+          "visible_text": 0,
+          "contextual_text": 0,
+          "logos_markings": 0.9,
+          "distinctive_features": 0.8,
+          "hardware_details": 0.8,
+          "shape_silhouette": 0.8,
+          "search_terms": 0.9,
+          "confidence": 0.9,
+          "identity_confidence": 0.9
+        },
+        "category": "Bags",
+        "subcategory": "Shoulder Bag",
+        "brand_candidate": "Louis Vuitton",
+        "model_candidate": "Capucines",
+        "color": "Brown",
+        "material": "Canvas",
+        "style_attributes": [
+          "Monogram"
+        ],
+        "visible_text": [],
+        "logos_markings": [
+          "LV Monogram"
+        ],
+        "distinctive_features": [
+          "Braided chain detail"
+        ],
+        "hardware_details": [
+          "Gold-tone hardware",
+          "Chain strap",
+          "Leather strap"
+        ],
+        "shape_silhouette": [],
+        "search_terms": [
+          "Louis Vuitton Capucines Shoulder Bag",
+          "LV Monogram Hobo Bag"
+        ],
+        "confidence": 0.9,
+        "identity_confidence": 0.9
+      },
+      "observed_mapping": {
+        "hit": false,
+        "reuse": "cross_video",
+        "confidence": 0,
+        "reason": "visual_rejected",
+        "same_video_reason": "visual_rejected",
+        "cross_video_reason": "visual_rejected",
+        "visual_similarity": 0.3,
+        "visual_confidence": 0.7,
+        "candidates_compared": 15,
+        "visual_failures": 0
+      },
+      "observed_top_results": [
+        {
+          "title": "Coach CV933 Brown Teri Shoulder Bag In Signature Canvas Outlet Free Shipping",
+          "result_class": "SIMILAR"
+        }
+      ]
+    },
+    {
+      "har_entry_index": 53,
+      "timestamp_ms": 627761,
+      "source_crop_sha256": "d23f0dae64c7b54ea3fc25e3f2671f6959e0050c87d70dfaf59e59da50d6c9a8",
+      "description": {
+        "evidence_confidence": {
+          "category": 0.9,
+          "subcategory": 0.8,
+          "brand_candidate": 0.9,
+          "model_candidate": 0.1,
+          "color": 0.9,
+          "material": 0.8,
+          "style_attributes": 0.1,
+          "visible_text": 0,
+          "contextual_text": 0,
+          "logos_markings": 0.9,
+          "distinctive_features": 0.8,
+          "hardware_details": 0.9,
+          "shape_silhouette": 0.9,
+          "search_terms": 0.9,
+          "confidence": 0.9,
+          "identity_confidence": 0.9
+        },
+        "category": "Bags",
+        "subcategory": "Clutch",
+        "brand_candidate": "Louis Vuitton",
+        "model_candidate": null,
+        "color": "Brown",
+        "material": "Canvas",
+        "style_attributes": [],
+        "visible_text": [],
+        "logos_markings": [
+          "LV monogram"
+        ],
+        "distinctive_features": [
+          "Gold-tone hardware",
+          "Corner protectors"
+        ],
+        "hardware_details": [
+          "Clasp closure",
+          "Rivets"
+        ],
+        "shape_silhouette": [],
+        "search_terms": [
+          "Louis Vuitton clutch",
+          "Monogram clutch",
+          "Designer clutch"
+        ],
+        "confidence": 0.9,
+        "identity_confidence": 0.9
+      },
+      "observed_mapping": {
+        "hit": true,
+        "provenance": "admin_verified",
+        "product_id": "v1|198299202303|0",
+        "canonical_key": "product:v1:nnwtzvms8527",
+        "track_id": "product:v1:nnwtzvms8527",
+        "track_diagnostics": {
+          "outcome": "TRACK_REUSED",
+          "candidate_count": 14,
+          "decision_reason": "visual_confirmed",
+          "confidence": 0.9,
+          "visual_compared": 14,
+          "visual_failures": 1,
+          "selected_track_id": "product:v1:nnwtzvms8527",
+          "observation_timestamp_ms": 627761,
+          "promotion_window_start_ms": 42085,
+          "promotion_window_end_ms": 52085,
+          "trusted_observation_count": 1
+        },
+        "reuse": "same_video",
+        "confidence": 0.9,
+        "reason": "visual_confirmed"
+      },
+      "observed_top_results": [
+        {
+          "title": "AUTH Louis Vuitton Petite Malle Reverse Monogram Canvas Clutch Shoulder Bag",
+          "result_class": "EXACT"
+        }
+      ]
+    }
+  ]
+}
