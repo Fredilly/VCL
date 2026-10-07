@@ -68,7 +68,7 @@ export function createCorpus() {
         ground_truth: { status: known ? 'known' : 'unknown', identity: known ? original.identity : null,
           evidence: known ? `Explicit fixture product label. ${original.reference}. Same-model authenticity/serial is outside scope.` : 'No readable identity; category/color only.',
           granularity: 'named model and stated color; not individual unit/authenticity', origin: 'fixture_definition' },
-        expected_classification: scenario === 'no-result' ? 'NO_RESULT' : ['known-exact', 'multi-frame'].includes(scenario) ? 'LIKELY' : 'SIMILAR',
+        expected_classification: scenario === 'no-result' ? 'NO_RESULT' : ['known-exact', 'multi-frame'].includes(scenario) ? 'SIMILAR' : 'RELATED',
         notes: '', input: { description: base, context: { title: 'Selected object' }, observations: [], providers: [] }, labels: {} };
       const add = (product, imageComparison, correct, useful, notes) => {
         let provider = fixture.input.providers.find(x => x.name === product.provider);
