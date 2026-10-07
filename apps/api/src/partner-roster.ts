@@ -65,3 +65,26 @@ export function verifiedRosterCanonicalRowsForContent(
   }
   return [...unique.values()];
 }
+
+/** Legacy corrections must not displace an active partner appearance roster.
+ * Explicitly ingested variants remain candidates and still require visual proof. */
+export function scopedPartnerRosterCandidates(input: {
+  partner: VerifiedRosterCanonicalRow[];
+  durable: VerifiedRosterCanonicalRow[];
+  timestamp_ms?: number | null;
+}): VerifiedRosterCanonicalRow[] {
+  const inWindow = (row: VerifiedRosterCanonicalRow) => {
+    const { candidate_window_start_ms: start, candidate_window_end_ms: end } = row.mapping;
+    return typeof input.timestamp_ms !== 'number' || typeof start !== 'number' || typeof end !== 'number'
+      || (input.timestamp_ms >= start && input.timestamp_ms <= end);
+  };
+  const partner = input.partner.filter(inWindow);
+  const hasActiveWindow = partner.some(row => typeof row.mapping.candidate_window_start_ms === 'number'
+    && typeof row.mapping.candidate_window_end_ms === 'number');
+  const allowed = new Set(partner.map(row => row.identity.canonical_key));
+  const durable = input.durable.filter(row => inWindow(row) && (!hasActiveWindow
+    || allowed.has(row.identity.canonical_key) || Boolean(row.identity.variant_id)));
+  const unique = new Map<string, VerifiedRosterCanonicalRow>();
+  for (const row of [...durable, ...partner]) if (!unique.has(row.identity.canonical_key)) unique.set(row.identity.canonical_key, row);
+  return [...unique.values()];
+}

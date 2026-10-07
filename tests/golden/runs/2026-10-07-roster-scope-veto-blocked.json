@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "suite": "golden",
+  "session_id": "2026-10-07-roster-scope-veto",
+  "run_date": "2026-10-07",
+  "status": "BLOCKED_BEFORE_EXECUTION",
+  "notes": "Golden blocked before execution: no live provider credentials or saved Golden selections. The new pilot HAR contains live false Exact evidence at 627761ms (Trunkie selected; Petite Malle returned), plus CarryAll and chain-strap family drift. This is a production regression, despite the earlier deterministic gate passing. The follow-up restores active roster scope, keeps explicit ingested variants, and removes ungrounded model guesses from roster-miss fallback. Deterministic scope-veto tests pass; a live replay against this changed code is not claimed.",
+  "cases": [
+    {
+      "case_id": "golden-001-billions-tie",
+      "url_at_time": "https://youtu.be/T-bpMn0VMYk?t=157",
+      "target_object": "tie on the left",
+      "click_point": "tie knot",
+      "runs": [],
+      "blocked_reason": "NO_LIVE_PROVIDER_CREDENTIALS_AND_NO_SAVED_GOLDEN_FRAMES",
+      "required_runs": 3
+    },
+    {
+      "case_id": "golden-002-casio-f91w",
+      "url_at_time": "https://youtu.be/CT0mvnFbOYQ?t=2",
+      "target_object": "Casio watch",
+      "click_point": "center of watch face",
+      "runs": [],
+      "blocked_reason": "NO_LIVE_PROVIDER_CREDENTIALS_AND_NO_SAVED_GOLDEN_FRAMES",
+      "required_runs": 3
+    },
+    {
+      "case_id": "golden-003-hugo-boss-bottled",
+      "url_at_time": "https://youtu.be/jndGRB5Il3k?t=7",
+      "target_object": "perfume bottle",
+      "click_point": "center/body of perfume bottle",
+      "runs": [],
+      "blocked_reason": "NO_LIVE_PROVIDER_CREDENTIALS_AND_NO_SAVED_GOLDEN_FRAMES",
+      "required_runs": 3
+    },
+    {
+      "case_id": "golden-004-white-denim-jacket",
+      "url_at_time": "https://youtu.be/Fr8xhEDNhfU?t=121",
+      "target_object": "white denim jacket",
+      "click_point": "side of jacket",
+      "runs": [],
+      "blocked_reason": "NO_LIVE_PROVIDER_CREDENTIALS_AND_NO_SAVED_GOLDEN_FRAMES",
+      "required_runs": 3
+    },
+    {
+      "case_id": "golden-005-dior-book-tote",
+      "url_at_time": "https://youtu.be/4Gmrv8KEuTo?t=504",
+      "target_object": "handbag",
+      "click_point": "bag surface",
+      "runs": [],
+      "blocked_reason": "NO_LIVE_PROVIDER_CREDENTIALS_AND_NO_SAVED_GOLDEN_FRAMES",
+      "required_runs": 3
+    }
+  ]
+}

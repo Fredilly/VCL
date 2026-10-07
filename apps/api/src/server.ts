@@ -40,7 +40,8 @@ import { recoverVerifiedProductImage } from './verified-image-recovery.js';
 import { ALPHA_VERIFIED_PRODUCT_SEEDS, alphaVerifiedCanonicalRowsForContent, alphaVerifiedCanonicalIdentitiesExcludingContent } from './alpha-verified-product-seeds.js';
 import { preparePartnerRoster, ingestPartnerRoster, buildCorrectionBundle, cacheLearningImage, learningImage, persistCorrectionBundle, assetDigest, type RosterOfferInput, type CorrectionBundle } from './partner-learning.js';
 import { verifiedLedgerRequest } from './verified-product-ledger.js';
-import { verifiedRosterCanonicalRowsForContent } from './partner-roster.js';
+import { rosterFallbackDescription } from './roster-fallback.js';
+import { scopedPartnerRosterCandidates, verifiedRosterCanonicalRowsForContent } from './partner-roster.js';
 export { AlphaAccessLedger } from './alpha-access.js';
 export { VerifiedProductLedger } from './verified-product-ledger.js';
 export { AdminAccessLedger } from './admin-access.js';
@@ -2120,17 +2121,9 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           return identity ? { mapping, identity: identityWithTrustedVpmObservations(identity, mapping) } : null;
         }))).filter((row): row is NonNullable<typeof row> => Boolean(row));
 
-        // Durable rows win when the same canonical product has already been
-        // persisted. Alpha roster rows fill the gap so a multi-product creator
-        // video can be resolved from its verified product list without manual
-        // timestamps. Visual verification still decides which product is on screen.
-        const canonicalRowMap = new Map<string, SameVideoCanonicalCandidate>();
-        for (const row of [...durableCanonicalRows, ...partnerCanonicalRows]) {
-          if (!canonicalRowMap.has(row.identity.canonical_key)) canonicalRowMap.set(row.identity.canonical_key, row);
-        }
-        // Include durable variant imports and corrections even when seed rows have
-        // candidate windows. All identities still need the same strict visual check.
-        const canonicalRows = [...canonicalRowMap.values()].filter(row => !reviewedNegativeKeys.has(row.identity.canonical_key));
+        const canonicalRows = scopedPartnerRosterCandidates({
+          partner: partnerCanonicalRows, durable: durableCanonicalRows, timestamp_ms: context?.timestamp_ms,
+        }).filter(row => !reviewedNegativeKeys.has(row.identity.canonical_key));
 
         sameVideoVisualCheck = await confirmSameVideoReuseWithImage(
           env,
@@ -2348,7 +2341,14 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           })
         : null;
       const visibleTextQueryV2 = env.VISIBLE_TEXT_QUERY_V2 === 'true' || record.benchmark_visible_text_query_v2 === true;
-      const queries = buildProductQueryVariants(description, context, visibleTextQueryV2).map((query) => affiliateClickRef
+      const fallbackDescription = partnerCanonicalRows.length ? rosterFallbackDescription(description) : description;
+      const baseQueries = buildProductQueryVariants(fallbackDescription, context, visibleTextQueryV2);
+      // Catalog titles nominate purchase candidates; they never change visual identity evidence.
+      const rosterQueries = partnerCanonicalRows.slice(0, 4).map(row => ({
+        ...baseQueries[0], query: row.identity.title, model: null,
+      }));
+      const queries = [...rosterQueries, ...baseQueries].filter((query, index, all) =>
+        all.findIndex(other => other.query === query.query) === index).map((query) => affiliateClickRef
         ? { ...query, affiliate_reference_id: affiliateClickRef }
         : query);
       const routingActive = Boolean(routing && !routing.telemetry.failed);
@@ -2360,7 +2360,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           : queries;
       const started = Date.now();
       const markingVerifyV1 = record.benchmark_marking_verify_v1 === true;
-      const resolved = await resolveProducts(routedProviders, routedQueries, description, env, context, sourceImage, compareCandidateImages, routing, markingVerifyV1);
+      const resolved = await resolveProducts(routedProviders, routedQueries, fallbackDescription, env, context, sourceImage, compareCandidateImages, routing, markingVerifyV1);
       if (sameVideoVisualCheck.usage) {
         const usage = resolved.cost_usage.verification_usage;
         usage.requests += sameVideoVisualCheck.usage.requests ?? 0;
