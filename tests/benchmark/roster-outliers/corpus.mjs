@@ -72,9 +72,118 @@ cases.push(make('white-alma-not-pochette', 'alma_pochette', [pochette], {
   search_terms: ['Louis Vuitton Alma'],
 }, null));
 
+
+
+// Real partner-roster failure shapes from the Handbagholic LV pilot.
+// These are evidence-level fixtures only; they protect the generic resolver from
+// choosing a nearby family member when a supplied partner candidate is more specific.
+const lvBase = {
+  ...plain,
+  category: 'accessories',
+  subcategory: 'bag',
+  brand_candidate: 'Louis Vuitton',
+  material: 'coated canvas',
+  logos_markings: ['Louis Vuitton monogram'],
+  search_terms: ['Louis Vuitton bag'],
+};
+const makeLv = (key, title, features, shape, color = 'brown') => {
+  const item = copy(shirt, key, {
+    title,
+    brand: 'Louis Vuitton',
+    object_type: 'bag',
+    color,
+    model: null,
+    visible_text: [],
+    logos_markings: ['Louis Vuitton monogram'],
+    distinctive_features: features,
+    shape_silhouette: shape,
+  });
+  item.mapping.object_type = 'bag';
+  item.mapping.brand = 'Louis Vuitton';
+  item.mapping.title = title;
+  return item;
+};
+const floralNeverfull = makeLv(
+  'lv:neverfull-roses-mm',
+  'Louis Vuitton Monogram Roses Neverfull MM',
+  ['open tote', 'large painted pink and orange rose print overlay'],
+  ['Neverfull tote'],
+  'brown multicolor',
+);
+const plainNeverfull = makeLv(
+  'lv:neverfull-mm',
+  'Louis Vuitton Monogram Neverfull MM',
+  ['open tote'],
+  ['Neverfull tote'],
+);
+const trunkie = makeLv(
+  'lv:trunkie-m14526',
+  'Louis Vuitton Trunkie Bag Monogram M14526',
+  ['38 gold-tone rivets', 'metallic corners', 'S-lock'],
+  ['flat trunk-style shoulder bag'],
+);
+const petiteMalle = makeLv(
+  'lv:petite-malle',
+  'Louis Vuitton Petite Malle',
+  ['rigid box construction', 'S-lock', 'metallic corners'],
+  ['rigid mini trunk bag'],
+);
+const lvVisual = (similarity, detail, sourceSubtype, candidateSubtype, sourceColor='brown', candidateColor='brown') => ({
+  source: {
+    subtype: { value: sourceSubtype, confidence: .98, basis: 'image' },
+    color: { value: sourceColor, confidence: .96, basis: 'image' },
+  },
+  candidate: {
+    subtype: { value: candidateSubtype, confidence: .98, basis: 'image' },
+    color: { value: candidateColor, confidence: .96, basis: 'image' },
+  },
+  similarity,
+  confidence: .97,
+  matching_details: [detail],
+});
+
+cases.push(
+  make(
+    'partner-floral-neverfull-beats-family-lookalike',
+    'partner_roster_variant',
+    [floralNeverfull, plainNeverfull],
+    {
+      ...lvBase,
+      model_candidate: 'Neverfull MM',
+      color: 'brown multicolor',
+      distinctive_features: ['large painted pink and orange rose print overlay', 'open tote'],
+      shape_silhouette: ['Neverfull tote'],
+      style_attributes: ['floral overlay'],
+      search_terms: ['Louis Vuitton Neverfull MM floral'],
+    },
+    floralNeverfull.identity.canonical_key,
+    {
+      [floralNeverfull.identity.canonical_key]: lvVisual(.98, 'same floral overlay and Neverfull tote construction', 'tote bag', 'tote bag', 'brown multicolor', 'brown multicolor'),
+      [plainNeverfull.identity.canonical_key]: lvVisual(.78, 'same Neverfull family but missing floral overlay', 'tote bag', 'tote bag', 'brown multicolor', 'brown'),
+    },
+  ),
+  make(
+    'partner-trunkie-beats-petite-malle-guess',
+    'partner_roster_variant',
+    [trunkie, petiteMalle],
+    {
+      ...lvBase,
+      model_candidate: 'Petite Malle',
+      distinctive_features: ['many gold-tone rivets', 'metallic corners', 'S-lock'],
+      shape_silhouette: ['flat slouching trunk-style shoulder bag'],
+      search_terms: ['Louis Vuitton trunk bag'],
+    },
+    trunkie.identity.canonical_key,
+    {
+      [trunkie.identity.canonical_key]: lvVisual(.98, 'same rivet field, flat trunk silhouette, corners and S-lock', 'shoulder bag', 'shoulder bag'),
+      [petiteMalle.identity.canonical_key]: lvVisual(.72, 'shares S-lock and corners but rigid box silhouette differs', 'shoulder bag', 'rigid trunk bag'),
+    },
+  ),
+);
+
 export const requiredScenarios = [
   'single_sku', 'multi_sku', 'comparison_outside_roster', 'near_size', 'near_trim',
   'near_season', 'reversed', 'worn', 'folded', 'partially_hidden', 'inside_out',
   'poor_lighting', 'old_new', 'screen_vs_speech', 'nearby_ocr', 'wrong_roster',
-  'colorways', 'overlapping_accessories', 'alma_pochette',
+  'colorways', 'overlapping_accessories', 'alma_pochette', 'partner_roster_variant',
 ];
