@@ -24,6 +24,9 @@ export type CanonicalProductIdentity = {
   title: string;
   brand: string | null;
   model: string | null;
+  /** Explicit catalog SKU/variant, never a generic model hypothesis. */
+  variant_id?: string | null;
+  family?: string | null;
   object_type: string;
   visible_text: string[];
   color?: string | null;
@@ -58,6 +61,10 @@ type CanonicalIdentityInput = {
 
 function bounded(value: unknown, max: number): string {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
+}
+
+export function normalizeVariantId(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase();
 }
 
 export function normalizeIdentityText(value: string | null | undefined): string {
@@ -116,7 +123,12 @@ export function canonicalMerchantOfferKey(ref: Pick<CanonicalMerchantRef, 'sourc
   let destination = ref.destination.trim();
   try {
     const url = new URL(destination);
-    url.search = '';
+    const keys: string[] = [];
+    url.searchParams.forEach((_value, key) => keys.push(key));
+    for (const key of keys) {
+      if (/^(utm_.+|gclid|fbclid|msclkid|mkcid|mkevt|mkrid|campid|customid|campaign|affiliate|affid)$/i.test(key)) url.searchParams.delete(key);
+    }
+    url.searchParams.sort();
     url.hash = '';
     destination = url.toString().replace(/\/$/, '');
   } catch {}
@@ -125,13 +137,14 @@ export function canonicalMerchantOfferKey(ref: Pick<CanonicalMerchantRef, 'sourc
 
 
 export function canonicalEquivalenceEvidenceKey(identity: Pick<CanonicalProductIdentity,
-  'brand' | 'model' | 'object_type' | 'visible_text' | 'logos_markings' | 'color'
+  'brand' | 'model' | 'variant_id' | 'object_type' | 'visible_text' | 'logos_markings' | 'color'
 >): string | null {
   const objectType = normalizeIdentityText(identity.object_type);
   if (!objectType) return null;
 
   const brand = normalizeIdentityText(identity.brand);
   const model = normalizeIdentityText(identity.model);
+  if (identity.variant_id) return `variant|${objectType}|${brand || '_'}|${normalizeVariantId(identity.variant_id)}`;
   if (model) return `model|${objectType}|${brand || '_'}|${model}`;
 
   const color = normalizeIdentityText(identity.color);
@@ -166,8 +179,8 @@ function wordOverlap(a: string[], b: string[]): { shared: number; ratio: number 
 }
 
 export function canonicalProductsEquivalent(
-  a: Pick<CanonicalProductIdentity, 'title' | 'brand' | 'model' | 'object_type' | 'visible_text' | 'logos_markings' | 'color'>,
-  b: Pick<CanonicalProductIdentity, 'title' | 'brand' | 'model' | 'object_type' | 'visible_text' | 'logos_markings' | 'color'>,
+  a: Pick<CanonicalProductIdentity, 'title' | 'brand' | 'model' | 'variant_id' | 'object_type' | 'visible_text' | 'logos_markings' | 'color'>,
+  b: Pick<CanonicalProductIdentity, 'title' | 'brand' | 'model' | 'variant_id' | 'object_type' | 'visible_text' | 'logos_markings' | 'color'>,
 ): boolean {
   const typeA = normalizeIdentityText(a.object_type);
   const typeB = normalizeIdentityText(b.object_type);
@@ -177,14 +190,17 @@ export function canonicalProductsEquivalent(
   const brandB = normalizeIdentityText(b.brand);
   if (brandA && brandB && brandA !== brandB) return false;
 
+  const colorA = normalizeIdentityText(a.color);
+  const colorB = normalizeIdentityText(b.color);
+  if (colorA && colorB && colorA !== colorB) return false;
+  const variantA = normalizeVariantId(a.variant_id);
+  const variantB = normalizeVariantId(b.variant_id);
+  if (variantA || variantB) return Boolean(variantA && variantB && variantA === variantB);
+
   const modelA = normalizeIdentityText(a.model);
   const modelB = normalizeIdentityText(b.model);
   if (modelA && modelB) return modelA === modelB && (!brandA || !brandB || brandA === brandB);
   if (modelA || modelB) return false;
-
-  const colorA = normalizeIdentityText(a.color);
-  const colorB = normalizeIdentityText(b.color);
-  if (colorA && colorB && colorA !== colorB) return false;
 
   const strongA = identityWords([
     ...(a.visible_text ?? []),
@@ -283,7 +299,11 @@ export function canonicalProductIdentity(input: CanonicalIdentityInput): Canonic
     distinctiveFeatures,
     shapeSilhouette,
   });
-  const identityBasis = model
+  const variantId = bounded(mapping.variant_id, 160) || null;
+  const family = bounded(mapping.family, 160) || null;
+  const identityBasis = variantId
+    ? ['variant', normalizeIdentityText(brand), normalizeVariantId(variantId), normalizeIdentityText(objectType)].join('|')
+    : model
     ? [normalizeIdentityText(brand), normalizeIdentityText(model), normalizeIdentityText(objectType)].join('|')
     : [normalizeIdentityText(brand), normalizeIdentityText(title), normalizeIdentityText(objectType), visibleText.map(normalizeIdentityText).join(' ')].join('|');
   const source = sourceFromMapping(mapping);
@@ -294,6 +314,8 @@ export function canonicalProductIdentity(input: CanonicalIdentityInput): Canonic
     title,
     brand,
     model,
+    ...(variantId ? { variant_id: variantId } : {}),
+    ...(family ? { family } : {}),
     object_type: objectType,
     visible_text: visibleText,
     color,
@@ -336,7 +358,7 @@ export function mergeCanonicalProductIdentity(
   incoming: CanonicalProductIdentity,
 ): CanonicalProductIdentity {
   if (existing.canonical_key !== incoming.canonical_key) throw new Error('Canonical product key mismatch');
-  if (conflict(existing.brand, incoming.brand) || conflict(existing.model, incoming.model) || conflict(existing.object_type, incoming.object_type)) {
+  if ((existing.variant_id && incoming.variant_id && conflict(existing.color ?? null, incoming.color ?? null)) || conflict(existing.variant_id ?? null, incoming.variant_id ?? null) || conflict(existing.brand, incoming.brand) || conflict(existing.model, incoming.model) || conflict(existing.object_type, incoming.object_type)) {
     throw new Error('Conflicting canonical product identity');
   }
 
@@ -350,7 +372,9 @@ export function mergeCanonicalProductIdentity(
       continue;
     }
     const current = merchantRefs[duplicateIndex];
-    if (!current.image_reference && ref.image_reference) {
+    const incomingDurable = ref.image_reference?.includes('/product-reference/') ?? false;
+    const currentDurable = current.image_reference?.includes('/product-reference/') ?? false;
+    if (ref.image_reference && (!current.image_reference || (incomingDurable && !currentDurable))) {
       merchantRefs[duplicateIndex] = { ...current, image_reference: ref.image_reference };
     }
   }
@@ -365,6 +389,8 @@ export function mergeCanonicalProductIdentity(
     title: existing.title || incoming.title,
     brand: existing.brand ?? incoming.brand,
     model: existing.model ?? incoming.model,
+    variant_id: existing.variant_id ?? incoming.variant_id ?? null,
+    family: existing.family ?? incoming.family ?? null,
     object_type: existing.object_type || incoming.object_type,
     visible_text: uniqueText([...existing.visible_text, ...incoming.visible_text]),
     color: existing.color ?? incoming.color ?? null,
@@ -376,7 +402,7 @@ export function mergeCanonicalProductIdentity(
     normalized_fingerprint: incoming.normalized_fingerprint || existing.normalized_fingerprint,
     provenance: existing.provenance,
     verified_at: incoming.verified_at,
-    merchant_refs: merchantRefs.slice(0, 25),
+    merchant_refs: merchantRefs,
     visual_references: visualReferences,
   };
 }

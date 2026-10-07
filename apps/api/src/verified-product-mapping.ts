@@ -31,6 +31,8 @@ export type VerifiedProductMapping = {
   object_type: string;
   brand: string;
   product_id: string;
+  variant_id?: string | null;
+  family?: string | null;
   title: string;
   destination: string;
   image_reference?: string | null;
@@ -122,6 +124,8 @@ export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProd
       object_type: (record.object_type as string).trim(),
       brand: (record.brand as string).trim(),
       product_id: (record.product_id as string).trim(),
+      ...(typeof record.variant_id === 'string' && record.variant_id.trim() ? { variant_id: record.variant_id.trim().slice(0, 160) } : {}),
+      ...(typeof record.family === 'string' && record.family.trim() ? { family: record.family.trim().slice(0, 160) } : {}),
       title: (record.title as string).trim(),
       destination: (record.destination as string).trim(),
       image_reference: typeof record.image_reference === 'string' && record.image_reference.trim() ? record.image_reference.trim() : null,
