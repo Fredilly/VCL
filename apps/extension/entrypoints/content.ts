@@ -192,7 +192,7 @@ type ProductCandidate = {
   destination: string | null;
   price: string | null;
   currency: string | null;
-  result_class: 'EXACT' | 'SIMILAR';
+  result_class: 'EXACT' | 'SIMILAR' | 'RELATED';
   brand?: string | null;
   model?: string | null;
   provenance?: string;
@@ -386,7 +386,13 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
 
   const exactProducts = commerce.products.filter((product) => product.result_class === 'EXACT');
   const similarProducts = commerce.products.filter((product) => product.result_class === 'SIMILAR');
-  const visibleProducts = [...exactProducts, ...similarProducts].slice(0, 8);
+  // Keep RELATED in the API and internal data. Do not surface it in the
+  // closed alpha until its relevance/utility has been independently validated.
+  const SHOW_RELATED_RESULTS = false;
+  const relatedProducts = SHOW_RELATED_RESULTS
+    ? commerce.products.filter((product) => product.result_class === 'RELATED')
+    : [];
+  const visibleProducts = [...exactProducts, ...similarProducts, ...relatedProducts].slice(0, 8);
 
   const resultsMeta = document.createElement('div');
   const resultsCount = document.createElement('span');
@@ -406,12 +412,12 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
   resultsMeta.append(resultsCount, resultsTime);
   panel.appendChild(resultsMeta);
 
-  let currentSection: 'EXACT' | 'SIMILAR' | null = null;
+  let currentSection: 'EXACT' | 'SIMILAR' | 'RELATED' | null = null;
 
-  const appendSectionHeading = (relationship: 'EXACT' | 'SIMILAR') => {
+  const appendSectionHeading = (relationship: 'EXACT' | 'SIMILAR' | 'RELATED') => {
     const section = document.createElement('div');
     const title = document.createElement('div');
-    title.textContent = relationship === 'EXACT' ? 'Exact' : 'Similar';
+    title.textContent = relationship === 'EXACT' ? 'Exact' : relationship === 'SIMILAR' ? 'Similar' : 'Related';
     Object.assign(section.style, {
       margin: relationship === 'EXACT' ? '0 0 8px' : '20px 0 8px',
       paddingTop: relationship === 'EXACT' ? '0' : '16px',
