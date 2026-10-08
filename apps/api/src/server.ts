@@ -598,9 +598,7 @@ export async function refreshVerifiedOffers(
       verification_image_confidence: comparison.confidence,
       verification_reasons: [
         ...(product.verification_reasons ?? []),
-        relationship === 'SIMILAR'
-          ? 'Same product idea/design family, but canonical identity was not confirmed'
-          : 'Related product; canonical design identity was not confirmed',
+        'Similar product; canonical identity was not confirmed',
       ],
     }];
   });
@@ -854,8 +852,8 @@ async function confirmSameVideoReuseWithImage(
         destination: merchantRef.destination,
         price: null,
         currency: null,
-        result_class: 'RELATED',
-        relationship: 'RELATED',
+        result_class: 'SIMILAR',
+        relationship: 'SIMILAR',
         metadata: {
           ...(identity.brand ? { brand: identity.brand } : {}),
           ...(identity.model ? { model: identity.model } : {}),
@@ -1070,8 +1068,8 @@ async function confirmCrossVideoReuseWithImage(
         destination: merchant.destination,
         price: null,
         currency: null,
-        result_class: 'RELATED',
-        relationship: 'RELATED',
+        result_class: 'SIMILAR',
+        relationship: 'SIMILAR',
       } as ProductCandidate,
     }];
   });
