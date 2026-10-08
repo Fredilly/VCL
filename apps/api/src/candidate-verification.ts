@@ -158,7 +158,7 @@ function canonicalRelationshipFromEvidence(
   // distinctive visual corroboration. Text may support the decision but cannot create it.
   if (!identityConflict && typeAgrees && identityGrounded && strongVisual && distinctiveVisual) return 'EXACT';
   if (!identityConflict && typeAgrees && (textAgrees || (comparison?.similarity ?? 0) >= 0.6)) return 'SIMILAR';
-  return 'SIMILAR';
+  return 'RELATED';
 }
 
 export function classifyCanonicalRelationship(
@@ -284,7 +284,7 @@ export function verifyCandidate(
   if (!identityGrounded) reasons.push('identity is not independently grounded; result cannot be Exact');
   if (!strongVisual) reasons.push('strong visual agreement is absent; result cannot be Exact');
   // Search IDs and model guesses are not verified SKU evidence. Use the same
-  // canonical Exact / Similar classes throughout the resolver.
+  // canonical Exact / Similar / Related classes throughout the resolver.
   const result_class = canonicalRelationshipFromEvidence(description, candidate, comparison, matched, identityGrounded, identityConflict);
   if (!comparison) reasons.push('image comparison unavailable; identity remains uncertain');
   const identity = matched.has('brand') && matched.has('model')
