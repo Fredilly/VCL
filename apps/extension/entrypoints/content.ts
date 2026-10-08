@@ -386,7 +386,12 @@ async function renderProducts(panel: HTMLElement, commerce: CommerceResponse, ev
 
   const exactProducts = commerce.products.filter((product) => product.result_class === 'EXACT');
   const similarProducts = commerce.products.filter((product) => product.result_class === 'SIMILAR');
-  const relatedProducts = commerce.products.filter((product) => product.result_class === 'RELATED');
+  // Keep RELATED in the API and internal data. Do not surface it in the
+  // closed alpha until its relevance/utility has been independently validated.
+  const SHOW_RELATED_RESULTS = false;
+  const relatedProducts = SHOW_RELATED_RESULTS
+    ? commerce.products.filter((product) => product.result_class === 'RELATED')
+    : [];
   const visibleProducts = [...exactProducts, ...similarProducts, ...relatedProducts].slice(0, 8);
 
   const resultsMeta = document.createElement('div');
