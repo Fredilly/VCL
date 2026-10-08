@@ -1942,7 +1942,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             : {};
           if (!item.platform || !item.content_ref || item.timestamp_ms == null) return jsonResponse({ error: 'Correction requires source video and exact timestamp' }, 422);
           const crop = parseSourceImage(body.source_image);
-          if (!crop) return jsonResponse({ error: 'Promotion requires the reviewed selected crop (under 2 MB)' }, 422);
+          if (path === '/feedback-promote' && !crop) return jsonResponse({ error: 'Promotion requires the reviewed selected crop (under 2 MB)' }, 422);
           const baselineMappings = await durableVerifiedMappings(env, item.platform, item.content_ref);
           const baselineRows = (await Promise.all(baselineMappings.map(async mapping => {
             const identity = mapping.canonical_key ? await durableCanonicalProductIdentity(env, mapping.canonical_key) : null;
@@ -1968,27 +1968,37 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           });
           const corrected = prepared[0]!;
           const wasKnown = Boolean(await durableCanonicalProductIdentity(env, corrected.identity.canonical_key));
-          // Freeze both paths before committing promotion. No supplied model score is trusted.
           const saved = await persistCanonicalProductIdentity(env, corrected.identity);
           canonicalKey = saved.canonical_key;
           corrected.identity = saved;
-          corrected.mapping = { ...corrected.mapping, canonical_key: canonicalKey, track_id: canonicalKey,
-            trusted_observations: [{ observed_at: new Date().toISOString(), timestamp_ms: item.timestamp_ms, reason: 'promotion', confidence: 1,
-              visible_text: item.visible_text, logos_markings: item.logos_markings, distinctive_features: item.distinctive_features,
-              shape_silhouette: item.shape_silhouette, style_attributes: item.style_attributes, color: item.color, material: item.material }] };
-          const unique = new Map(rosterRows.map(row => [row.identity.canonical_key, row]));
-          unique.set(canonicalKey, corrected);
-          const rows = [...unique.values()];
-          const check = await confirmSameVideoReuseWithImage(env, description, { platform: item.platform, content_ref: item.content_ref, timestamp_ms: item.timestamp_ms }, crop, rows);
-          if (check.decision.canonical_key !== canonicalKey) return jsonResponse({ error: 'Correction replay did not pass visual trust gate', learned: false, reason: check.decision.reason }, 422);
-          const cropAsset = await cacheLearningImage(env, crop, 'observation');
-          const bundle = buildCorrectionBundle({ event_id: eventId, result_id: resultId,
-            action: action as 'hard_negative' | 'verify_product', reviewed_by: authorized.admin_id,
-            crop_asset: cropAsset, platform: item.platform, content_ref: item.content_ref, timestamp_ms: item.timestamp_ms,
-            canonical_product: saved, candidates: rows, description, comparisons: check.comparisons ?? {},
-            before: { id: 'before', scenario: 'reviewed_correction', timestamp_ms: item.timestamp_ms, candidates: rosterRows, description,
-              comparisons: check.comparisons ?? {}, expected_class: canonicalKey, truth: 'IN_ROSTER' }, newly_learned: !wasKnown });
-          learned = await persistCorrectionBundle(env, bundle);
+          corrected.mapping = { ...corrected.mapping, canonical_key: canonicalKey, track_id: canonicalKey };
+          // Admin review may safely add the corrected SKU to canonical Product Memory
+          // without the old crop. This is candidate membership only: PR #357 prevents
+          // variant roster rows from becoming Exact without independent visual proof.
+          await persistAdminVerifiedMapping(env, corrected.mapping);
+
+          if (crop) {
+            // Promotion is the stronger operation. It freezes the reviewed crop,
+            // reruns the production visual trust gate, and only then records an
+            // appearance assertion / hard-negative bundle.
+            corrected.mapping = { ...corrected.mapping,
+              trusted_observations: [{ observed_at: new Date().toISOString(), timestamp_ms: item.timestamp_ms, reason: 'promotion', confidence: 1,
+                visible_text: item.visible_text, logos_markings: item.logos_markings, distinctive_features: item.distinctive_features,
+                shape_silhouette: item.shape_silhouette, style_attributes: item.style_attributes, color: item.color, material: item.material }] };
+            const unique = new Map(rosterRows.map(row => [row.identity.canonical_key, row]));
+            unique.set(canonicalKey, corrected);
+            const rows = [...unique.values()];
+            const check = await confirmSameVideoReuseWithImage(env, description, { platform: item.platform, content_ref: item.content_ref, timestamp_ms: item.timestamp_ms }, crop, rows);
+            if (check.decision.canonical_key !== canonicalKey) return jsonResponse({ error: 'Correction replay did not pass visual trust gate', learned: false, reason: check.decision.reason }, 422);
+            const cropAsset = await cacheLearningImage(env, crop, 'observation');
+            const bundle = buildCorrectionBundle({ event_id: eventId, result_id: resultId,
+              action: action as 'hard_negative' | 'verify_product', reviewed_by: authorized.admin_id,
+              crop_asset: cropAsset, platform: item.platform, content_ref: item.content_ref, timestamp_ms: item.timestamp_ms,
+              canonical_product: saved, candidates: rows, description, comparisons: check.comparisons ?? {},
+              before: { id: 'before', scenario: 'reviewed_correction', timestamp_ms: item.timestamp_ms, candidates: rosterRows, description,
+                comparisons: check.comparisons ?? {}, expected_class: canonicalKey, truth: 'IN_ROSTER' }, newly_learned: !wasKnown });
+            learned = await persistCorrectionBundle(env, bundle);
+          }
 
         }
 
@@ -2006,7 +2016,8 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           ...(canonicalKey ? { canonical_key: canonicalKey } : {}),
         });
         return jsonResponse({ accepted: true, action, canonical_key: canonicalKey, learned: Boolean(learned),
-          ...(learned ? { metrics: learned.metrics, promotion_id: learned.promotion_id } : { missing_assets: ['positive observation', 'canonical product', 'regression case', 'appearance', 'metrics'] }) });
+          product_memory_saved: Boolean(canonicalKey),
+          ...(learned ? { metrics: learned.metrics, promotion_id: learned.promotion_id } : {}) });
       } catch (error) {
         logSafeError(error);
         return jsonResponse({ error: 'Could not resolve feedback review' }, 400);
