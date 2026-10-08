@@ -80,8 +80,8 @@ function normalizeResult(result: BraveWebResult): ProductCandidate | null {
     destination,
     price: null,
     currency: null,
-    result_class: 'RELATED',
-    relationship: 'RELATED',
+    result_class: 'SIMILAR',
+    relationship: 'SIMILAR',
     metadata: {
       description: description?.slice(0, 800) || undefined,
       category: domain ?? undefined,
