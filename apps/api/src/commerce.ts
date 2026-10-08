@@ -18,7 +18,7 @@ export type ProductContext = {
   timestamp_ms?: number | null;
 };
 
-export type ProductResultClass = 'EXACT' | 'SIMILAR';
+export type ProductResultClass = 'EXACT' | 'SIMILAR' | 'RELATED';
 export type CanonicalRelationship = ProductResultClass;
 
 export type ProductCandidate = {
@@ -325,7 +325,7 @@ export function verifyProductCandidate(description: ObjectDescription, candidate
   }
 
   const identityStrong = modelMatches || (brandMatches && typeMatches);
-  const resultClass: ProductResultClass | null = identityStrong && score >= 55 ? 'SIMILAR' : null;
+  const resultClass: ProductResultClass | null = identityStrong && score >= 55 ? 'SIMILAR' : score >= 25 ? 'RELATED' : null;
   if (!resultClass) return null;
   return { ...candidate, result_class: resultClass, relationship: resultClass, verification_score: score, verification_reasons: reasons };
 }
