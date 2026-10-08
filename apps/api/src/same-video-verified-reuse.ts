@@ -378,7 +378,26 @@ export function verifiedProductMemoryCandidates(input: {
     if (!vpmTrackCompatible(identity, input.description)) continue;
     if (!unique.has(identity.canonical_key)) unique.set(identity.canonical_key, candidate);
   }
-  return [...unique.values()];
+  const candidates = [...unique.values()];
+
+  // A model-family hypothesis can cheaply nominate one roster entry before the
+  // expensive image verifier. This is only a work-bounding hint: the nominated
+  // candidate must still pass strict visual verification before Exact.
+  const observedModel = normalizeIdentityText(input.description.model_candidate);
+  if (observedModel && observedModel.length >= 4 && candidates.length > 1) {
+    const familyMatches = candidates.filter(({ identity }) => {
+      const model = normalizeIdentityText(identity.model);
+      const title = normalizeIdentityText(identity.title);
+      return model === observedModel
+        || title === observedModel
+        || title.startsWith(`${observedModel} `)
+        || title.endsWith(` ${observedModel}`)
+        || title.includes(` ${observedModel} `);
+    });
+    if (familyMatches.length === 1) return familyMatches;
+  }
+
+  return candidates;
 }
 
 export const ROSTER_VISUAL_CANDIDATE_LIMIT = 24;
@@ -599,6 +618,33 @@ export function canonicalVisualExactOfferIds(input: {
     if (confirmed.mapping && confirmed.reason === 'visual_confirmed') exact.add(product.id);
   }
   return exact;
+}
+
+/**
+ * Keep the strict visual veto introduced by the roster-outlier gate, but avoid
+ * visually verifying the entire same-video roster when model/OCR evidence has
+ * already nominated one unique candidate. The nomination only narrows the work;
+ * it never grants Exact without the normal image verifier.
+ */
+export function sameVideoVisualVerificationCandidates(input: {
+  description: ObjectDescription;
+  candidates: SameVideoCanonicalCandidate[];
+}): SameVideoCanonicalCandidate[] {
+  const vpm = verifiedProductMemoryCandidates(input);
+  const eligible = vpm.length ? vpm : eligibleSameVideoCanonicalCandidates(input);
+  if (!eligible.length) return [];
+
+  const model = exactModelSameVideoReuse({ description: input.description, candidates: eligible });
+  if (model.mapping && model.canonical_key) {
+    return eligible.filter(({ identity }) => identity.canonical_key === model.canonical_key);
+  }
+
+  const distinctive = distinctiveTextSameVideoReuse({ description: input.description, candidates: eligible });
+  if (distinctive.mapping && distinctive.canonical_key) {
+    return eligible.filter(({ identity }) => identity.canonical_key === distinctive.canonical_key);
+  }
+
+  return eligible;
 }
 
 /** Resolve recorded evidence in one place. Once image verification has been
