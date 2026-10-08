@@ -142,8 +142,8 @@ function normalizeListing(listing: EtsyListingResult, query: ProductQuery, fetch
     price,
     currency,
     // Provider rank/title overlap is retrieval evidence, not identity proof.
-    result_class: 'RELATED',
-    relationship: 'RELATED',
+    result_class: 'SIMILAR',
+    relationship: 'SIMILAR',
     provider: 'etsy',
   };
 }
