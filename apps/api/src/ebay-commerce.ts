@@ -105,8 +105,8 @@ function normalizeItem(
     price: item.price?.value ?? null,
     currency: item.price?.currency ?? null,
     // Provider rank/title overlap is retrieval evidence, not identity proof.
-    result_class: 'RELATED',
-    relationship: 'RELATED',
+    result_class: 'SIMILAR',
+    relationship: 'SIMILAR',
     provider: 'ebay',
   };
 }
