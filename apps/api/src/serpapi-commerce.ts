@@ -138,8 +138,8 @@ export class SerpApiCommerceProvider implements CommerceProvider {
       price: typeof item.extracted_price === 'number' ? String(item.extracted_price) : item.price ?? null,
       currency: typeof item.extracted_price === 'number' ? 'USD' : null,
       // Search rank is candidate generation only.
-      result_class: 'RELATED',
-      relationship: 'RELATED',
+      result_class: 'SIMILAR',
+      relationship: 'SIMILAR',
       provider: 'serpapi',
     }));
   }
