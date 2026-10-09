@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-const manifest = JSON.parse(readFileSync(new URL('../../tests/fixtures/partner-regressions/n9u8ynhBdSo-inventory.json', import.meta.url), 'utf8'));
+const manifest = JSON.parse(readFileSync(new URL('../../../tests/fixtures/partner-regressions/n9u8ynhBdSo-inventory.json', import.meta.url), 'utf8'));
 
 test('video research survives with all original offers, discussion windows and unverified variants', () => {
   assert.equal(manifest.video.id, 'n9u8ynhBdSo');
