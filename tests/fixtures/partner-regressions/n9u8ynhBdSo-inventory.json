@@ -1,0 +1,403 @@
+{
+  "schema_version": 1,
+  "video": {
+    "platform": "youtube",
+    "id": "n9u8ynhBdSo",
+    "source": "SKU.txt transcript uploaded 2026-10-07 plus alpha-verified-product-seeds.ts"
+  },
+  "status": "research_inventory_not_verified_frame_ground_truth",
+  "rules": [
+    "Never infer that a transcript-mentioned variant is on screen",
+    "Do not treat seed row trusted_observations as proof of appearance without independent crop comparison",
+    "Source merchant listing IDs are not manufacturer SKUs",
+    "Timestamps are discussion windows only, not verified visual appearance boundaries",
+    "Missing URLs and reference imagery are explicit gaps, never silently replaced"
+  ],
+  "sections": [
+    {
+      "section": 1,
+      "family": "Side Trunk",
+      "discussion_window_ms": [
+        24000,
+        161000
+      ],
+      "reference_offer": {
+        "merchant_item_id": "FP-1977706",
+        "title": "Louis Vuitton Monogram Side Trunk PM",
+        "url": "https://www.fashionphile.com/products/louis-vuitton-monogram-side-trunk-pm-1977706",
+        "identity_status": "seed_candidate_unverified_variant"
+      },
+      "mentioned_variants": [
+        {
+          "description": "PM",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "MM",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "GM",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "canvas",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "leather",
+          "on_screen": "unknown",
+          "merchant_url": null
+        }
+      ],
+      "status": "needs_variant_image_and_visual_annotation"
+    },
+    {
+      "section": 2,
+      "family": "Vagabond Hobo",
+      "discussion_window_ms": [
+        163000,
+        228000
+      ],
+      "reference_offer": {
+        "merchant_item_id": "M28392",
+        "title": "Louis Vuitton Vagabond Hobo Bag",
+        "url": "https://uk.louisvuitton.com/eng-gb/products/vagabond-hobo-bag-h39-nvprod7260131v/M28392",
+        "identity_status": "seed_candidate_unverified_variant"
+      },
+      "mentioned_variants": [
+        {
+          "description": "canvas",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "leather",
+          "on_screen": "unknown",
+          "merchant_url": null
+        }
+      ],
+      "status": "needs_variant_image_and_visual_annotation"
+    },
+    {
+      "section": 3,
+      "family": "Neverfull",
+      "discussion_window_ms": [
+        284000,
+        305000
+      ],
+      "reference_offer": {
+        "merchant_item_id": "FP-1925620",
+        "title": "Louis Vuitton Monogram Roses Neverfull MM",
+        "url": "https://www.fashionphile.com/products/louis-vuitton-monogram-roses-neverfull-mm-1925620",
+        "identity_status": "seed_candidate_unverified_variant"
+      },
+      "mentioned_variants": [
+        {
+          "description": "Nano",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "PM",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "MM",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "GM",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "Monogram Roses",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "leather",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "shearling trim",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "reversible",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "Cargo",
+          "on_screen": "unknown",
+          "merchant_url": null
+        }
+      ],
+      "status": "needs_variant_image_and_visual_annotation"
+    },
+    {
+      "section": 4,
+      "family": "CarryAll",
+      "discussion_window_ms": [
+        335000,
+        399000
+      ],
+      "reference_offer": {
+        "merchant_item_id": "FP-1981368",
+        "title": "Louis Vuitton Monogram CarryAll MM",
+        "url": "https://www.fashionphile.com/products/louis-vuitton-monogram-carryall-mm-1981368",
+        "identity_status": "seed_candidate_unverified_variant"
+      },
+      "mentioned_variants": [
+        {
+          "description": "MM canvas",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "other sizes (unspecified)",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "leather",
+          "on_screen": "unknown",
+          "merchant_url": null
+        }
+      ],
+      "status": "needs_variant_image_and_visual_annotation"
+    },
+    {
+      "section": 5,
+      "family": "NeoNoe",
+      "discussion_window_ms": [
+        402000,
+        522000
+      ],
+      "reference_offer": {
+        "merchant_item_id": "FP-1983129",
+        "title": "Louis Vuitton Monogram NeoNoe MM Black",
+        "url": "https://www.fashionphile.com/products/louis-vuitton-monogram-neonoe-mm-black-1983129",
+        "identity_status": "seed_candidate_unverified_variant"
+      },
+      "mentioned_variants": [
+        {
+          "description": "MM Monogram / black leather",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "other strap colors",
+          "on_screen": "unknown",
+          "merchant_url": null
+        }
+      ],
+      "status": "needs_variant_image_and_visual_annotation"
+    },
+    {
+      "section": 6,
+      "family": "Multipass",
+      "discussion_window_ms": [
+        524000,
+        607000
+      ],
+      "reference_offer": {
+        "merchant_item_id": "M2A078",
+        "title": "Louis Vuitton Multipass",
+        "url": "https://us.louisvuitton.com/eng-us/products/Multipass-G81-nvprod7770009v/M2A078",
+        "identity_status": "seed_candidate_unverified_variant"
+      },
+      "mentioned_variants": [
+        {
+          "description": "MM canvas",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "Mini",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "leather",
+          "on_screen": "unknown",
+          "merchant_url": null
+        }
+      ],
+      "status": "needs_variant_image_and_visual_annotation"
+    },
+    {
+      "section": 7,
+      "family": "Trunkie",
+      "discussion_window_ms": [
+        610000,
+        671000
+      ],
+      "reference_offer": {
+        "merchant_item_id": "M14526",
+        "title": "Louis Vuitton Trunkie Bag Monogram",
+        "url": "https://uk.louisvuitton.com/eng-gb/products/trunkie-bag-monogram-nvprod6090072v/M14526",
+        "identity_status": "seed_candidate_unverified_variant"
+      },
+      "mentioned_variants": [
+        {
+          "description": "Monogram",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "East-West",
+          "on_screen": "unknown",
+          "merchant_url": null
+        }
+      ],
+      "status": "needs_variant_image_and_visual_annotation"
+    },
+    {
+      "section": 8,
+      "family": "Vanity Chain Pouch",
+      "discussion_window_ms": [
+        682000,
+        741000
+      ],
+      "reference_offer": {
+        "merchant_item_id": "POSH-6a3f49685919e011180b400c",
+        "title": "Louis Vuitton Vanity Chain Pouch Monogram Brown",
+        "url": "https://poshmark.com/listing/Louis-Vuitton-Monogram-Vanity-Chain-Pouch-Brown-6a3f49685919e011180b400c",
+        "identity_status": "seed_candidate_unverified_variant"
+      },
+      "mentioned_variants": [
+        {
+          "description": "Reverse Monogram",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "Milky White / Blue M27744",
+          "on_screen": "unknown",
+          "merchant_url": null
+        }
+      ],
+      "status": "needs_variant_image_and_visual_annotation"
+    },
+    {
+      "section": 9,
+      "family": "High Rise Bumbag",
+      "discussion_window_ms": [
+        744000,
+        805000
+      ],
+      "reference_offer": {
+        "merchant_item_id": "M46784",
+        "title": "Louis Vuitton High Rise Monogram Bumbag",
+        "url": "https://poshmark.com/listing/Louis-Vuitton-High-Rise-Monogram-Bumbag-M46784-Full-Set-Receipt-6abd335f046d1f7c1de21801",
+        "identity_status": "seed_candidate_unverified_variant"
+      },
+      "mentioned_variants": [
+        {
+          "description": "Monogram",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "creator's discontinued older bumbag (different product)",
+          "on_screen": "unknown",
+          "merchant_url": null
+        }
+      ],
+      "status": "needs_variant_image_and_visual_annotation"
+    },
+    {
+      "section": 10,
+      "family": "Speedy",
+      "discussion_window_ms": [
+        805000,
+        955000
+      ],
+      "reference_offer": {
+        "merchant_item_id": "FP-1985008",
+        "title": "Louis Vuitton Monogram Speedy Bandouliere 25",
+        "url": "https://www.fashionphile.com/products/louis-vuitton-monogram-speedy-bandouliere-25-1985008",
+        "identity_status": "seed_candidate_unverified_variant"
+      },
+      "mentioned_variants": [
+        {
+          "description": "Nano",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "20",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "25",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "30",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "35",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "P9 leather",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "black Multicolore 25",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "white Multicolore (research reference; screen unverified)",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "Giant Monogram",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "Soft Speedy Boho / ostrich trim",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "red P9 40 Fashionphile 1961012 (research reference; screen unverified)",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "silver-grey P9 (research reference; screen unverified)",
+          "on_screen": "unknown",
+          "merchant_url": null
+        },
+        {
+          "description": "yellow Pharrell (research reference; screen unverified)",
+          "on_screen": "unknown",
+          "merchant_url": null
+        }
+      ],
+      "status": "needs_variant_image_and_visual_annotation"
+    }
+  ]
+}
