@@ -32,7 +32,7 @@ export function auditVideoInventory(manifest, evidence = {}) {
     }
     for (const variant of section.mentioned_variants ?? []) {
       variants.push({section: section.section, description: variant.description,
-        state: variant.on_screen === 'verified' ? 'APPEARANCE_REVIEW_REQUIRED' : 'APPEARANCE_UNKNOWN'});
+        state: variant.on_screen === 'verified' ? 'APPEARANCE_VERIFIED' : variant.on_screen === 'not_shown' ? 'NOT_SHOWN' : 'APPEARANCE_UNKNOWN'});
     }
   }
   const ready = offers.filter(o => o.state === 'READY').length;
@@ -42,8 +42,8 @@ export function auditVideoInventory(manifest, evidence = {}) {
     ready_offers: ready,
     unready_offers: offers.length - ready,
     variant_mentions: variants.length,
-    unverified_appearances: variants.length,
-    status: ready === offers.length && issues.length === 0 && variants.length === 0 ? 'READY' : 'NOT_READY',
+    unverified_appearances: variants.filter(v => v.state === 'APPEARANCE_UNKNOWN').length,
+    status: ready === offers.length && issues.length === 0 && variants.every(v => v.state !== 'APPEARANCE_UNKNOWN') ? 'READY' : 'NOT_READY',
     offers, variants, issues
   };
 }
