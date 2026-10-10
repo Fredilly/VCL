@@ -82,11 +82,12 @@ export function scopedPartnerRosterCandidates(input: {
   const hasActiveWindow = partner.some(row => typeof row.mapping.candidate_window_start_ms === 'number'
     && typeof row.mapping.candidate_window_end_ms === 'number');
   const allowed = new Set(partner.map(row => row.identity.canonical_key));
-  // Variant identity does not prove presence in the selected appearance window.
-  // Stale corrections must not compete with a scoped partner roster merely
-  // because they have a distinct variant ID. Open-set fallback remains available.
+  // Keep explicitly imported variants as candidates, even when a partner
+  // window is active. Their SKU metadata is not proof of appearance or Exact:
+  // visual verification still has to reject wrong candidates. Out-of-window
+  // variants remain excluded by inWindow().
   const durable = input.durable.filter(row => inWindow(row) && (!hasActiveWindow
-    || allowed.has(row.identity.canonical_key)));
+    || allowed.has(row.identity.canonical_key) || Boolean(row.identity.variant_id)));
   const unique = new Map<string, VerifiedRosterCanonicalRow>();
   for (const row of [...durable, ...partner]) if (!unique.has(row.identity.canonical_key)) unique.set(row.identity.canonical_key, row);
   return [...unique.values()];
