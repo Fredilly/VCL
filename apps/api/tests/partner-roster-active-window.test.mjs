@@ -19,13 +19,15 @@ test('active partner scope excludes stale unversioned memory but preserves legit
   }).map(x=>x.identity.canonical_key)),JSON.stringify(['imported','current']));
 });
 test('durable variants remain eligible without active scoped partner window',()=>{
-  assert.deepEqual(scopedPartnerRosterCandidates({
+  const keys=scopedPartnerRosterCandidates({
     partner:[],durable:[row('variant',{variant:'v2'})],timestamp_ms:50
-  }).map(x=>x.identity.canonical_key)),JSON.stringify(['variant']));
+  }).map(x=>x.identity.canonical_key);
+  assert.equal(JSON.stringify(keys),JSON.stringify(['variant']));
 });
 test('out-of-window partner candidate cannot assert identity',()=>{
-  assert.deepEqual(scopedPartnerRosterCandidates({
+  const keys=scopedPartnerRosterCandidates({
     partner:[row('old',{start:0,end:100})],
     durable:[row('old',{start:0,end:100})],timestamp_ms:500
-  })),JSON.stringify([]));
+  }).map(x=>x.identity.canonical_key);
+  assert.equal(JSON.stringify(keys),JSON.stringify([]));
 });
