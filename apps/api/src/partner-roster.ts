@@ -82,6 +82,10 @@ export function scopedPartnerRosterCandidates(input: {
   const hasActiveWindow = partner.some(row => typeof row.mapping.candidate_window_start_ms === 'number'
     && typeof row.mapping.candidate_window_end_ms === 'number');
   const allowed = new Set(partner.map(row => row.identity.canonical_key));
+  // Keep explicitly imported variants as candidates, even when a partner
+  // window is active. Their SKU metadata is not proof of appearance or Exact:
+  // visual verification still has to reject wrong candidates. Out-of-window
+  // variants remain excluded by inWindow().
   const durable = input.durable.filter(row => inWindow(row) && (!hasActiveWindow
     || allowed.has(row.identity.canonical_key) || Boolean(row.identity.variant_id)));
   const unique = new Map<string, VerifiedRosterCanonicalRow>();
