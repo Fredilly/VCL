@@ -78,7 +78,8 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   if(process.env.SCOOP_HAR_REPLAY_CONFIRM!=='YES')throw Error('Set SCOOP_HAR_REPLAY_CONFIRM=YES to permit paid live API requests');
   const result=await replayHar(JSON.parse(readFileSync(input,'utf8')),{endpoint,
     contentRef:process.env.SCOOP_REPLAY_CONTENT_REF||null,
-    auth:process.env.SCOOP_READER_BASIC_AUTH||null});
+    auth:process.env.SCOOP_READER_BASIC_AUTH||null,
+    maxCases:Number(process.env.SCOOP_REPLAY_MAX_CASES || '5')});
   writeFileSync(output,JSON.stringify(result,null,2)+'\n',{flag:'wx',mode:0o600});
   console.log(JSON.stringify({count:result.count,completed:result.completed,changed:result.changed},null,2));
   if(result.completed!==result.count)process.exitCode=1;
