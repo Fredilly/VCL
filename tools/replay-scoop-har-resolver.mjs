@@ -53,12 +53,15 @@ export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImp
   if(url.pathname!=='/resolve-products')throw new Error('Endpoint must be /resolve-products');
   if(!Number.isInteger(maxCases)||maxCases<1||maxCases>100)throw new Error('Invalid case budget');
   const cases=harvestReplayRequests(har,{contentRef}).slice(0,maxCases), rows=[];
+  // Live alpha guard requires an install identifier. Use a new isolated UUID
+  // per replay run rather than reusing the original user's installation ID.
+  const replayInstallId=randomUUID();
   for(const c of cases){
     let current=null,status='OK',error_code=null,validation_fields=[],error_shape=null,error_category=null;
     const abort=new AbortController();
     const timer=setTimeout(()=>abort.abort(),timeoutMs);
     try {
-      const headers={'content-type':'application/json'};
+      const headers={'content-type':'application/json','x-scoop-install-id':replayInstallId};
       if(auth)headers.authorization='Basic '+auth;
       const response=await fetchImpl(endpoint,{method:'POST',headers,
         body:JSON.stringify(c.request),signal:abort.signal,redirect:'error'});
