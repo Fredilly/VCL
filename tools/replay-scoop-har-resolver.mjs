@@ -97,12 +97,18 @@ export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImp
     finally {clearTimeout(timer);}
     rows.push({case_id:c.case_id,video_timestamp_ms:c.request.context?.timestamp_ms??null,
       original:c.original,current,status,error_code,validation_fields,error_shape,error_category,
+      identity_changed:status==='OK'&&c.original.top_identity!==current?.top_identity,
+      confidence_changed:status==='OK'&&c.original.top_class!==current?.top_class,
+      offers_changed:status==='OK'&&c.original.count!==current?.count,
       changed:status==='OK'&&JSON.stringify([c.original.top_identity,c.original.top_class,c.original.count])!==JSON.stringify([current?.top_identity,current?.top_class,current?.count])});
   }
   return {version:1,mode:'recorded_description_and_frame_resolver_replay',
     evaluation:'UNLABELED_NO_ACCURACY_CLAIM',count:rows.length,
     completed:rows.filter(r=>r.status==='OK').length,
     changed:rows.filter(r=>r.changed).length,
+    identity_changed:rows.filter(r=>r.identity_changed).length,
+    confidence_changed:rows.filter(r=>r.confidence_changed).length,
+    offers_changed:rows.filter(r=>r.offers_changed).length,
     note:'This replays historical object descriptions and source crops; it cannot test the current vision or prove SKU accuracy. Human-reviewed labels and real Golden are required.',
     rows};
 }
