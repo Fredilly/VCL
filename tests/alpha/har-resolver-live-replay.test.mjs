@@ -32,3 +32,13 @@ test('rejects unsafe endpoints and blocks silent HTTP failures',async()=>{
  assert.equal(result.rows[0].status,'HTTP_401');
  assert.equal(result.completed,0);
 });
+
+test('time and cost changes alone do not masquerade as SKU improvements',async()=>{
+  const result=await replayHar(har,{endpoint:'https://api.example.test/resolve-products',
+    fetchImpl:async()=>({ok:true,json:async()=>({
+      state:'RESULTS',
+      products:[{title:'Trunkie',identity_key:'sku:trunkie',result_class:'SIMILAR'}],
+      latency_ms:9999, cost_usage:{total_cost_usd:0.123}
+    })})});
+  assert.equal(result.changed,0);
+});
