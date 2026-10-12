@@ -838,6 +838,25 @@ async function confirmSameVideoReuseWithImage(
       }
     }
 
+    // The roster is the source of candidate identities. An expired or missing
+    // listing image must not silently remove a known SKU before comparison.
+    // Recovery is restricted to this verified mapping; never promote a search
+    // lookalike to a new identity.
+    if (!merchantRef?.image_reference && env.BRAVE_SEARCH_API_KEY) {
+      const recovered = await recoverVerifiedProductImage(
+        env.BRAVE_SEARCH_API_KEY, { ...candidate.mapping, image_reference: null },
+      ).catch(() => null);
+      if (recovered) {
+        const recoveredRef = {
+          source: 'verified_roster_image_recovery',
+          item_id: candidate.mapping.product_id,
+          destination: candidate.mapping.destination,
+          image_reference: recovered,
+        };
+        identity = { ...identity, merchant_refs: [...identity.merchant_refs, recoveredRef] };
+        merchantRef = recoveredRef;
+      }
+    }
     if (!merchantRef?.image_reference) continue;
 
     rows.push({
