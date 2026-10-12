@@ -395,9 +395,16 @@ export function retrieveSameVideoRosterCandidates(input: {
   const observations = rankSameVideoRosterCandidates({ candidates, description: {
     ...input.description, brand_candidate: null, model_candidate: null, search_terms: [],
   } });
+  // A third independent retrieval view uses only physical appearance. OCR,
+  // brand/model guesses and search terms must not monopolize the visual budget.
+  // This view only nominates candidates; strict image verification still decides.
+  const structural = rankSameVideoRosterCandidates({ candidates, description: {
+    ...input.description, brand_candidate: null, model_candidate: null,
+    visible_text: [], contextual_text: [], logos_markings: [], search_terms: [],
+  } });
   const selected = new Map<string, SameVideoCanonicalCandidate>();
   for (let i = 0; i < candidates.length && selected.size < ROSTER_VISUAL_CANDIDATE_LIMIT; i++) {
-    for (const row of [hypotheses[i], observations[i]]) {
+    for (const row of [hypotheses[i], observations[i], structural[i]]) {
       if (selected.size >= ROSTER_VISUAL_CANDIDATE_LIMIT) break;
       if (row) selected.set(row.identity.canonical_key, row);
     }
