@@ -54,7 +54,7 @@ export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImp
   if(!Number.isInteger(maxCases)||maxCases<1||maxCases>100)throw new Error('Invalid case budget');
   const cases=harvestReplayRequests(har,{contentRef}).slice(0,maxCases), rows=[];
   for(const c of cases){
-    let current=null,status='OK';
+    let current=null,status='OK',error_code=null,validation_fields=[];
     const abort=new AbortController();
     const timer=setTimeout(()=>abort.abort(),timeoutMs);
     try {
@@ -62,12 +62,28 @@ export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImp
       if(auth)headers.authorization='Basic '+auth;
       const response=await fetchImpl(endpoint,{method:'POST',headers,
         body:JSON.stringify(c.request),signal:abort.signal,redirect:'error'});
-      if(!response.ok)status='HTTP_'+response.status;
+      if(!response.ok) {
+        status='HTTP_'+response.status;
+        // Do not echo arbitrary response bodies: they can contain private source data.
+        try {
+          const payload=await response.json();
+          const code=payload?.code ?? payload?.error?.code;
+          if(typeof code==='string' && /^[A-Z][A-Z0-9_]{1,79}$/.test(code)) error_code=code;
+          const issues=Array.isArray(payload?.issues) ? payload.issues :
+            Array.isArray(payload?.error?.issues) ? payload.error.issues : [];
+          const allowed=new Set(['description','context','source_image','telemetry',
+            'vpm_observation_mode','body','timestamp_ms','event_id','session_id',
+            'interaction_started_at']);
+          validation_fields=[...new Set(issues.flatMap(issue=>
+            Array.isArray(issue?.path) ? issue.path.map(String).filter(p=>allowed.has(p)) : []
+          ))].slice(0,8);
+        } catch {}
+      }
       else {const data=await response.json();current=summarize(data);}
     } catch {status='NETWORK_OR_PROVIDER_FAILURE';}
     finally {clearTimeout(timer);}
     rows.push({case_id:c.case_id,video_timestamp_ms:c.request.context?.timestamp_ms??null,
-      original:c.original,current,status,
+      original:c.original,current,status,error_code,validation_fields,
       changed:status==='OK'&&JSON.stringify([c.original.top_identity,c.original.top_class,c.original.count])!==JSON.stringify([current?.top_identity,current?.top_class,current?.count])});
   }
   return {version:1,mode:'recorded_description_and_frame_resolver_replay',
