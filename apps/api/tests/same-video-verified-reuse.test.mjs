@@ -608,3 +608,27 @@ test('visual verification preserves agreeing in-roster match and fails closed on
   assert.equal(unavailable.mapping, null);
   assert.equal(unavailable.reason, 'visual_unavailable');
 });
+
+test('structural roster retrieval keeps true SKU despite misleading model and OCR among 40 items', () => {
+  const rows=Array.from({length:40},(_,i)=>({
+    mapping:{...mapping,canonical_key:'product:v1:bag-'+i,product_id:'bag-'+i},
+    identity:{...identity,canonical_key:'product:v1:bag-'+i,
+      object_type:'handbag',title:'Model '+i,model:'Model '+i,
+      visible_text:['model '+i],shape_silhouette:['ordinary tote'],
+      distinctive_features:['standard top handle'],style_attributes:[],
+      logos_markings:[],color:null,material:null}
+  }));
+  rows[39].identity={
+    ...rows[39].identity,model:'True model',title:'True model',
+    shape_silhouette:['arched double handles and tapered body'],
+    distinctive_features:['diagonal front zipper and side buckle']
+  };
+  const selected=mod.retrieveSameVideoRosterCandidates({candidates:rows,
+    description:{...description,category:'accessories',subcategory:'handbag',
+      model_candidate:'Model 0',visible_text:['model 0'],search_terms:['model 0'],
+      distinctive_features:['diagonal front zipper and side buckle'],
+      shape_silhouette:['arched double handles and tapered body'],
+      style_attributes:[],logos_markings:[],color:null,material:null}});
+  assert.ok(selected.length<=mod.ROSTER_VISUAL_CANDIDATE_LIMIT);
+  assert.ok(selected.some(row=>row.identity.canonical_key==='product:v1:bag-39'));
+});
