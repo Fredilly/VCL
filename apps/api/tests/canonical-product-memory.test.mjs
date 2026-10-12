@@ -396,3 +396,13 @@ test('canonical merge preserves distinct visual references and dedupes repeated 
     new Set(['partner:front', 'partner:side']),
   );
 });
+
+test('portable SKU reference takes precedence over merchant offer image across videos', () => {
+  const sku=memory.canonicalProductIdentity({mapping,model:null});
+  const carryable={...sku,visual_references:[
+    {reference_key:'offer',image_url:'https://merchant.example.com/offer.jpg',provenance:'merchant_verified'},
+    {reference_key:'verified',image_url:'https://catalog.example.com/sku.jpg',provenance:'partner_catalog'},
+  ]};
+  assert.equal(memory.preferredCanonicalReference(carryable),'https://catalog.example.com/sku.jpg');
+  assert.equal(memory.preferredCanonicalReference({...carryable,visual_references:[]}),null);
+});

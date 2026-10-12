@@ -32,7 +32,7 @@ import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, create
 import { lookupVerifiedProductMapping, parseVerifiedProductMappings, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { backfillLegacyAdminCanonicalMappings, consolidateCanonicalProducts, durableCanonicalCandidates, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
 import { eligibleSameVideoCanonicalCandidates, resolveSameVideoReuse, identityWithTrustedVpmObservations, rankSameVideoRosterCandidates, retrieveSameVideoRosterCandidates, unresolvedRosterCandidateKeys, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
-import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, type CanonicalProductIdentity } from './canonical-product-memory.js';
+import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, preferredCanonicalReference, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 import { fetchProductPageMetadata } from './product-page-enrichment.js';
@@ -816,7 +816,13 @@ async function confirmSameVideoReuseWithImage(
   const rows: Array<{ candidate: SameVideoCanonicalCandidate; identity: CanonicalProductIdentity; product: ProductCandidate }> = [];
   for (const candidate of visualCandidates) {
     let identity = candidate.identity;
-    let merchantRef = identity.merchant_refs.find((ref) => Boolean(ref.image_reference && ref.destination));
+    // Trust SKU-bound visual memory ahead of volatile shopping-offer imagery.
+    // This is a candidate reference, never an automatic Exact decision.
+    const preferredImage = preferredCanonicalReference(identity);
+    let merchantRef = preferredImage && candidate.mapping.destination
+      ? { source: 'canonical_visual_reference', item_id: candidate.mapping.product_id,
+          destination: candidate.mapping.destination, image_reference: preferredImage }
+      : identity.merchant_refs.find((ref) => Boolean(ref.image_reference && ref.destination));
 
     if (!merchantRef?.image_reference) {
       const refreshed = await refreshVerifiedOffers(providers, candidate.mapping).catch(() => null);
