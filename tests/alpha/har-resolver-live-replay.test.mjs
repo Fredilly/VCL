@@ -75,3 +75,14 @@ test('HTTP 400 string messages classified without exposing message text',async()
   assert.equal(result.rows[0].error_category,'VALIDATION');
   assert.equal(JSON.stringify(result).includes('secret-123'),false);
 });
+
+test('report separates identity, confidence and offer count changes',async()=>{
+  const result=await replayHar(har,{endpoint:'https://api.example.test/resolve-products',
+    maxCases:1,fetchImpl:async()=>({ok:true,json:async()=>({
+      products:[{identity_key:'sku:new',result_class:'SIMILAR',title:'New'}],state:'RESULTS'
+    })})});
+  assert.equal(result.identity_changed,1);
+  assert.equal(result.confidence_changed,0);
+  assert.equal(result.offers_changed,0);
+  assert.equal(result.changed,1);
+});
