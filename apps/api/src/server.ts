@@ -9,7 +9,7 @@ import { parseSelectionPoint, TargetLocalizationError, type SelectionPoint } fro
 import { CommerceNoResultsError, buildProductQueryVariants, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
 import { classifyCanonicalRelationship, highConfidenceMetadataContradiction, verifyCandidate, rankVerified } from './candidate-verification.js';
 import { canonical } from './verification-evidence.js';
-import { candidateKey, compareCandidateImages, parseSourceImage, imageRequestBudget } from './candidate-images.js';
+import { candidateKey, compareCandidateImages, parseSourceImage, imageRequestBudget, safeImageUrl } from './candidate-images.js';
 import type { ImageComparison } from './verification-evidence.js';
 import { EbayAuth } from './ebay-auth.js';
 import { EbayCommerceProvider, ebayItemIdForLiveLookup } from './ebay-commerce.js';
@@ -931,9 +931,18 @@ async function confirmSameVideoReuseWithImage(
   // The shared request budget still caps fetches; recovered images must pass
   // exactly the same independent visual verifier before becoming Exact.
   const missingRows = rows.filter((row) => !comparisons.has(row.identity.canonical_key)).slice(0, 6);
-  if (missingRows.length && env.BRAVE_SEARCH_API_KEY) {
+  if (missingRows.length) {
     const recoveredRows = (await Promise.all(missingRows.map(async (row) => {
-      const recovered = await recoverVerifiedProductImage(
+      // Reuse another verified image for this exact canonical identity before
+      // spending search quota. A broken preferred URL does not invalidate the
+      // other SKU-bound visual references or merchant images.
+      const references = [
+        ...(row.identity.visual_references ?? []).map(ref => ref.image_url),
+        row.candidate.mapping.image_reference,
+        ...row.identity.merchant_refs.map(ref => ref.image_reference),
+      ].filter((url): url is string => Boolean(url && safeImageUrl(url) && url !== row.product.image_reference));
+      const alternate = [...new Set(references)][0] ?? null;
+      const recovered = alternate ?? await recoverVerifiedProductImage(
         env.BRAVE_SEARCH_API_KEY,
         { ...row.candidate.mapping, image_reference: null },
       ).catch(() => null);
