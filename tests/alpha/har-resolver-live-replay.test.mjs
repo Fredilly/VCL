@@ -61,3 +61,14 @@ test('HTTP 400 exposes only allowlisted validation fields and safe error codes',
   assert.equal(JSON.stringify(result).includes('private-image-data'),false);
   assert.deepEqual(JSON.parse(JSON.stringify(result.rows[0].validation_fields)),['context','timestamp_ms']);
 });
+
+test('HTTP 400 string messages classified without exposing message text',async()=>{
+  const result=await replayHar(har,{endpoint:'https://api.example.test/resolve-products',
+    maxCases:1,fetchImpl:async()=>({ok:false,status:400,json:async()=>({
+      error:'Invalid request body with PRIVATE frame name: secret-123'
+    })})});
+  assert.equal(result.rows[0].status,'HTTP_400');
+  assert.equal(result.rows[0].error_shape,'json_object');
+  assert.equal(result.rows[0].error_category,'VALIDATION');
+  assert.equal(JSON.stringify(result).includes('secret-123'),false);
+});
