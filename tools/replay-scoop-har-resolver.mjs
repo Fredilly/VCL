@@ -54,7 +54,7 @@ export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImp
   if(!Number.isInteger(maxCases)||maxCases<1||maxCases>100)throw new Error('Invalid case budget');
   const cases=harvestReplayRequests(har,{contentRef}).slice(0,maxCases), rows=[];
   for(const c of cases){
-    let current=null,status='OK',error_code=null,validation_fields=[];
+    let current=null,status='OK',error_code=null,validation_fields=[],error_shape=null,error_category=null;
     const abort=new AbortController();
     const timer=setTimeout(()=>abort.abort(),timeoutMs);
     try {
@@ -67,6 +67,16 @@ export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImp
         // Do not echo arbitrary response bodies: they can contain private source data.
         try {
           const payload=await response.json();
+          error_shape=typeof payload==='string' ? 'json_string' : Array.isArray(payload) ? 'json_array' : (payload && typeof payload==='object' ? 'json_object' : 'json_scalar');
+          const message=typeof payload==='string' ? payload : [payload?.message,payload?.error?.message,typeof payload?.error==='string' ? payload.error : null].find(x=>typeof x==='string');
+          if(typeof message==='string') {
+            const m=message.toLowerCase();
+            error_category=/auth|unauthoriz|forbidden|credential|permission|token/.test(m) ? 'AUTH' :
+              /size|large|payload too/.test(m) ? 'PAYLOAD_SIZE' :
+              /json|parse|syntax/.test(m) ? 'JSON_PARSE' :
+              /schema|valid|missing|required|field|body|parameter/.test(m) ? 'VALIDATION' :
+              /quota|rate.limit/.test(m) ? 'QUOTA' : 'OTHER';
+          }
           const code=payload?.code ?? payload?.error?.code;
           if(typeof code==='string' && /^[A-Z][A-Z0-9_]{1,79}$/.test(code)) error_code=code;
           const issues=Array.isArray(payload?.issues) ? payload.issues :
@@ -83,7 +93,7 @@ export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImp
     } catch {status='NETWORK_OR_PROVIDER_FAILURE';}
     finally {clearTimeout(timer);}
     rows.push({case_id:c.case_id,video_timestamp_ms:c.request.context?.timestamp_ms??null,
-      original:c.original,current,status,error_code,validation_fields,
+      original:c.original,current,status,error_code,validation_fields,error_shape,error_category,
       changed:status==='OK'&&JSON.stringify([c.original.top_identity,c.original.top_class,c.original.count])!==JSON.stringify([current?.top_identity,current?.top_class,current?.count])});
   }
   return {version:1,mode:'recorded_description_and_frame_resolver_replay',
