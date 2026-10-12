@@ -395,6 +395,8 @@ export class FeedbackLedger {
       CREATE INDEX IF NOT EXISTS idx_learning_category ON scoop_learning(category, subcategory);
       CREATE INDEX IF NOT EXISTS idx_learning_evidence ON scoop_learning(evidence_key);
       CREATE INDEX IF NOT EXISTS idx_feedback_review_action ON feedback_review(action);
+      CREATE INDEX IF NOT EXISTS idx_context_candidate_family ON result_context(candidate_key, category, subcategory, brand, model);
+      CREATE INDEX IF NOT EXISTS idx_signal_candidate ON mapping_signal(candidate_key);
     `);
     for (const statement of [
       'ALTER TABLE scoop_learning ADD COLUMN platform TEXT',
@@ -641,8 +643,14 @@ export class FeedbackLedger {
            WHERE candidate_key = ?`,
           key,
         )[0] ?? {};
-        const familyRows = this.rows(
-          `SELECT f.feedback_type, c.evidence_key
+        // Aggregate in SQLite instead of materializing every historical feedback
+        // row for each candidate. This keeps Durable Objects rows_read bounded
+        // by a single aggregate row per candidate.
+        const familyCounts = this.rows(
+          `SELECT
+             SUM(CASE WHEN f.feedback_type IN ('wrong_item','wrong_category','not_similar') THEN 1 ELSE 0 END) AS wrong_count,
+             SUM(CASE WHEN f.feedback_type IN ('correct_match','useful') THEN 1 ELSE 0 END) AS correct_count,
+             COUNT(DISTINCT NULLIF(c.evidence_key, '')) AS context_count
            FROM feedback f
            JOIN result_context c ON c.event_id = f.event_id AND c.result_id = f.result_id
            WHERE c.candidate_key = ?
@@ -651,10 +659,10 @@ export class FeedbackLedger {
              AND lower(COALESCE(c.brand, '')) = ?
              AND lower(COALESCE(c.model, '')) = ?`,
           key, family.category, family.subcategory, family.brand ?? '', family.model ?? '',
-        );
-        const familyWrong = familyRows.filter((row) => WRONG_TYPES.has(String(row.feedback_type ?? ''))).length;
-        const familyCorrect = familyRows.filter((row) => CORRECT_TYPES.has(String(row.feedback_type ?? ''))).length;
-        const familyContexts = new Set(familyRows.map((row) => String(row.evidence_key ?? '')).filter(Boolean)).size;
+        )[0] ?? {};
+        const familyWrong = Number(familyCounts.wrong_count ?? 0);
+        const familyCorrect = Number(familyCounts.correct_count ?? 0);
+        const familyContexts = Number(familyCounts.context_count ?? 0);
         penalties.push({
           candidate_key: key,
           exact_wrong_count: Number(exact.wrong_count ?? 0),
