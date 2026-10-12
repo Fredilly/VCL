@@ -926,7 +926,11 @@ async function confirmSameVideoReuseWithImage(
   // then run the same strict visual verifier again. Missing or rejected evidence
   // still fails closed; no generic lookalike can inherit Exact.
   let retryVerification: typeof images | null = null;
-  const missingRows = rows.filter((row) => !comparisons.has(row.identity.canonical_key)).slice(0, 2);
+  // Recover missing reference images across a full verifier batch, rather than
+  // silently dropping every missing roster identity after the first two.
+  // The shared request budget still caps fetches; recovered images must pass
+  // exactly the same independent visual verifier before becoming Exact.
+  const missingRows = rows.filter((row) => !comparisons.has(row.identity.canonical_key)).slice(0, 6);
   if (missingRows.length && env.BRAVE_SEARCH_API_KEY) {
     const recoveredRows = (await Promise.all(missingRows.map(async (row) => {
       const recovered = await recoverVerifiedProductImage(
