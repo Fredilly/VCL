@@ -931,7 +931,7 @@ async function confirmSameVideoReuseWithImage(
   // The shared request budget still caps fetches; recovered images must pass
   // exactly the same independent visual verifier before becoming Exact.
   const missingRows = rows.filter((row) => !comparisons.has(row.identity.canonical_key)).slice(0, 6);
-  if (missingRows.length && env.BRAVE_SEARCH_API_KEY) {
+  if (missingRows.length) {
     const recoveredRows = (await Promise.all(missingRows.map(async (row) => {
       // Reuse another verified image for this exact canonical identity before
       // spending search quota. A broken preferred URL does not invalidate the
