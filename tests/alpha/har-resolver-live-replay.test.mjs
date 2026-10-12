@@ -21,6 +21,9 @@ test('replay retains recorded pixels privately and does not claim SKU truth',asy
  const result=await replayHar(har,{endpoint:'https://api.example.test/resolve-products',
   fetchImpl:async (_url,options)=>{
    calls++;
+   const id=options.headers['x-scoop-install-id'];
+   assert.match(id,/^[a-f0-9-]{36}$/i);
+   assert.notEqual(id,'old-session');
    const body=JSON.parse(options.body);
    assert.equal(body.source_image,frame);
    return {ok:true,json:async()=>({products:[{title:'Trunkie',result_class:'SIMILAR',identity_key:'sku:trunkie'}],state:'RESULTS'})};
