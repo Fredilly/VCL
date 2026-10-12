@@ -930,7 +930,16 @@ async function confirmSameVideoReuseWithImage(
   // silently dropping every missing roster identity after the first two.
   // The shared request budget still caps fetches; recovered images must pass
   // exactly the same independent visual verifier before becoming Exact.
-  const missingRows = rows.filter((row) => !comparisons.has(row.identity.canonical_key)).slice(0, 6);
+  // An absent comparison is not necessarily a broken image. When the model
+  // times out, rejects a schema, or returns no candidates after loading all
+  // thumbnails, looking up more image URLs wastes quota and edge subrequests.
+  // Keep these cases unknown/fail-closed instead of treating them as image errors.
+  const hasMissingImageEvidence = images.timing.batches.some(
+    (batch) => batch.images_loaded < batch.candidates,
+  );
+  const missingRows = hasMissingImageEvidence
+    ? rows.filter((row) => !comparisons.has(row.identity.canonical_key)).slice(0, 6)
+    : [];
   if (missingRows.length) {
     const recoveredRows = (await Promise.all(missingRows.map(async (row) => {
       // Reuse another verified image for this exact canonical identity before
