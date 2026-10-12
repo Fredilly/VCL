@@ -3,7 +3,7 @@
 // Replays the captured object description and source image through the CURRENT
 // commerce resolver. This does not measure fresh vision/localization correctness.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -36,6 +36,9 @@ export function harvestReplayRequests(har, {contentRef=null}={}) {
     const case_id=digest(e.startedDateTime+'|'+(req.context?.content_ref??'')+'|'+(req.context?.timestamp_ms??'')+'|'+req.source_image);
     cases.push({case_id,request:{
       description:req.description,context:req.context,source_image:req.source_image,
+      // Preserve the API request contract; replay telemetry must not duplicate
+      // original interaction identifiers when submitting paid requests.
+      telemetry: req.telemetry ? {...req.telemetry, event_id:randomUUID(),session_id:randomUUID(),interaction_started_at:Date.now()} : undefined,
       ...(req.vpm_observation_mode?{vpm_observation_mode:req.vpm_observation_mode}:{})
     },original:summarize(res)});
   }
