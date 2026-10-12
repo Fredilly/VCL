@@ -48,3 +48,16 @@ test('time and cost changes alone do not masquerade as SKU improvements',async()
     })})});
   assert.equal(result.changed,0);
 });
+
+test('HTTP 400 exposes only allowlisted validation fields and safe error codes',async()=>{
+  const result=await replayHar(har,{endpoint:'https://api.example.test/resolve-products',
+    fetchImpl:async()=>({ok:false,status:400,json:async()=>({
+      code:'VALIDATION_FAILED',message:'private-image-data:secret',
+      issues:[{path:['context','timestamp_ms'],message:'sensitive'},
+        {path:['password'],message:'sensitive'}]
+    })})});
+  assert.equal(result.rows[0].status,'HTTP_400');
+  assert.equal(result.rows[0].error_code,'VALIDATION_FAILED');
+  assert.equal(JSON.stringify(result).includes('private-image-data'),false);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.rows[0].validation_fields)),['context','timestamp_ms']);
+});
