@@ -5,13 +5,15 @@ const frame='data:image/jpeg;base64,/9j/2Q==';
 const har={log:{entries:[{startedDateTime:'2026-10-10T00:00:00Z',
  request:{url:'https://api.example.test/resolve-products',method:'POST',
  postData:{text:JSON.stringify({description:{model_candidate:'Petite Malle'},
- source_image:frame,context:{content_ref:'youtube:handbags',timestamp_ms:636600},
+ source_image:frame,context:{content_ref:'youtube:handbags',timestamp_ms:636600},vpm_observation_mode:null,
  telemetry:{event_id:'old-event',session_id:'old-session',interaction_started_at:1791555203775}})}},
  response:{content:{text:JSON.stringify({products:[{title:'Trunkie',identity_key:'sku:trunkie',result_class:'SIMILAR'}],state:'RESULTS'})}}}]}};
 test('replay retains recorded pixels privately and does not claim SKU truth',async()=>{
  const cases=harvestReplayRequests(har,{contentRef:'handbags'});
  assert.equal(cases.length,1);
  assert.equal(cases[0].request.source_image,frame);
+ assert.equal(Object.hasOwn(cases[0].request,'vpm_observation_mode'),true);
+ assert.equal(cases[0].request.vpm_observation_mode,null);
  assert.notEqual(cases[0].request.telemetry.event_id,'old-event');
  assert.notEqual(cases[0].request.telemetry.session_id,'old-session');
  assert.equal(typeof cases[0].request.telemetry.interaction_started_at,'number');

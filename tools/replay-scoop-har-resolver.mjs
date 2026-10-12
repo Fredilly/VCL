@@ -35,11 +35,14 @@ export function harvestReplayRequests(har, {contentRef=null}={}) {
     if(contentRef && !String(req.context?.content_ref??'').includes(contentRef))continue;
     const case_id=digest(e.startedDateTime+'|'+(req.context?.content_ref??'')+'|'+(req.context?.timestamp_ms??'')+'|'+req.source_image);
     cases.push({case_id,request:{
-      description:req.description,context:req.context,source_image:req.source_image,
-      // Preserve the API request contract; replay telemetry must not duplicate
-      // original interaction identifiers when submitting paid requests.
-      telemetry: req.telemetry ? {...req.telemetry, event_id:randomUUID(),session_id:randomUUID(),interaction_started_at:Date.now()} : undefined,
-      ...(req.vpm_observation_mode?{vpm_observation_mode:req.vpm_observation_mode}:{})
+      // Preserve every field of the original successful HTTP 200 request,
+      // including explicitly null optional fields. Previous replay rebuilt
+      // the payload and dropped fields the API contract may require.
+      ...req,
+      telemetry: req.telemetry ? {
+        ...req.telemetry, event_id:randomUUID(), session_id:randomUUID(),
+        interaction_started_at:Date.now(),
+      } : req.telemetry,
     },original:summarize(res)});
   }
   return cases;
