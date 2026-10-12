@@ -22,7 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      HAR_URL: ${{ secrets.SCOOP_REPLAY_HAR_URL }}
+      R2_ACCESS_KEY_ID: ${{ secrets.SCOOP_REPLAY_R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.SCOOP_REPLAY_R2_SECRET_ACCESS_KEY }}
+      R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       HAR_SHA256: ${{ secrets.SCOOP_REPLAY_HAR_SHA256 }}
       SCOOP_READER_BASIC_AUTH: ${{ secrets.SCOOP_READER_BASIC_AUTH }}
       SCOOP_REPLAY_HAR_ENDPOINT: https://api.vcl.article6.org/resolve-products
@@ -39,33 +41,40 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Safely download private HAR without printing URL or contents
+      - name: Download private HAR using bucket-scoped R2 credentials
         shell: bash
         run: |
           set -euo pipefail
           umask 077
+          python3 -m pip install --quiet boto3
           python3 - <<'PY'
-          import hashlib, os, pathlib, urllib.parse, urllib.request
-          url=os.environ.get('HAR_URL','')
-          expected=os.environ.get('HAR_SHA256','').lower()
-          if not url or not expected:
-              raise SystemExit('Missing SCOOP_REPLAY_HAR_URL or SCOOP_REPLAY_HAR_SHA256 repository secret')
-          parsed=urllib.parse.urlparse(url)
-          if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password:
-              raise SystemExit('Replay HAR URL must be HTTPS with no embedded credentials')
+          import hashlib, os, pathlib
+          import boto3
+          from botocore.config import Config
+          required=('R2_ACCESS_KEY_ID','R2_SECRET_ACCESS_KEY','R2_ACCOUNT_ID','HAR_SHA256')
+          if any(not os.environ.get(k) for k in required):
+              raise SystemExit('Missing private R2 replay credentials or checksum secret')
+          expected=os.environ['HAR_SHA256'].strip().lower()
           if len(expected)!=64 or any(c not in '0123456789abcdef' for c in expected):
-              raise SystemExit('Invalid HAR SHA256 repository secret')
-          req=urllib.request.Request(url,headers={'User-Agent':'ScoopPrivateReplay/1'})
-          with urllib.request.urlopen(req,timeout=45) as response:
-              if response.geturl()!=url:
-                  raise SystemExit('HAR redirects are not permitted')
-              data=response.read(16*1024*1024+1)
+              raise SystemExit('Invalid HAR SHA-256')
+          s3=boto3.client('s3',
+            endpoint_url='https://'+os.environ['R2_ACCOUNT_ID']+'.r2.cloudflarestorage.com',
+            aws_access_key_id=os.environ['R2_ACCESS_KEY_ID'],
+            aws_secret_access_key=os.environ['R2_SECRET_ACCESS_KEY'],
+            region_name='auto',config=Config(signature_version='s3v4',
+              connect_timeout=15,read_timeout=45,retries={'max_attempts':2}))
+          body=s3.get_object(Bucket='scoop-private-replays',
+            Key='network-log(20261010-081638).har')['Body']
+          data=body.read(16*1024*1024+1)
+          body.close()
           if len(data)>16*1024*1024:
-              raise SystemExit('HAR exceeds 16 MB limit')
+              raise SystemExit('HAR exceeds 16 MB')
           if hashlib.sha256(data).hexdigest()!=expected:
-              raise SystemExit('Private HAR SHA256 mismatch')
-          pathlib.Path(os.environ['RUNNER_TEMP'],'private-scoop.har').write_bytes(data)
-          print('Private HAR downloaded and hash verified')
+              raise SystemExit('Private HAR SHA-256 mismatch')
+          out=pathlib.Path(os.environ['RUNNER_TEMP'],'private-scoop.har')
+          out.write_bytes(data)
+          out.chmod(0o600)
+          print('Private HAR downloaded and checksum verified')
           PY
 
       - name: Replay selected Handbagholic resolver calls
