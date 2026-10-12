@@ -2407,7 +2407,15 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       // useful family/subtype hypotheses before retrieval. Retrieval and verification
       // are deliberately different evidence roles.
       const fallbackDescription = canonicalRows.length ? rosterFallbackDescription(description) : description;
-      const retrievalDescription = canonicalRows.length ? rosterFallbackRetrievalDescription(description) : description;
+      // An unresolved roster is not evidence for the model's guessed family.
+      // Retaining that guess in commerce queries can promote an unrelated sibling
+      // offer ahead of the unverified roster candidates. Keep physical evidence,
+      // but suppress unsupported model names until the comparison is complete.
+      const retrievalDescription = canonicalRows.length
+        ? (['incomplete_comparison', 'ambiguous', 'visual_unavailable'].includes(sameVideoReuse.reason)
+          ? fallbackDescription
+          : rosterFallbackRetrievalDescription(description))
+        : description;
       const baseQueries = buildProductQueryVariants(retrievalDescription, context, visibleTextQueryV2);
       // Rank the entire roster independent of partner input order, then spend the
       // bounded open-world query budget on the strongest roster hypotheses.
