@@ -406,3 +406,22 @@ export function mergeCanonicalProductIdentity(
     visual_references: visualReferences,
   };
 }
+
+/** Pick the best stored visual evidence for a canonical SKU, independent of the
+ * video or a particular merchant listing. Do not use reference URLs as identity
+ * proof: source/candidate pixel comparison remains mandatory. */
+export function preferredCanonicalReference(identity: CanonicalProductIdentity): string | null {
+  const rank: Record<CanonicalVisualReference['provenance'], number> = {
+    partner_catalog: 0, admin_verified: 1, merchant_verified: 2, web_verified: 3,
+  };
+  const trusted = (identity.visual_references ?? [])
+    .filter(ref => {
+      try {
+        const u = new URL(ref.image_url);
+        return u.protocol === 'https:' && !u.username && !u.password;
+      } catch { return false; }
+    })
+    .sort((a,b) => rank[a.provenance]-rank[b.provenance]
+      || a.reference_key.localeCompare(b.reference_key));
+  return trusted[0]?.image_url ?? null;
+}
