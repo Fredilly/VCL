@@ -38,7 +38,7 @@ export function harvestReplayRequests(har, {contentRef=null}={}) {
       description:req.description,context:req.context,source_image:req.source_image,
       // Preserve the API request contract; replay telemetry must not duplicate
       // original interaction identifiers when submitting paid requests.
-      telemetry: req.telemetry ? {...req.telemetry, event_id:randomUUID(),session_id:randomUUID(),interaction_started_at:new Date().toISOString()} : undefined,
+      telemetry: req.telemetry ? {...req.telemetry, event_id:randomUUID(),session_id:randomUUID(),interaction_started_at:Date.now()} : undefined,
       ...(req.vpm_observation_mode?{vpm_observation_mode:req.vpm_observation_mode}:{})
     },original:summarize(res)});
   }
