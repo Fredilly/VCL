@@ -62,7 +62,7 @@ export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImp
     finally {clearTimeout(timer);}
     rows.push({case_id:c.case_id,video_timestamp_ms:c.request.context?.timestamp_ms??null,
       original:c.original,current,status,
-      changed:status==='OK'&&JSON.stringify(c.original)!==JSON.stringify(current)});
+      changed:status==='OK'&&JSON.stringify([c.original.top_identity,c.original.top_class,c.original.count])!==JSON.stringify([current?.top_identity,current?.top_class,current?.count])});
   }
   return {version:1,mode:'recorded_description_and_frame_resolver_replay',
     evaluation:'UNLABELED_NO_ACCURACY_CLAIM',count:rows.length,
