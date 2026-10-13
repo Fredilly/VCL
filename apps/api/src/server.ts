@@ -1991,7 +1991,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       try {
         if (path === '/learning-export') return jsonResponse(await verifiedLedgerRequest(env, '/learning/export', {}));
         const input = await request.json() as { platform: string; content_ref: string; offers: Array<RosterOfferInput | string> };
-        const rows = await preparePartnerRoster(env, new URL(request.url).origin, input);
+        const rows = await preparePartnerRoster(env, new URL(request.url).origin, input, undefined, env.BRAVE_SEARCH_API_KEY);
         await ingestPartnerRoster(env, rows);
         await auditAdminAction(env, authorized.admin_id, 'partner_roster_ingested', { identities: rows.length, offers: input.offers.length, content_ref: input.content_ref });
         return jsonResponse({ accepted: true, distinct_variants: rows.length, merchant_offers: input.offers.length, reference_ready: rows.length });
