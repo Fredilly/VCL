@@ -317,6 +317,12 @@ export class FeedbackLedger {
 
   constructor(ctx: { storage: { sql: FeedbackLedger['sql'] } }) {
     this.sql = ctx.storage.sql;
+    // Durable Object constructors may run on every cold start. Checking the
+    // schema version avoids repeatedly scanning existing tables/indexes and
+    // retrying already-applied ALTER TABLE migrations on normal requests.
+    const versionRows = this.sql.exec('PRAGMA user_version');
+    const version = Number(Array.from(versionRows)[0]?.user_version ?? 0);
+    if (version >= 1) return;
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS result_context (
         event_id TEXT NOT NULL,
@@ -415,6 +421,7 @@ export class FeedbackLedger {
         if (!String(error).toLowerCase().includes('duplicate column')) throw error;
       }
     }
+    this.sql.exec('PRAGMA user_version = 1');
   }
 
   private rows(query: string, ...bindings: unknown[]): Record<string, unknown>[] {
