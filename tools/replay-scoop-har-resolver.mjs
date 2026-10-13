@@ -18,6 +18,13 @@ function summarize(response) {
     top_class: typeof top?.result_class === 'string' ? top.result_class : null,
     count: Array.isArray(response?.products) ? response.products.length : null,
     mapping_reason: typeof response?.verified_mapping?.reason === 'string' ? response.verified_mapping.reason : null,
+    roster_retrieved: Array.isArray(response?.verified_mapping?.roster_retrieval?.retrieved_keys) ? response.verified_mapping.roster_retrieval.retrieved_keys.length : null,
+    roster_unresolved: Array.isArray(response?.verified_mapping?.roster_retrieval?.unresolved_keys) ? response.verified_mapping.roster_retrieval.unresolved_keys.length : null,
+    visual_failures: Number.isFinite(response?.verified_mapping?.visual_failures) ? response.verified_mapping.visual_failures : null,
+    visual_failure_reasons: response?.verified_mapping?.visual_failure_reasons && typeof response.verified_mapping.visual_failure_reasons === 'object'
+      ? Object.fromEntries(Object.entries(response.verified_mapping.visual_failure_reasons)
+        .filter(([key,value]) => /^[a-z0-9_]{1,60}$/.test(key) && Number.isInteger(value) && value >= 0)
+        .slice(0,20)) : null,
     compared: Number.isFinite(response?.verification?.compared) ? response.verification.compared : null,
     latency_ms: Number.isFinite(response?.latency_ms) ? response.latency_ms : null,
     cost_usd: Number.isFinite(response?.cost_usage?.total_cost_usd) ? response.cost_usage.total_cost_usd : null,
@@ -47,7 +54,7 @@ export function harvestReplayRequests(har, {contentRef=null}={}) {
   }
   return cases;
 }
-export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImpl=fetch,timeoutMs=30000,maxCases=30}={}) {
+export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImpl=fetch,timeoutMs=45000,maxCases=30}={}) {
   const url=new URL(endpoint);
   if(url.protocol!=='https:' && !(url.hostname==='localhost' && url.protocol==='http:')) throw new Error('HTTPS required for live resolver');
   if(url.pathname!=='/resolve-products')throw new Error('Endpoint must be /resolve-products');
@@ -93,7 +100,12 @@ export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImp
         } catch {}
       }
       else {const data=await response.json();current=summarize(data);}
-    } catch {status='NETWORK_OR_PROVIDER_FAILURE';}
+    } catch (error) {
+      // Do not conflate a 45-second client timeout with a provider/network
+      // failure. The two causes require different production fixes.
+      status=abort.signal.aborted ? 'CLIENT_TIMEOUT' : 'NETWORK_OR_PROVIDER_FAILURE';
+      error_category=abort.signal.aborted ? 'TIMEOUT' : 'NETWORK';
+    }
     finally {clearTimeout(timer);}
     rows.push({case_id:c.case_id,video_timestamp_ms:c.request.context?.timestamp_ms??null,
       original:c.original,current,status,error_code,validation_fields,error_shape,error_category,

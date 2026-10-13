@@ -2611,6 +2611,8 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
               : {}),
           candidates_compared: sameVideoVisualCheck.compared + crossVideoVisualCheck.compared,
           visual_failures: sameVideoVisualCheck.failures + crossVideoVisualCheck.failures,
+          // Bounded reason counts only: never expose images, candidate titles or credentials.
+          visual_failure_reasons: sameVideoVisualCheck.failure_reasons,
         },
         latency_ms: total_ms,
         timing: { ...resolved.timing, total_ms },
