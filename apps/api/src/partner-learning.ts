@@ -69,7 +69,7 @@ export async function preparePartnerRoster(
   env: VerifiedProductLedgerEnv,
   origin: string,
   input: { platform: string; content_ref: string; offers: Array<RosterOfferInput | string> },
-  dependencies: { metadata: (url: string) => Promise<PartnerCatalogMetadata>; image: typeof fetchCatalogImage }
+  dependencies: { metadata: (url: string) => Promise<PartnerCatalogMetadata>; image: typeof fetchCatalogImage; recover?: typeof recoverVerifiedProductImage }
     = { metadata: fetchPartnerCatalogMetadata, image: fetchCatalogImage },
   imageSearchApiKey?: string,
 ): Promise<SameVideoCanonicalCandidate[]> {
@@ -93,7 +93,7 @@ export async function preparePartnerRoster(
     // nominate a reference, and the bytes still have to pass fetchCatalogImage.
     // Never promote image-search similarity into verified product identity.
     if (!imageUrl && imageSearchApiKey && (offer.sku || offer.variant_id || metadata.sku)) {
-      imageUrl = await recoverVerifiedProductImage(imageSearchApiKey, {
+      imageUrl = await (dependencies.recover ?? recoverVerifiedProductImage)(imageSearchApiKey, {
         platform: input.platform.trim(), content_ref: input.content_ref.trim(), scope: 'entire_video',
         object_type: objectType, brand,
         product_id: offer.sku || metadata.sku || variant,
