@@ -828,26 +828,8 @@ async function confirmSameVideoReuseWithImage(
               destination: candidate.mapping.destination, image_reference: candidate.mapping.image_reference }
           : undefined);
 
-    if (!merchantRef?.image_reference) {
-      const refreshed = await refreshVerifiedOffers(providers, candidate.mapping).catch(() => null);
-      const hydrated = refreshed?.products.find((product) => Boolean(product.image_reference && product.destination)) ?? null;
-      const hydratedDestination = hydrated?.destination ?? null;
-      if (hydrated?.image_reference && hydratedDestination) {
-        const hydratedIdentity: CanonicalProductIdentity = {
-          ...identity,
-          merchant_refs: [{
-            source: hydrated.provider || hydrated.provenance || null,
-            item_id: hydrated.id || candidate.mapping.product_id,
-            destination: hydratedDestination,
-            image_reference: hydrated.image_reference,
-          }],
-        };
-        identity = await persistCanonicalProductIdentity(env, hydratedIdentity).catch(() => hydratedIdentity);
-        merchantRef = identity.merchant_refs.find((ref) => Boolean(ref.image_reference && ref.destination))
-          ?? hydratedIdentity.merchant_refs[0];
-      }
-    }
-
+    // Use the linked SKU's own image before any broad shopping-offer refresh.
+    // A search offer may be a visually similar sibling, not the listed variant.
     // The roster is the source of candidate identities. An expired or missing
     // listing image must not silently remove a known SKU before comparison.
     // Recovery is restricted to this verified mapping; never promote a search
@@ -866,6 +848,26 @@ async function confirmSameVideoReuseWithImage(
         };
         identity = { ...identity, merchant_refs: [...identity.merchant_refs, sourceRef] };
         merchantRef = sourceRef;
+      }
+    }
+
+    if (!merchantRef?.image_reference) {
+      const refreshed = await refreshVerifiedOffers(providers, candidate.mapping).catch(() => null);
+      const hydrated = refreshed?.products.find((product) => Boolean(product.image_reference && product.destination)) ?? null;
+      const hydratedDestination = hydrated?.destination ?? null;
+      if (hydrated?.image_reference && hydratedDestination) {
+        const hydratedIdentity: CanonicalProductIdentity = {
+          ...identity,
+          merchant_refs: [{
+            source: hydrated.provider || hydrated.provenance || null,
+            item_id: hydrated.id || candidate.mapping.product_id,
+            destination: hydratedDestination,
+            image_reference: hydrated.image_reference,
+          }],
+        };
+        identity = await persistCanonicalProductIdentity(env, hydratedIdentity).catch(() => hydratedIdentity);
+        merchantRef = identity.merchant_refs.find((ref) => Boolean(ref.image_reference && ref.destination))
+          ?? hydratedIdentity.merchant_refs[0];
       }
     }
 
