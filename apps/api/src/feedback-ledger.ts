@@ -397,6 +397,12 @@ export class FeedbackLedger {
       CREATE INDEX IF NOT EXISTS idx_feedback_review_action ON feedback_review(action);
       CREATE INDEX IF NOT EXISTS idx_context_candidate_family ON result_context(candidate_key, category, subcategory, brand, model);
       CREATE INDEX IF NOT EXISTS idx_signal_candidate ON mapping_signal(candidate_key);
+      -- Family lookups use lower() expressions. A plain column index cannot
+      -- cover those predicates; without this index /penalties can scan the
+      -- entire context history for every candidate on every Scoop request.
+      CREATE INDEX IF NOT EXISTS idx_context_candidate_normalized_family
+        ON result_context(candidate_key, lower(category), lower(subcategory),
+          lower(COALESCE(brand, '')), lower(COALESCE(model, '')));
     `);
     for (const statement of [
       'ALTER TABLE scoop_learning ADD COLUMN platform TEXT',
