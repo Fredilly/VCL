@@ -252,3 +252,40 @@ test('HTTP resolver compares at most 24 of 73 same-family variants and exposes u
   assert.equal(result.verified_mapping.roster_retrieval.unresolved_keys.length, 49);
   assert.ok(!result.products.some(row => row.result_class === 'EXACT'));
 });
+
+test('SKU and retail URL can recover an unavailable product reference automatically', async () => {
+  const { env } = environment();
+  const record = {
+    sku: 'M14526',
+    destination: 'https://catalog.shop/products/trunkie-M14526',
+  };
+  const recoverCalls = [];
+  const rows = await learning.preparePartnerRoster(env, 'https://api.scoop.shop', input([record]), {
+    metadata: async () => ({sku:'M14526',variant_id:'M14526',brand:'Louis Vuitton',
+      title:'Louis Vuitton Trunkie',object_type:'bag',image_reference:null}),
+    image: async url => {
+      assert.equal(url,'https://images.shop/M14526.png');
+      return catalog;
+    },
+    recover: async (key, mapping) => {
+      recoverCalls.push({key,mapping});
+      return 'https://images.shop/M14526.png';
+    },
+  }, 'test-brave-key');
+  assert.equal(recoverCalls.length,1);
+  assert.equal(recoverCalls[0].mapping.product_id,'M14526');
+  assert.equal(rows.length,1);
+  assert.match(rows[0].mapping.image_reference,/\/product-reference\//);
+});
+test('SKU-only import fails closed when no authentic image can be recovered', async () => {
+  const { env } = environment();
+  const depsNoImage = {
+    metadata: async () => ({sku:'M14526',variant_id:'M14526',brand:'Louis Vuitton',
+      title:'Louis Vuitton Trunkie',object_type:'bag',image_reference:null}),
+    image: async () => null,
+    recover: async () => null,
+  };
+  await assert.rejects(() => learning.preparePartnerRoster(env,'https://api.scoop.shop',
+    input([{sku:'M14526',destination:'https://catalog.shop/products/trunkie-M14526'}]),
+    depsNoImage,'test-brave-key'), /reference image missing/);
+});
