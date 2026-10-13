@@ -96,6 +96,10 @@ function normalizeItem(
     category: item.categories?.[0]?.categoryName ?? null,
     metadata: { brand: item.brand?.brandName, model: model ?? undefined, category: item.categories?.[0]?.categoryName },
     image_reference: item.image?.imageUrl ?? item.additionalImages?.[0]?.imageUrl ?? null,
+    image_references: [...new Set([
+      item.image?.imageUrl,
+      ...(item.additionalImages ?? []).map((image) => image.imageUrl),
+    ].filter((url): url is string => Boolean(url)))],
     provenance: 'ebay:browse',
     destination: ebayDestinationForOffer(item.itemId, resolveChromeMerchantDestination({
       plain_url: item.itemWebUrl ?? null,
