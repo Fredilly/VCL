@@ -1016,7 +1016,7 @@ async function confirmSameVideoReuseWithImage(
     // Missing/blocked image evidence is candidate-local. Keep every successful
     // comparison and let the existing strict visual threshold decide among them.
     // Uncompared roster identities remain visible in retrieval telemetry.
-    decision: resolveSameVideoReuse({ description, candidates: eligible, comparisons, require_complete_comparisons: false }),
+    decision: resolveSameVideoReuse({ description, candidates: eligible, comparisons, require_complete_comparisons: true }),
     retrieval: { ...retrieval, verified_keys: [...comparisons.keys()],
       unresolved_keys: unresolvedRosterCandidateKeys({ candidates: eligible, comparisons }) },
     comparisons: Object.fromEntries(comparisons),
