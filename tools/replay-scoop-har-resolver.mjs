@@ -9,6 +9,21 @@ import { fileURLToPath } from 'node:url';
 
 const digest = value => createHash('sha256').update(value).digest('hex').slice(0,20);
 const parse = raw => { try { return JSON.parse(raw); } catch { return null; } };
+// Respect production rate limits: bounded backoff, never rotate install IDs or
+// override server quotas to force a replay through.
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+function retryDelay(response, attempt) {
+  if (![429, 502, 503, 504].includes(response.status) || attempt >= 2) return null;
+  const retryAfter = response.headers.get('retry-after');
+  let ms = 2000 * 2 ** attempt;
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    const until = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - Date.now();
+    if (Number.isFinite(until)) ms = Math.max(0, until);
+  }
+  // A longer server-enforced quota is not a transient network problem.
+  return ms <= 30000 ? ms : null;
+}
 function summarize(response) {
   const top = Array.isArray(response?.products) ? response.products[0] : null;
   return {
@@ -70,8 +85,17 @@ export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImp
     try {
       const headers={'content-type':'application/json','x-scoop-install-id':replayInstallId};
       if(auth)headers.authorization='Basic '+auth;
-      const response=await fetchImpl(endpoint,{method:'POST',headers,
-        body:JSON.stringify(c.request),signal:abort.signal,redirect:'error'});
+      let response;
+      for (let attempt=0; attempt<3; attempt++) {
+        response=await fetchImpl(endpoint,{method:'POST',headers,
+          body:JSON.stringify(c.request),signal:abort.signal,redirect:'error'});
+        const delay=retryDelay(response,attempt);
+        if(delay===null)break;
+        // Release rejected responses before retrying. The per-case abort signal
+        // still bounds the entire operation to timeoutMs.
+        await response.body?.cancel();
+        await wait(delay);
+      }
       if(!response.ok) {
         status='HTTP_'+response.status;
         // Do not echo arbitrary response bodies: they can contain private source data.
