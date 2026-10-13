@@ -138,8 +138,27 @@ export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImp
       offers_changed:status==='OK'&&c.original.count!==current?.count,
       changed:status==='OK'&&JSON.stringify([c.original.top_identity,c.original.top_class,c.original.count])!==JSON.stringify([current?.top_identity,current?.top_class,current?.count])});
   }
+  // A completed HTTP request is not an accepted product identification.
+  // Surface roster evidence gaps explicitly so green CI cannot be read as accuracy.
+  const evidence = {
+    cases_with_missing_sku_image_reference: rows.filter(r =>
+      (r.current?.visual_failure_reasons?.missing_sku_image_reference ?? 0) > 0).length,
+    missing_sku_image_reference_events: rows.reduce((n,r) =>
+      n + (r.current?.visual_failure_reasons?.missing_sku_image_reference ?? 0), 0),
+    unresolved_roster_comparisons: rows.reduce((n,r) =>
+      n + (r.current?.roster_unresolved ?? 0), 0),
+    cases_with_incomplete_comparison: rows.filter(r =>
+      r.current?.mapping_reason === 'incomplete_comparison').length,
+  };
+  const acceptance = {
+    status: rows.length !== maxCases ? 'INCOMPLETE_SAMPLE'
+      : evidence.cases_with_missing_sku_image_reference || evidence.unresolved_roster_comparisons
+        ? 'BLOCKED_MISSING_VISUAL_EVIDENCE' : 'UNLABELED_NEEDS_GROUND_TRUTH',
+    accuracy_verified: false,
+    reason: 'Request completion and changed shopping offers never prove correct SKU identity.',
+  };
   return {version:1,mode:'recorded_description_and_frame_resolver_replay',
-    evaluation:'UNLABELED_NO_ACCURACY_CLAIM',count:rows.length,
+    evaluation:'UNLABELED_NO_ACCURACY_CLAIM', evidence, acceptance, count:rows.length,
     completed:rows.filter(r=>r.status==='OK').length,
     changed:rows.filter(r=>r.changed).length,
     identity_changed:rows.filter(r=>r.identity_changed).length,
@@ -158,6 +177,6 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
     auth:process.env.SCOOP_READER_BASIC_AUTH||null,
     maxCases:Number(process.env.SCOOP_REPLAY_MAX_CASES || '5')});
   writeFileSync(output,JSON.stringify(result,null,2)+'\n',{flag:'wx',mode:0o600});
-  console.log(JSON.stringify({count:result.count,completed:result.completed,changed:result.changed},null,2));
+  console.log(JSON.stringify({count:result.count,completed:result.completed,changed:result.changed, evidence:result.evidence, acceptance:result.acceptance},null,2));
   if(result.completed!==result.count)process.exitCode=1;
 }
