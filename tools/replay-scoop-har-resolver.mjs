@@ -47,7 +47,7 @@ export function harvestReplayRequests(har, {contentRef=null}={}) {
   }
   return cases;
 }
-export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImpl=fetch,timeoutMs=30000,maxCases=30}={}) {
+export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImpl=fetch,timeoutMs=45000,maxCases=30}={}) {
   const url=new URL(endpoint);
   if(url.protocol!=='https:' && !(url.hostname==='localhost' && url.protocol==='http:')) throw new Error('HTTPS required for live resolver');
   if(url.pathname!=='/resolve-products')throw new Error('Endpoint must be /resolve-products');
@@ -93,7 +93,12 @@ export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImp
         } catch {}
       }
       else {const data=await response.json();current=summarize(data);}
-    } catch {status='NETWORK_OR_PROVIDER_FAILURE';}
+    } catch (error) {
+      // Do not conflate a 45-second client timeout with a provider/network
+      // failure. The two causes require different production fixes.
+      status=abort.signal.aborted ? 'CLIENT_TIMEOUT' : 'NETWORK_OR_PROVIDER_FAILURE';
+      error_category=abort.signal.aborted ? 'TIMEOUT' : 'NETWORK';
+    }
     finally {clearTimeout(timer);}
     rows.push({case_id:c.case_id,video_timestamp_ms:c.request.context?.timestamp_ms??null,
       original:c.original,current,status,error_code,validation_fields,error_shape,error_category,
