@@ -868,7 +868,7 @@ async function confirmSameVideoReuseWithImage(
     const imageReferences = [...new Set([
       preferredImage,
       candidate.mapping.image_reference,
-      ...identity.visual_references.map((ref) => ref.image_url),
+      ...(identity.visual_references ?? []).map((ref) => ref.image_url),
       ...identity.merchant_refs.map((ref) => ref.image_reference),
     ].filter((url): url is string => Boolean(url && safeImageUrl(url))))];
 
