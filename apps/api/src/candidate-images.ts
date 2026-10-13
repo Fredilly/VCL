@@ -133,7 +133,6 @@ async function fetchCandidateImage(
     const image = await fetchImage(url, failure, budget);
     if (image) return image;
   }
-  failure('image_sources_exhausted');
   return null;
 }
 
