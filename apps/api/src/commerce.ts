@@ -28,6 +28,8 @@ export type ProductCandidate = {
   model: string | null;
   category: string | null;
   image_reference: string | null;
+  /** Ordered fallback image URLs for the same candidate identity. */
+  image_references?: string[];
   provenance: string;
   destination: string | null;
   price: string | null;
