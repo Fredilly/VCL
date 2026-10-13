@@ -852,6 +852,23 @@ async function confirmSameVideoReuseWithImage(
     // listing image must not silently remove a known SKU before comparison.
     // Recovery is restricted to this verified mapping; never promote a search
     // lookalike to a new identity.
+    // Resolve the verified SKU's own destination image before spending search quota.
+    // This URL is attached to the saved mapping, not a visually similar search hit.
+    // A recovered image is still only candidate evidence and must pass the visual gate.
+    if (!merchantRef?.image_reference) {
+      const sourceImageUrl = await sourceImageForVerifiedMapping(candidate.mapping).catch(() => null);
+      if (sourceImageUrl && safeImageUrl(sourceImageUrl)) {
+        const sourceRef = {
+          source: 'verified_roster_destination_page',
+          item_id: candidate.mapping.product_id,
+          destination: candidate.mapping.destination,
+          image_reference: sourceImageUrl,
+        };
+        identity = { ...identity, merchant_refs: [...identity.merchant_refs, sourceRef] };
+        merchantRef = sourceRef;
+      }
+    }
+
     if (!merchantRef?.image_reference && env.BRAVE_SEARCH_API_KEY) {
       const recovered = await recoverVerifiedProductImage(
         env.BRAVE_SEARCH_API_KEY, { ...candidate.mapping, image_reference: null },
