@@ -1,6 +1,7 @@
 import { canonicalProductIdentity, mergeCanonicalProductIdentity, normalizeIdentityText, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { fetchCatalogImage, parseSourceImage, safeImageUrl, type CatalogImage } from './candidate-images.js';
 import { fetchPartnerCatalogMetadata, type PartnerCatalogMetadata } from './partner-catalog.js';
+import { recoverVerifiedProductImage } from './verified-image-recovery.js';
 import { persistAdminVerifiedMapping, persistCanonicalProductIdentity, verifiedLedgerRequest, type VerifiedProductLedgerEnv } from './verified-product-ledger.js';
 import { resolveSameVideoReuse, type SameVideoCanonicalCandidate } from './same-video-verified-reuse.js';
 import type { VerifiedProductMapping } from './verified-product-mapping.js';
@@ -70,6 +71,7 @@ export async function preparePartnerRoster(
   input: { platform: string; content_ref: string; offers: Array<RosterOfferInput | string> },
   dependencies: { metadata: (url: string) => Promise<PartnerCatalogMetadata>; image: typeof fetchCatalogImage }
     = { metadata: fetchPartnerCatalogMetadata, image: fetchCatalogImage },
+  imageSearchApiKey?: string,
 ): Promise<SameVideoCanonicalCandidate[]> {
   if (!env.VERIFIED_PRODUCT_LEDGER) throw new Error('Durable product memory is required');
   if (!input.platform?.trim() || !input.content_ref?.trim() || !Array.isArray(input.offers) || !input.offers.length || input.offers.length > 100) throw new Error('Need source context and 1-100 offers');
@@ -85,7 +87,20 @@ export async function preparePartnerRoster(
     const brand = (offer.brand || metadata.brand || '').trim();
     const title = (offer.title || metadata.title || '').trim();
     const objectType = (offer.object_type || metadata.object_type || '').trim();
-    const imageUrl = offer.image_reference || metadata.image_reference;
+    let imageUrl = offer.image_reference || metadata.image_reference;
+    // The partner supplies SKU + retailer URL; missing merchant image markup is
+    // our recovery responsibility. Only a SKU-supported image search hit may
+    // nominate a reference, and the bytes still have to pass fetchCatalogImage.
+    // Never promote image-search similarity into verified product identity.
+    if (!imageUrl && imageSearchApiKey && (offer.sku || offer.variant_id || metadata.sku)) {
+      imageUrl = await recoverVerifiedProductImage(imageSearchApiKey, {
+        platform: input.platform.trim(), content_ref: input.content_ref.trim(), scope: 'entire_video',
+        object_type: objectType, brand,
+        product_id: offer.sku || metadata.sku || variant,
+        title, destination: offer.destination, provider: new URL(offer.destination).hostname,
+        provenance: 'admin_verified',
+      });
+    }
     if (metadata.resolution === 'ambiguous') throw new Error(`Offer ${index + 1}: linked variant is ambiguous; provide its catalog fields and reference`);
     if (!variant || variant.length > 160 || !brand || !title || !objectType) throw new Error(`Offer ${index + 1}: explicit variant/SKU, brand, title and object type required when catalog metadata is incomplete`);
     const requestedVariant = offer.sku || offer.variant_id;
