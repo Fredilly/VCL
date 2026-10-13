@@ -822,7 +822,11 @@ async function confirmSameVideoReuseWithImage(
     let merchantRef = preferredImage && candidate.mapping.destination
       ? { source: 'canonical_visual_reference', item_id: candidate.mapping.product_id,
           destination: candidate.mapping.destination, image_reference: preferredImage }
-      : identity.merchant_refs.find((ref) => Boolean(ref.image_reference && ref.destination));
+      : identity.merchant_refs.find((ref) => Boolean(ref.image_reference && ref.destination))
+        ?? (candidate.mapping.image_reference && candidate.mapping.destination && safeImageUrl(candidate.mapping.image_reference)
+          ? { source: 'verified_mapping_image', item_id: candidate.mapping.product_id,
+              destination: candidate.mapping.destination, image_reference: candidate.mapping.image_reference }
+          : undefined);
 
     if (!merchantRef?.image_reference) {
       const refreshed = await refreshVerifiedOffers(providers, candidate.mapping).catch(() => null);
@@ -900,7 +904,10 @@ async function confirmSameVideoReuseWithImage(
     });
   }
 
-  if (!rows.length) return { ...empty, decision: { ...noDecision, reason: 'visual_unavailable' } };
+  if (!rows.length) return { ...empty,
+    decision: { ...noDecision, reason: 'visual_unavailable' },
+    failures: 1, failure_reasons: { missing_sku_image_reference: 1 },
+  };
 
   const budget = imageRequestBudget();
   const images = await compareCandidateImages(
