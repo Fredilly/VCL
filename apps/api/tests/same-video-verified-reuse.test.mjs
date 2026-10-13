@@ -632,3 +632,28 @@ test('structural roster retrieval keeps true SKU despite misleading model and OC
   assert.ok(selected.length<=mod.ROSTER_VISUAL_CANDIDATE_LIMIT);
   assert.ok(selected.some(row=>row.identity.canonical_key==='product:v1:bag-39'));
 });
+
+
+test('missing comparison does not erase a separately verified roster winner when coverage fail-closed is disabled', () => {
+  const secondMapping = { ...mapping, product_id: 'merchant-item-2', canonical_key: 'product:v1:shirt-2' };
+  const secondIdentity = { ...identity, canonical_key: 'product:v1:shirt-2' };
+  const candidates = [
+    { mapping: { ...mapping, track_id: identity.canonical_key }, identity },
+    { mapping: secondMapping, identity: secondIdentity },
+  ];
+  const comparisons = new Map([[identity.canonical_key, {
+    source: {}, candidate: {}, similarity: .97, confidence: .96,
+    matching_details: ['tonal embossed chest lettering'],
+  }]]);
+  const resilient = mod.resolveSameVideoReuse({
+    description, candidates, comparisons, require_complete_comparisons: false,
+  });
+  assert.equal(resilient.canonical_key, identity.canonical_key);
+  assert.equal(resilient.reason, 'visual_confirmed');
+
+  const strictCoverage = mod.resolveSameVideoReuse({
+    description, candidates, comparisons, require_complete_comparisons: true,
+  });
+  assert.equal(strictCoverage.mapping, null);
+  assert.equal(strictCoverage.reason, 'incomplete_comparison');
+});

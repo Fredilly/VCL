@@ -865,6 +865,13 @@ async function confirmSameVideoReuseWithImage(
     }
     if (!merchantRef?.image_reference) continue;
 
+    const imageReferences = [...new Set([
+      preferredImage,
+      candidate.mapping.image_reference,
+      ...(identity.visual_references ?? []).map((ref) => ref.image_url),
+      ...identity.merchant_refs.map((ref) => ref.image_reference),
+    ].filter((url): url is string => Boolean(url && safeImageUrl(url))))];
+
     rows.push({
       candidate,
       identity,
@@ -875,6 +882,7 @@ async function confirmSameVideoReuseWithImage(
         model: identity.model,
         category: identity.object_type,
         image_reference: merchantRef.image_reference,
+        image_references: imageReferences,
         provenance: 'canonical_verified',
         destination: merchantRef.destination,
         price: null,
@@ -1005,6 +1013,9 @@ async function confirmSameVideoReuseWithImage(
   } : images.timing;
 
   return {
+    // Missing/blocked image evidence is candidate-local. Keep every successful
+    // comparison and let the existing strict visual threshold decide among them.
+    // Uncompared roster identities remain visible in retrieval telemetry.
     decision: resolveSameVideoReuse({ description, candidates: eligible, comparisons, require_complete_comparisons: true }),
     retrieval: { ...retrieval, verified_keys: [...comparisons.keys()],
       unresolved_keys: unresolvedRosterCandidateKeys({ candidates: eligible, comparisons }) },

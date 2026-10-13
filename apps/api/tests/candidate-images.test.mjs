@@ -293,3 +293,56 @@ test('deterministic budget: first batch always gets priority when budget is tigh
   const sorted = verifiedTitles.sort();
   assert.deepEqual(sorted, products.slice(0, 6).map((p) => p.title).sort());
 });
+
+
+test('candidate verification falls back to alternate image without dropping healthy candidates', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  const primary = 'https://cdn.example.com/dead.png';
+  const alternate = 'https://cdn.example.com/good.png';
+  let modelCalls = 0;
+  const { compareCandidateImages } = loadModule(filename, { fetch: async (url, options) => {
+    const value = String(url);
+    if (value.includes('generativelanguage')) {
+      modelCalls++;
+      const count = JSON.parse(options.body).contents[0].parts.filter((p) => p.inlineData).length - 1;
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+        source: comparison.source,
+        candidates: Array.from({ length: count }, (_, index) => ({ index, attributes: comparison.candidate, ...comparison })),
+      }) }] } }] });
+    }
+    if (value === primary) return new Response('gone', { status: 404 });
+    if (value === alternate) return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+  } });
+  const healthy = { ...candidate, id: 'healthy', image_reference: 'https://cdn.example.com/healthy.png' };
+  const fallback = { ...candidate, id: 'fallback', image_reference: primary, image_references: [primary, alternate] };
+  const result = await compareCandidateImages('key', 'model', image, description, [fallback, healthy]);
+  assert.equal(result.compared, 2);
+  assert.equal(modelCalls, 1);
+  assert.equal(result.failure_reasons.image_http_404, 1);
+  assert.equal(result.failure_reasons.image_sources_exhausted, undefined);
+});
+
+test('malformed verifier JSON is retried once and successful retry preserves comparisons', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  let modelCalls = 0;
+  const { compareCandidateImages } = loadModule(filename, { fetch: async (url) => {
+    if (!String(url).includes('generativelanguage')) {
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+    }
+    modelCalls++;
+    if (modelCalls === 1) {
+      return Response.json({ candidates: [{ content: { parts: [{ text: '{"source":' }] } }] });
+    }
+    return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+      source: comparison.source,
+      candidates: [{ index: 0, attributes: comparison.candidate, ...comparison }],
+    }) }] } }] });
+  } });
+  const result = await compareCandidateImages('key', 'model', image, description, [candidate]);
+  assert.equal(modelCalls, 2);
+  assert.equal(result.compared, 1);
+  assert.equal(result.failures, 0);
+  assert.equal(result.failure_reasons.model_json_retry, 1);
+  assert.equal(result.usage.requests, 2);
+});
