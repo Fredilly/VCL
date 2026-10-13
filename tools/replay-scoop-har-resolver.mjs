@@ -21,6 +21,10 @@ function summarize(response) {
     roster_retrieved: Array.isArray(response?.verified_mapping?.roster_retrieval?.retrieved_keys) ? response.verified_mapping.roster_retrieval.retrieved_keys.length : null,
     roster_unresolved: Array.isArray(response?.verified_mapping?.roster_retrieval?.unresolved_keys) ? response.verified_mapping.roster_retrieval.unresolved_keys.length : null,
     visual_failures: Number.isFinite(response?.verified_mapping?.visual_failures) ? response.verified_mapping.visual_failures : null,
+    visual_failure_reasons: response?.verified_mapping?.visual_failure_reasons && typeof response.verified_mapping.visual_failure_reasons === 'object'
+      ? Object.fromEntries(Object.entries(response.verified_mapping.visual_failure_reasons)
+        .filter(([key,value]) => /^[a-z0-9_]{1,60}$/.test(key) && Number.isInteger(value) && value >= 0)
+        .slice(0,20)) : null,
     compared: Number.isFinite(response?.verification?.compared) ? response.verification.compared : null,
     latency_ms: Number.isFinite(response?.latency_ms) ? response.latency_ms : null,
     cost_usd: Number.isFinite(response?.cost_usage?.total_cost_usd) ? response.cost_usage.total_cost_usd : null,
