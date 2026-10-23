@@ -21,6 +21,10 @@ export function summarizeVideoSkuCorpus(corpus) {
     if(k && Object.hasOwn(classCounts,k)) classCounts[k]++;
     else classCounts.UNSPECIFIED++;
   }
+  const paired=cases.filter(c=>c.click && Number.isFinite(c.click.x) && Number.isFinite(c.click.y));
+  const centerClicks=paired.filter(c=>Math.abs(c.click.x-0.5)<1e-9 && Math.abs(c.click.y-0.5)<1e-9);
+  // High center-point repetition warrants manual confirmation, not automatic rejection.
+  const suspiciousCenterConcentration=paired.length>=5 && centerClicks.length/paired.length>=0.8;
   return {
     schema_version:1,video:corpus.video,
     status:'COVERAGE_ONLY_NOT_ACCURACY',
@@ -29,11 +33,14 @@ export function summarizeVideoSkuCorpus(corpus) {
       cases_in_narration_window:cases.filter(c=>c.candidate_sections.length>0).length,
       cases_outside_narration_window:cases.filter(c=>c.candidate_sections.length===0).length,
       unpaired_clicks:cases.filter(c=>!c.click).length,
+      center_clicks:centerClicks.length,
+      paired_clicks:paired.length,
+      suspicious_center_click_concentration:suspiciousCenterConcentration,
       reviewed_cases:reviewed,unreviewed_cases:cases.length-reviewed},
     observed_top_classes_not_truth:classCounts,
     section_coverage:sections,
     accuracy:null,exact_precision:null,recall_at_5:null,none_recall:null,
-    next_gate:reviewed===cases.length && cases.every(c=>c.click)
+    next_gate:suspiciousCenterConcentration ? 'VERIFY_CLICK_LOCALIZATION_BEFORE_SKU_SCORING' : reviewed===cases.length && cases.every(c=>c.click)
       ? 'INDEPENDENT_LABEL_VALIDATION_AND_FRAME_COMPARISON'
       : 'INDEPENDENT_FRAME_LABELING_AND_CLICK_CORRELATION'
   };
