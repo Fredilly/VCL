@@ -48,7 +48,9 @@ export function compileVideoSkuCorpus({ video, sections, offers=[], clicks=[] })
     if (truth==='SKU' && !str(c.canonical_sku)) throw new Error('Reviewed SKU requires canonical_sku');
     return {
       id:str(c.id)||'case-'+(i+1), timestamp_ms:ts,
-      click:c.click ?? null, observation:c.observation ?? null,
+      // click_space: 'crop_centered' means the point is relative to a crop built around the click
+      // (the extension always does this), so it carries no frame-position information.
+      click:c.click ?? null, click_space:c.click_space ?? null, observation:c.observation ?? null,
       truth, canonical_sku:truth==='SKU'?str(c.canonical_sku):null,
       reviewed_by:truth==='UNREVIEWED'?null:str(c.reviewed_by)||null,
       candidate_sections:candidates.map(s=>s.id),

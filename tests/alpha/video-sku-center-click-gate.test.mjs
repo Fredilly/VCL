@@ -24,3 +24,21 @@ test('insufficient sample is never presented as an anomaly',()=>{
  const summary=summarizeVideoSkuCorpus(make([{x:.5,y:.5}]));
  assert.equal(summary.totals.suspicious_center_click_concentration,false);
 });
+
+const makeSpaced=(points,space)=>compileVideoSkuCorpus({
+ video:{platform:'youtube',id:'test-video'},
+ sections:[{section:1,family:'Bag',discussion_window_ms:[0,100000]}],
+ clicks:points.map((click,i)=>({timestamp_ms:i*100+1,click,click_space:space}))
+});
+test('crop-centered points are expected to sit at 0.5,0.5 and do not trip the localization gate',()=>{
+ const summary=summarizeVideoSkuCorpus(makeSpaced(Array.from({length:20},()=>({x:.5,y:.5})),'crop_centered'));
+ assert.equal(summary.totals.crop_centered_clicks,20);
+ assert.equal(summary.totals.paired_clicks,0);
+ assert.equal(summary.totals.suspicious_center_click_concentration,false);
+ assert.equal(summary.next_gate,'INDEPENDENT_CROP_CONTENT_LABELING');
+});
+test('frame-space center repetition still trips the gate',()=>{
+ const summary=summarizeVideoSkuCorpus(makeSpaced(Array.from({length:9},()=>({x:.5,y:.5})),'frame'));
+ assert.equal(summary.totals.suspicious_center_click_concentration,true);
+ assert.equal(summary.totals.crop_centered_clicks,0);
+});
