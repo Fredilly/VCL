@@ -56,6 +56,7 @@ export function adaptVideoResearch({ sectionsFile, reviewFile, offerCsv }) {
   }
   const clicks=(reviewFile.clicks??[]).map(c=>({
     id:c.id,timestamp_ms:c.video_timestamp_ms,click:c.point,
+    click_space:c.point_space??reviewFile.point_space??null,
     observation:{
       vision_model_hypothesis:c.vision_hypothesis??null,
       returned_top_title:c.returned_top_title??null,
