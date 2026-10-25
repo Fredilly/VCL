@@ -14,10 +14,21 @@ const schema={
     required:['sku','similarity','visual_compared','contradiction'],
     properties:{sku:{type:'string'},similarity:{type:'number'},visual_compared:{type:'boolean'},contradiction:{type:'boolean'}}}}}
 };
-export async function predict({frame,catalog}) {
+export function partitionCatalog(catalog, size=24) {
+  if (!Array.isArray(catalog) || !catalog.length || !Number.isSafeInteger(size) || size<1 || size>24) throw Error('Invalid catalog batch');
+  const seen=new Set();
+  for(const item of catalog) {
+    if(typeof item?.sku!=='string' || !item.sku.trim() || seen.has(item.sku)) throw Error('Missing or duplicate catalog SKU');
+    seen.add(item.sku);
+  }
+  const batches=[];
+  for(let i=0;i<catalog.length;i+=size) batches.push(catalog.slice(i,i+size));
+  return batches;
+}
+
+async function predictBatch({frame,catalog}) {
   const key=process.env.OPENROUTER_API_KEY;
   if(!key) throw Error('OPENROUTER_API_KEY required');
-  if(catalog.length>24) throw Error('Roster too large for one visual batch; partition before calling model');
   if(catalog.some(c=>!c.references?.length)) throw Error('Missing reference image');
   const parts=[{type:'text',text:`Compare the first image (video frame) against the numbered SKU image references that follow.
 Return JSON only, candidates containing one entry for every SKU. A SKU must not be asserted solely from its title.
@@ -47,4 +58,18 @@ Catalog order: ${catalog.map((c,i)=>`${i+1}: ${c.sku}: ${c.title} (${c.reference
         || parsed.candidates.some(x=>!expected.has(x.sku))) throw Error('Missing or foreign SKU');
     return parsed;
   } finally {clearTimeout(timer);}
+}
+
+// Compare every SKU even for chaotic rosters larger than a single model batch.
+// Fail closed on any missing/failed batch: incomplete evidence must never look
+// like full-catalog recall or an absent SKU. Scores are proposals, not Exact.
+export async function predict({frame,catalog}) {
+  const batches=partitionCatalog(catalog);
+  const candidates=[];
+  for(const batch of batches) {
+    const result=await predictBatch({frame,catalog:batch});
+    candidates.push(...result.candidates);
+  }
+  if(candidates.length!==catalog.length) throw Error('Incomplete cross-batch SKU comparison');
+  return {candidates};
 }
