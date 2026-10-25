@@ -12,5 +12,5 @@ test('out-of-window creator variants survive full-video retrieval; windows are o
 });
 test('foreign-video inventory is never admitted into retrieval',()=>{
  const full=verifiedRosterCanonicalRowsForContent([mapping('A',0,100),{...mapping('B',200,300),content_ref:'other-video'}],'youtube','video-1',250);
- assert.deepEqual(full.map(x=>x.mapping.product_id),['A']);
+ assert.equal(full.map(x=>x.mapping.product_id).join(','),'A');
 });
