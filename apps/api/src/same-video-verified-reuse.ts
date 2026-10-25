@@ -192,7 +192,10 @@ export function confirmSameVideoVisual(
     return { ...decision, mapping: null, canonical_key: null, confidence: 0, reason: 'visual_unavailable' };
   }
 
-  // Material is variant identity evidence, not merely commercial metadata. An\n  // independently observed material contradiction must veto an Exact even when\n  // overall image similarity and the shared model family appear convincing.\n  const critical = ['subtype', 'color', 'sleeve', 'brand', 'model', 'material'] as const;
+  // Material is variant identity evidence, not merely commercial metadata. An
+  // independently observed material contradiction must veto an Exact even when
+  // overall image similarity and the shared model family appear convincing.
+  const critical = ['subtype', 'color', 'sleeve', 'brand', 'model', 'material'] as const;
   for (const key of critical) {
     const source = comparison.source[key];
     const candidate = comparison.candidate[key];
