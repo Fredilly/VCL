@@ -1,84 +1,27 @@
 <!doctype html>
-<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Scoop private crop review</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Scoop · private review</title>
 <style>
-:root{font:16px system-ui;background:#111827;color:#f9fafb}body{max-width:1040px;margin:25px auto;padding:0 16px}button,input,select{font:inherit;padding:9px;border-radius:7px}button{cursor:pointer}main{display:grid;grid-template-columns:minmax(250px,1fr) 1fr;gap:22px;margin:18px 0}#photo{width:100%;height:330px;object-fit:contain;background:#05070c;border:1px solid #374151}article{padding:16px;background:#1f2937;border-radius:10px}label{display:block;margin:12px 0}label input,label select{display:block;width:95%;margin-top:4px}.sub{color:#9ca3af}.warning{color:#fbbf24}pre{white-space:pre-wrap;overflow-wrap:anywhere}button:focus-visible{outline:3px solid #93c5fd}@media(max-width:700px){main{grid-template-columns:1fr}}
-</style>
-<h1>Scoop · private crop review</h1>
-<p class="sub">Local-only labeling. Load the private joined-review-manifest.json and optionally the extracted crop image files. No uploads or external requests.</p>
-<label>Reviewer's identifier <input id="reviewer" placeholder="Your reviewer ID" autocomplete="off"></label>
-<label>Private review manifest <input id="manifest" type="file" accept=".json,application/json"></label>
-<label>Crop images (select all from private directory) <input id="images" type="file" accept="image/*" multiple></label>
-<p id="status" class="sub">No manifest loaded</p>
-<main>
-<article><img id="photo" alt="Selected video crop"><p id="imageStatus" class="warning">Select a manifest and crop files.</p><pre id="metadata"></pre></article>
+:root{font:16px system-ui;background:#111827;color:#fff}body{max-width:1000px;margin:20px auto;padding:16px}button,input,select,textarea{font:inherit;padding:8px}main{display:grid;grid-template-columns:1fr 1fr;gap:20px}article{background:#1f2937;padding:16px;border-radius:10px}#photo{width:100%;height:330px;object-fit:contain;background:#05070c}label{display:block;margin:12px 0}label input,label select,label textarea{display:block;max-width:95%;width:95%}.dim{color:#bbb}.warn{color:#fbbf24}@media(max-width:700px){main{grid-template-columns:1fr}}
+</style></head><body>
+<h1>Private crop review</h1>
+<p class="dim">Runs locally. Export reviewed labels before closing the page. No remote requests, and no model predictions shown.</p>
+<label>Reviewer ID <input id="reviewer"></label>
+<label>Private joined-review-manifest.json <input type="file" id="manifest" accept=".json"></label>
+<label>Canonical roster JSON (required) <input type="file" id="roster" accept=".json"></label>
+<label>Private crop images <input type="file" id="images" accept="image/*" multiple></label>
+<label>Resume previously exported labels (optional) <input type="file" id="resume" accept=".json"></label>
+<p id="status" class="dim">Load manifest, roster, and images.</p>
+<main><article><h2 id="caseTitle">No case</h2><img id="photo" alt="Private selected crop"><p id="imageStatus" class="warn">No crop loaded</p><p id="metadata"></p></article>
 <article>
-<h2 id="caseTitle">No case</h2>
-<label>Ground truth
-<select id="truth"><option value="UNREVIEWED">Not reviewed</option><option value="IN_ROSTER">In roster</option><option value="OUT_OF_ROSTER">Not in roster (NONE)</option><option value="AMBIGUOUS">Cannot identify variant (UNKNOWN)</option></select></label>
-<label>Canonical product / variant ID <input id="sku" placeholder="Required only for in-roster"></label>
-<label>Reviewer notes <input id="notes" placeholder="Visual evidence, uncertainty"></label>
-<p class="warning">Do not infer ground truth from a product title, merchant link or section timestamp. An admin label is not an automatic EXACT match.</p>
-<button id="previous">Previous</button> <button id="save">Save label and next</button> <button id="next">Next</button>
-<p id="progress"></p><button id="export">Export reviewed labels JSON</button>
+<label>Ground truth <select id="truth"><option value="UNREVIEWED">Not reviewed</option><option value="SKU">SKU in roster</option><option value="NONE">Not in roster (NONE)</option><option value="UNKNOWN">Ambiguous / cannot tell</option></select></label>
+<label>Verified canonical variant <select id="sku"><option value="">Select a roster variant</option></select></label>
+<label>Uncertainty type <select id="reason"><option value="">Select reason</option><option value="family_known_variant_unknown">Family known, variant unknown</option><option value="visually_indistinguishable">Multiple visually indistinguishable variants</option><option value="insufficient_visual_evidence">Insufficient visual evidence</option></select></label>
+<label>Possible variants (comma separated roster IDs) <input id="possible"></label>
+<label>Evidence notes <textarea id="notes" rows="3"></textarea></label>
+<p class="warn">Identity must be judged from the image independently. Reviewed labels cannot force runtime EXACT.</p>
+<button id="previous">Previous</button> <button id="save">Save &amp; next</button> <button id="next">Next</button>
+<p id="progress"></p><button id="export">Export labels</button>
 </article></main>
-<script>
-'use strict';
-const el=id=>document.getElementById(id);
-let cases=[],index=0,labels={},images=new Map(),objectUrls=[];
-const escapeText=value=>String(value??'');
-function imageCandidates(c){
- const first=c.input?.frames?.[0]||{};
- return [first.path,first.file,first.filename,first.image_path,first.crop_path,
- c.image_path,c.crop_path,c.image_file,c.id+'.png',c.id+'.jpg'].filter(x=>typeof x==='string');
-}
-function show(){
- if(!cases.length)return;
- const c=cases[index],l=labels[c.id]||{};
- el('caseTitle').textContent='Case '+escapeText(c.id);
- el('truth').value=l.truth||'UNREVIEWED';el('sku').value=l.canonical_product_id||'';
- el('notes').value=l.notes||'';
- const frame=c.input?.frames?.[0]||{};
- el('metadata').textContent=JSON.stringify({timestamp_ms:frame.timestamp_ms,click:c.input?.click,
- correlation:c.click_correlation,observation:c.observation},null,2);
- const candidates=imageCandidates(c);
- const found=candidates.map(x=>images.get(x.split('/').pop())).find(Boolean);
- el('photo').removeAttribute('src');
- if(found){el('photo').src=found;el('imageStatus').textContent='Local image loaded'}
- else{el('imageStatus').textContent='No matching crop file. Do not label without viewing the crop.'}
- el('progress').textContent=(index+1)+' / '+cases.length+' · '+Object.values(labels).filter(x=>x.truth!=='UNREVIEWED').length+' reviewed';
-}
-function save(){
- if(!cases.length)return false;
- const c=cases[index],truth=el('truth').value,sku=el('sku').value.trim();
- if(!el('reviewer').value.trim()){alert('Enter reviewer identifier');return false}
- if(truth==='IN_ROSTER'&&!sku){alert('Provide canonical variant ID');return false}
- if(truth!=='IN_ROSTER'&&sku){alert('SKU allowed only for IN_ROSTER');return false}
- labels[c.id]={case_id:c.id,truth,canonical_product_id:sku||null,notes:el('notes').value.trim(),
- reviewed_by:el('reviewer').value.trim(),reviewed_at:new Date().toISOString()};
- show();return true;
-}
-el('manifest').addEventListener('change',async e=>{
- const f=e.target.files[0];if(!f)return;
- try{const data=JSON.parse(await f.text());if(!Array.isArray(data.cases))throw Error('Missing cases array');
- const ids=data.cases.map(c=>c.id);if(ids.some(x=>!x)||new Set(ids).size!==ids.length)throw Error('Invalid or duplicate case IDs');
- cases=data.cases;labels={};index=0;el('status').textContent=cases.length+' private cases loaded';show()}
- catch(err){cases=[];el('status').textContent='Invalid manifest: '+err.message}
-});
-el('images').addEventListener('change',e=>{
- objectUrls.forEach(URL.revokeObjectURL);objectUrls=[];images=new Map();
- for(const file of e.target.files){const url=URL.createObjectURL(file);objectUrls.push(url);images.set(file.name,url)}
- show();
-});
-el('previous').onclick=()=>{if(index>0)index--;show()};
-el('next').onclick=()=>{if(index<cases.length-1)index++;show()};
-el('save').onclick=()=>{if(save()&&index<cases.length-1){index++;show()}};
-el('export').onclick=()=>{
- if(!cases.length)return;
- const output={schema:'scoop-private-labels-v1',exported_at:new Date().toISOString(),
- source:'independent-local-crop-review',cases:cases.map(c=>labels[c.id]||{case_id:c.id,truth:'UNREVIEWED'})};
- const blob=new Blob([JSON.stringify(output,null,2)+'\n'],{type:'application/json'});
- const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='scoop-reviewed-labels.json';a.click();
- setTimeout(()=>URL.revokeObjectURL(url),1000);
-};
-</script></html>
+<script type="module" src="./private-crop-review-app.mjs"></script></body></html>
