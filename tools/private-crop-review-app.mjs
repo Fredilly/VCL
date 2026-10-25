@@ -40,7 +40,7 @@ function navigate(step){
 $('previous').onclick=()=>navigate(-1);
 $('next').onclick=()=>navigate(1);
 $('save').onclick=()=>navigate(1);
-for(const id of ['truth','sku','reason','possible','notes'])$(id).addEventListener('change',markDirty);
+for(const id of ['truth','sku','reason','possible','notes','reviewer'])$(id).addEventListener('change',()=>{if(cases.length&&$('truth').value!=='UNREVIEWED'&&visible){const truth=$('truth').value,sku=$('sku').value;const draft={case_id:cases[index].id,truth,true_sku:truth==='SKU'?sku:null,uncertainty_reason:truth==='UNKNOWN'?$('reason').value:null,possible_variants:$('possible').value.split(',').map(x=>x.trim()).filter(Boolean),reviewed_by:$('reviewer').value.trim(),reviewed_at:new Date().toISOString(),notes:$('notes').value.trim()};try{validateLabel(draft,allowed);labels[cases[index].id]=draft}catch{}}markDirty()});
 $('manifest').onchange=async e=>{
  const f=e.target.files[0];if(!f)return;
  if((Object.keys(labels).length||dirty)&&!confirm('Discard existing review? Export first if needed.')){e.target.value='';return}
@@ -58,7 +58,7 @@ $('roster').onchange=async e=>{
  try{
   const data=JSON.parse(await e.target.files[0].text());allowed=rosterIds(data);
   if(!allowed.length)throw Error('No canonical variant identifiers in roster');
-  labels={};persist();const select=$('sku');select.replaceChildren(new Option('Select a variant',''));
+  labels=Object.fromEntries(Object.entries(labels).filter(([,l])=>l.truth!=='SKU'||allowed.includes(l.true_sku)));persist();const select=$('sku');select.replaceChildren(new Option('Select a variant',''));
   for(const id of allowed)select.add(new Option(id,id));
   render();$('status').textContent='Roster: '+allowed.length+' variants';
  }catch(err){alert(err.message)}
