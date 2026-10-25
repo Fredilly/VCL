@@ -40,11 +40,10 @@ export function verifiedRosterCanonicalRowsForContent(
     if (mapping.platform.trim().toLowerCase() !== normalizedPlatform) continue;
     if (normalizeContentRef(mapping.platform, mapping.content_ref) !== normalizedRef) continue;
 
-    if (typeof timestampMs === 'number') {
-      const start = mapping.candidate_window_start_ms;
-      const end = mapping.candidate_window_end_ms;
-      if (typeof start === 'number' && typeof end === 'number' && (timestampMs < start || timestampMs > end)) continue;
-    }
+    // A discussion or transcript window is a retrieval prior, not proof of
+    // on-screen absence. Keep same-video identities eligible for image verification.
+    // The bounded shortlist handles comparison cost; no out-of-window identity
+    // may be declared Exact without independent visual verification.
 
     const identity = canonicalProductIdentity({
       mapping,
@@ -78,8 +77,9 @@ export function scopedPartnerRosterCandidates(input: {
     return typeof input.timestamp_ms !== 'number' || typeof start !== 'number' || typeof end !== 'number'
       || (input.timestamp_ms >= start && input.timestamp_ms <= end);
   };
-  const partner = input.partner.filter(inWindow);
-  const hasActiveWindow = partner.some(row => typeof row.mapping.candidate_window_start_ms === 'number'
+  const partner = input.partner;
+  const activePartner = partner.filter(inWindow);
+  const hasActiveWindow = activePartner.some(row => typeof row.mapping.candidate_window_start_ms === 'number'
     && typeof row.mapping.candidate_window_end_ms === 'number');
   const allowed = new Set(partner.map(row => row.identity.canonical_key));
   // Keep explicitly imported variants as candidates, even when a partner
@@ -89,6 +89,8 @@ export function scopedPartnerRosterCandidates(input: {
   const durable = input.durable.filter(row => inWindow(row) && (!hasActiveWindow
     || allowed.has(row.identity.canonical_key) || Boolean(row.identity.variant_id)));
   const unique = new Map<string, VerifiedRosterCanonicalRow>();
-  for (const row of [...durable, ...partner]) if (!unique.has(row.identity.canonical_key)) unique.set(row.identity.canonical_key, row);
+  // Put active appearance-window hints first; never exclude other partner
+  // variants just because the selected item appears outside narrated timing.
+  for (const row of [...activePartner, ...durable, ...partner]) if (!unique.has(row.identity.canonical_key)) unique.set(row.identity.canonical_key, row);
   return [...unique.values()];
 }
