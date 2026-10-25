@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Scoop · private review</title>
+<style>
+:root{font:16px system-ui;background:#111827;color:#fff}body{max-width:1000px;margin:20px auto;padding:16px}button,input,select,textarea{font:inherit;padding:8px}main{display:grid;grid-template-columns:1fr 1fr;gap:20px}article{background:#1f2937;padding:16px;border-radius:10px}#photo{width:100%;height:330px;object-fit:contain;background:#05070c}label{display:block;margin:12px 0}label input,label select,label textarea{display:block;max-width:95%;width:95%}.dim{color:#bbb}.warn{color:#fbbf24}@media(max-width:700px){main{grid-template-columns:1fr}}
+</style></head><body>
+<h1>Private crop review</h1>
+<p class="dim">Runs locally. Export reviewed labels before closing the page. No remote requests, and no model predictions shown.</p>
+<label>Reviewer ID <input id="reviewer"></label>
+<label>Private joined-review-manifest.json <input type="file" id="manifest" accept=".json"></label>
+<label>Canonical roster JSON (required) <input type="file" id="roster" accept=".json"></label>
+<label>Private crop images <input type="file" id="images" accept="image/*" multiple></label>
+<label>Resume previously exported labels (optional) <input type="file" id="resume" accept=".json"></label>
+<p id="status" class="dim">Load manifest, roster, and images.</p>
+<main><article><h2 id="caseTitle">No case</h2><img id="photo" alt="Private selected crop"><p id="imageStatus" class="warn">No crop loaded</p><p id="metadata"></p></article>
+<article>
+<label>Ground truth <select id="truth"><option value="UNREVIEWED">Not reviewed</option><option value="SKU">SKU in roster</option><option value="NONE">Not in roster (NONE)</option><option value="UNKNOWN">Ambiguous / cannot tell</option></select></label>
+<label>Verified canonical variant <select id="sku"><option value="">Select a roster variant</option></select></label>
+<label>Uncertainty type <select id="reason"><option value="">Select reason</option><option value="family_known_variant_unknown">Family known, variant unknown</option><option value="visually_indistinguishable">Multiple visually indistinguishable variants</option><option value="insufficient_visual_evidence">Insufficient visual evidence</option></select></label>
+<label>Possible variants (comma separated roster IDs) <input id="possible"></label>
+<label>Evidence notes <textarea id="notes" rows="3"></textarea></label>
+<p class="warn">Identity must be judged from the image independently. Reviewed labels cannot force runtime EXACT.</p>
+<button id="previous">Previous</button> <button id="save">Save &amp; next</button> <button id="next">Next</button>
+<p id="progress"></p><button id="export">Export labels</button>
+</article></main>
+<script type="module" src="./private-crop-review-app.mjs"></script></body></html>
