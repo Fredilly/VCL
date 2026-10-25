@@ -363,17 +363,18 @@ test('Handbagholic High Rise Bumbag can resolve from explicit model evidence', (
 });
 
 
-test('Handbagholic partner roster narrows candidates by appearance window without turning time into identity', () => {
+test('Handbagholic partner roster preserves all candidates across appearance windows', () => {
   const flower = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 288420);
-  assert.equal(flower.map(({ mapping }) => mapping.product_id).join(','), 'FP-1925620');
-  assert.ok(flower[0]?.mapping.image_reference?.includes('42edbf9959473e53ec1c92e1c8327770.jpg'));
+  assert.equal(flower.length, 10);
+  assert.ok(flower.some(({ mapping }) => mapping.product_id === 'FP-1925620'));
+  assert.ok(flower.find(({ mapping }) => mapping.product_id === 'FP-1925620')?.mapping.image_reference?.includes('42edbf9959473e53ec1c92e1c8327770.jpg'));
 
   const trunkie = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 620046);
-  assert.equal(trunkie.map(({ mapping }) => mapping.product_id).join(','), 'M14526');
-  assert.ok(trunkie[0]?.mapping.image_reference?.includes('M14526_PM1_Worn'));
+  assert.ok(trunkie.some(({ mapping }) => mapping.product_id === 'M14526'));
+  assert.ok(trunkie.find(({ mapping }) => mapping.product_id === 'M14526')?.mapping.image_reference?.includes('M14526_PM1_Worn'));
 
   const gap = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 320000);
-  assert.equal(gap.length, 0);
+  assert.equal(gap.length, 10);
 });
 
 test('candidate appearance windows remain candidate-only: generic frame evidence does not become direct Exact', () => {
@@ -439,11 +440,11 @@ test('configured multi-product roster can be canonicalized without code-specific
   ]));
 
   const aRows = partner.verifiedRosterCanonicalRowsForContent(mappings, 'youtube', 'partner-video', 3000);
-  assert.equal(aRows.map(({ mapping }) => mapping.product_id).join(','), 'A');
+  assert.equal(aRows.map(({ mapping }) => mapping.product_id).join(','), 'A,B');
   assert.equal(aRows[0].mapping.track_id, aRows[0].identity.canonical_key);
 
   const bRows = partner.verifiedRosterCanonicalRowsForContent(mappings, 'youtube', 'https://www.youtube.com/watch?v=partner-video', 7000);
-  assert.equal(bRows.map(({ mapping }) => mapping.product_id).join(','), 'B');
+  assert.equal(bRows.map(({ mapping }) => mapping.product_id).join(','), 'A,B');
 
   const allRows = partner.verifiedRosterCanonicalRowsForContent(mappings, 'youtube', 'partner-video');
   assert.equal([...allRows.map(({ mapping }) => mapping.product_id)].sort().join(','), 'A,B');
