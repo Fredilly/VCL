@@ -28,3 +28,26 @@ test('out-of-roster/no visual evidence remains unknown',()=>{
  const result=buildTimeline([row(1000,[]),row(2000,[])]);
  assert.equal(result.windows[0].status,'UNKNOWN');
 });
+
+test('same SKU appearances separated by a long unseen interval become distinct windows',()=>{
+ const result=buildTimeline([
+  row(1000,[candidate('A',.98)]),row(2000,[candidate('A',.97)]),
+  row(100000,[candidate('A',.96)]),row(101000,[candidate('A',.98)])
+ ]);
+ assert.equal(result.windows.length,2);
+ assert.deepEqual(result.windows.map(w=>[w.start_ms,w.end_ms]),[[1000,2000],[100000,101000]]);
+ assert.ok(result.windows.every(w=>w.status==='NEEDS_HUMAN_REVIEW'));
+});
+test('reused identical image hashes do not count as independent visual evidence',()=>{
+ const result=buildTimeline([
+  {...row(1000,[candidate('A',.98)]),frame_sha256:'identical'},
+  {...row(2000,[candidate('A',.98)]),frame_sha256:'identical'}
+ ]);
+ assert.equal(result.windows.length,1);
+ assert.equal(result.windows[0].status,'UNKNOWN');
+});
+test('unknown intervals must not become one invented continuous appearance across gaps',()=>{
+ const result=buildTimeline([row(1000,[]),row(80000,[])]);
+ assert.equal(result.windows.length,2);
+ assert.ok(result.windows.every(w=>w.status==='UNKNOWN'));
+});

@@ -43,7 +43,8 @@ export async function loadMappingInputs(manifestPath) {
   }
   return {source:manifest.video.source, catalog, frames, manifest_sha256:hash(await readFile(manifestPath))};
 }
-export function buildTimeline(observations, {minIndependentFrames=2, minSimilarity=.90, minMargin=.08}={}) {
+export function buildTimeline(observations, {minIndependentFrames=2, minSimilarity=.90, minMargin=.08, maxGapMs=15000}={}) {
+  if (!Number.isSafeInteger(maxGapMs) || maxGapMs <= 0) throw Error('Invalid mapping continuity gap');
   // Raw similarity alone does not create a VERIFIED assertion. A human must
   // review exported appearances before anything enters trusted product memory.
   const points = observations.map(o => {
@@ -56,7 +57,7 @@ export function buildTimeline(observations, {minIndependentFrames=2, minSimilari
   const windows=[];
   for(const p of points) {
     const last=windows.at(-1);
-    if(last && last.proposed_sku===p.proposed_sku) {
+    if(last && last.proposed_sku===p.proposed_sku && p.timestamp_ms-last.end_ms<=maxGapMs) {
       last.end_ms=p.timestamp_ms;
       last.frame_sha256.push(p.frame_sha256);
       last.timestamps_ms.push(p.timestamp_ms);
@@ -64,7 +65,7 @@ export function buildTimeline(observations, {minIndependentFrames=2, minSimilari
       frame_sha256:[p.frame_sha256],timestamps_ms:[p.timestamp_ms]});
   }
   return {points,windows:windows.map(w=>({...w,
-    status:w.proposed_sku && w.timestamps_ms.length>=minIndependentFrames ? 'NEEDS_HUMAN_REVIEW':'UNKNOWN'}))};
+    status:w.proposed_sku && new Set(w.frame_sha256).size>=minIndependentFrames ? 'NEEDS_HUMAN_REVIEW':'UNKNOWN'}))};
 }
 export async function mapVideoManifest(manifestPath, adapterPath) {
   const {predict} = await import(pathToFileURL(resolve(adapterPath)).href);
