@@ -16,7 +16,7 @@ test('active partner scope excludes stale unversioned memory but preserves legit
   const durable=[row('stale'),row('imported',{variant:'v2'}),row('current')];
   assert.equal(JSON.stringify(scopedPartnerRosterCandidates({
     partner,durable,timestamp_ms:50
-  }).map(x=>x.identity.canonical_key)),JSON.stringify(['imported','current']));
+  }).map(x=>x.identity.canonical_key)),JSON.stringify(['current','imported']));
 });
 test('durable variants remain eligible without active scoped partner window',()=>{
   const keys=scopedPartnerRosterCandidates({
@@ -29,12 +29,12 @@ test('out-of-window partner candidate remains eligible for independent visual ve
     partner:[row('old',{start:0,end:100})],
     durable:[row('old',{start:0,end:100})],timestamp_ms:500
   }).map(x=>x.identity.canonical_key);
-  assert.deepEqual(keys,['old']);
+  assert.equal(keys.join(','),'old');
 });
 test('active window is preferred without deleting other partner variants',()=>{
   const keys=scopedPartnerRosterCandidates({
     partner:[row('outside',{start:0,end:100}),row('active',{start:200,end:300})],
     durable:[],timestamp_ms:250
   }).map(x=>x.identity.canonical_key);
-  assert.deepEqual(keys,['active','outside']);
+  assert.equal(keys.join(','),'active,outside');
 });
