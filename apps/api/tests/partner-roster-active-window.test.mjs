@@ -24,10 +24,17 @@ test('durable variants remain eligible without active scoped partner window',()=
   }).map(x=>x.identity.canonical_key);
   assert.equal(JSON.stringify(keys),JSON.stringify(['variant']));
 });
-test('out-of-window partner candidate cannot assert identity',()=>{
+test('out-of-window partner candidate remains eligible for independent visual verification',()=>{
   const keys=scopedPartnerRosterCandidates({
     partner:[row('old',{start:0,end:100})],
     durable:[row('old',{start:0,end:100})],timestamp_ms:500
   }).map(x=>x.identity.canonical_key);
-  assert.equal(JSON.stringify(keys),JSON.stringify([]));
+  assert.deepEqual(keys,['old']);
+});
+test('active window is preferred without deleting other partner variants',()=>{
+  const keys=scopedPartnerRosterCandidates({
+    partner:[row('outside',{start:0,end:100}),row('active',{start:200,end:300})],
+    durable:[],timestamp_ms:250
+  }).map(x=>x.identity.canonical_key);
+  assert.deepEqual(keys,['active','outside']);
 });
