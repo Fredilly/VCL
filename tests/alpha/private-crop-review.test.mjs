@@ -15,7 +15,7 @@ test('cannot stamp unreviewed or assign SKU to NONE',()=>{
 });
 test('merge emits runner truth and true_sku without changing unreviewed',()=>{
  const corpus={cases:[{id:'016',truth:'UNREVIEWED'},{id:'026',truth:'UNREVIEWED'}]};
- const labels=exportLabels(corpus.cases,{016:item});
+ const labels=exportLabels(corpus.cases,{'016':item});
  const merged=applyLabels(corpus,labels,roster);
  assert.equal(merged.cases[0].truth,'IN_ROSTER');
  assert.equal(merged.cases[0].true_sku,'A');
@@ -24,8 +24,8 @@ test('merge emits runner truth and true_sku without changing unreviewed',()=>{
 test('NONE and UNKNOWN remain distinct',()=>{
  const corpus={cases:[{id:'016'},{id:'026'}]};
  const l=exportLabels(corpus.cases,{
-  016:{...item,truth:'NONE',true_sku:null},
-  026:{...item,case_id:'026',truth:'UNKNOWN',true_sku:null,uncertainty_reason:'family_known_variant_unknown'}
+  '016':{...item,truth:'NONE',true_sku:null},
+  '026':{...item,case_id:'026',truth:'UNKNOWN',true_sku:null,uncertainty_reason:'family_known_variant_unknown'}
  });
  const m=applyLabels(corpus,l,roster);
  assert.equal(m.cases[0].expected_class,'NONE');
