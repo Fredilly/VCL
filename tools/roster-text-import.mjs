@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const TRACKING = /^(utm_|mk(evt|cid|rid)$|campid$|customid$|toolid$|srsltid$|gclid$|fbclid$|ultra_crid$|scid$|itm(meta|prp)$|_skw$|hash$)/i;
 const UNRESOLVED = /couldn.?t find|could not find|not found|can.?t find|unavailable/i;
+const SINGULAR_CAUTION = /\b(?:this|the) link\b/i;
 const UNSURE = /not sure|unsure|didn.?t open|maybe|\?\s*$/i;
 
 // Markdown exports escape punctuation (https\://, \_, \&). Only unescape non-alphanumerics.
@@ -82,6 +83,11 @@ export function parseRosterText(source) {
       }
       return;
     }
+    // Text sharing a line with a link describes that link only; text on its own line
+    // describes the links that follow it, until the next note or heading.
+    const inline = text && !UNRESOLVED.test(text);
+    let lineNote = inline ? text : note;
+    let lineFlags = inline ? (UNSURE.test(text) ? ['USER_UNSURE'] : []) : noteFlags;
     for (const rawUrl of urls) {
       if (!section) { audit.orphan_links.push({ source_line: index + 1 }); continue; }
       let canonical;
@@ -94,11 +100,13 @@ export function parseRosterText(source) {
       }
       offers.push({
         source_line: index + 1, section: section.section, url: canonical, link_type: 'offer',
-        variant_note: note, merchant: host, seller_kind: sellerKind(host), flags: [...noteFlags]
+        variant_note: lineNote, merchant: host, seller_kind: sellerKind(host), flags: [...lineFlags]
       });
+      // A singular caution ("this link below") flags only the next link, not the whole group.
+      if (SINGULAR_CAUTION.test(lineNote)) { lineFlags = []; lineNote = ''; }
     }
-    // A note applies to the links that follow it until the next note.
-    if (text && !UNRESOLVED.test(text)) { note = text; noteFlags = UNSURE.test(text) ? ['USER_UNSURE'] : []; }
+    if (inline) { note = ''; noteFlags = []; }
+    else if (SINGULAR_CAUTION.test(note)) { noteFlags = []; note = ''; }
   });
 
   const seen = new Map();

@@ -91,3 +91,19 @@ test('partner import manifest carries offers only: no search pages, no windows, 
   assert.equal(manifest.offers[0].family, 'sneaker');
   assert.throws(() => toPartnerImport({ video_id: null, sections: [], offers: [] }), /video id/);
 });
+
+test('inline notes and singular cautions scope to the right links', () => {
+  const md = [
+    'V https://youtu.be/abcdefghijk', '',
+    '1. bag', 'This link is a search. https://shop.example/search?q=bag',
+    'https://shop.example/item/1', 'A variant in red https://shop.example/item/2', '',
+    '2. other', 'Not sure about this link below it did not open', 'https://shop.example/item/3', 'https://shop.example/item/4'
+  ].join('\n');
+  const { offers } = parseRosterText(md);
+  const by = n => offers.find(o => o.url.endsWith(n));
+  assert.equal(by('/item/1').variant_note, '');
+  assert.equal(by('/item/2').variant_note, 'A variant in red');
+  assert.deepEqual(by('/item/3').flags, ['USER_UNSURE']);
+  assert.deepEqual(by('/item/4').flags, []);
+  assert.equal(by('/item/4').variant_note, '');
+});
