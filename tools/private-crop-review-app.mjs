@@ -1,8 +1,9 @@
 import {rosterIds,validateLabel,exportLabels} from './private-crop-review-core.mjs';
 const $=id=>document.getElementById(id);
-let cases=[],allowed=[],labels={},index=0,images=new Map(),urls=[],dirty=false,visible=false;
+let cases=[],allowed=[],labels={},index=0,images=new Map(),urls=[],dirty=false,visible=false,storeKey='';
+function persist(){if(storeKey)try{localStorage.setItem(storeKey,JSON.stringify(labels))}catch(e){$('status').textContent='Local autosave unavailable; export labels frequently.'}}
 const key=()=>cases.map(c=>c.id).join('|');
-function markDirty(){dirty=true;$('status').textContent='Unsaved changes. Export labels before leaving.'}
+function markDirty(){dirty=true;persist();$('status').textContent='Autosaved locally; export a portable backup before closing.'}
 function imageCandidates(c){const f=c.input?.frames?.[0]||{};return [f.path,f.file,f.filename,f.image_path,f.crop_path,c.image_path,c.crop_path,c.image_file,c.id+'.png',c.id+'.jpg'].filter(x=>typeof x==='string').map(x=>x.split('/').pop())}
 function render(){
  if(!cases.length)return;
@@ -46,7 +47,10 @@ $('manifest').onchange=async e=>{
  try{
   const data=JSON.parse(await f.text());if(!Array.isArray(data.cases))throw Error('Missing cases');
   const ids=data.cases.map(c=>c.id);if(ids.some(x=>!x)||new Set(ids).size!==ids.length)throw Error('Duplicate/invalid cases');
-  cases=data.cases;labels={};index=0;dirty=false;$('status').textContent=cases.length+' cases loaded';render();
+  cases=data.cases;storeKey='scoop-review:'+f.name+':'+key();labels={};index=0;dirty=false;
+  const backup=localStorage.getItem(storeKey);
+  if(backup&&confirm('Restore locally autosaved labels for this manifest?')){try{labels=JSON.parse(backup)}catch{labels={}}}
+  $('status').textContent=cases.length+' cases loaded';render();
  }catch(err){alert(err.message)}
 };
 $('roster').onchange=async e=>{
@@ -54,7 +58,7 @@ $('roster').onchange=async e=>{
  try{
   const data=JSON.parse(await e.target.files[0].text());allowed=rosterIds(data);
   if(!allowed.length)throw Error('No canonical variant identifiers in roster');
-  labels={};const select=$('sku');select.replaceChildren(new Option('Select a variant',''));
+  labels={};persist();const select=$('sku');select.replaceChildren(new Option('Select a variant',''));
   for(const id of allowed)select.add(new Option(id,id));
   render();$('status').textContent='Roster: '+allowed.length+' variants';
  }catch(err){alert(err.message)}
@@ -75,7 +79,7 @@ $('resume').onchange=async e=>{
    validateLabel(l,allowed);next[l.case_id]=l;
   }
   if(Object.keys(labels).length&&!confirm('Replace current labels with imported labels?'))return;
-  labels=next;dirty=false;render();
+  labels=next;dirty=false;persist();render();
  }catch(err){alert(err.message)}
 };
 $('export').onclick=()=>{
