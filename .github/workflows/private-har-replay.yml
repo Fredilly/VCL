@@ -67,7 +67,18 @@ jobs:
           key=os.environ['HAR_OBJECT_KEY']
           if not key.startswith('private-replay/') or '..' in key or not key.endswith('.har'):
               raise SystemExit('HAR key must be a private-replay/*.har object')
-          body=s3.get_object(Bucket='scoop-private-replays', Key=key)['Body']
+          # The original operator upload may be at the bucket root. Permit that
+          # known legacy location only when the configured key is absent, and
+          # only if the complete object's SHA-256 matches the pinned secret.
+          from botocore.exceptions import ClientError
+          try:
+              response=s3.get_object(Bucket='scoop-private-replays', Key=key)
+          except ClientError as error:
+              if error.response.get('Error',{}).get('Code') not in ('NoSuchKey','404'):
+                  raise
+              print('Configured key not found; checking legacy root upload against pinned SHA-256')
+              response=s3.get_object(Bucket='scoop-private-replays', Key='network-log.har')
+          body=response['Body']
           data=body.read(16*1024*1024+1)
           body.close()
           if len(data)>16*1024*1024:
