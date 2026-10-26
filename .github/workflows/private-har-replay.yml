@@ -64,27 +64,45 @@ jobs:
             aws_secret_access_key=os.environ['R2_SECRET_ACCESS_KEY'],
             region_name='auto',config=Config(signature_version='s3v4',
               connect_timeout=15,read_timeout=45,retries={'max_attempts':2}))
+          # Verify bucket visibility first. A missing key in an unexpected
+          # account is a configuration failure, not a reason to change names.
+          bucket='scoop-private-replays'
+          from botocore.exceptions import ClientError
           key=os.environ['HAR_OBJECT_KEY']
           if not key.startswith('private-replay/') or '..' in key or not key.endswith('.har'):
               raise SystemExit('HAR key must be a private-replay/*.har object')
-          # The original operator upload may be at the bucket root. Permit that
-          # known legacy location only when the configured key is absent, and
-          # only if the complete object's SHA-256 matches the pinned secret.
-          from botocore.exceptions import ClientError
+          limit=16*1024*1024
           try:
-              response=s3.get_object(Bucket='scoop-private-replays', Key=key)
+              listing=s3.list_objects_v2(Bucket=bucket, MaxKeys=1000)
           except ClientError as error:
-              if error.response.get('Error',{}).get('Code') not in ('NoSuchKey','404'):
-                  raise
-              print('Configured key not found; checking legacy root upload against pinned SHA-256')
-              response=s3.get_object(Bucket='scoop-private-replays', Key='network-log.har')
-          body=response['Body']
-          data=body.read(16*1024*1024+1)
-          body.close()
-          if len(data)>16*1024*1024:
-              raise SystemExit('HAR exceeds 16 MB')
-          if hashlib.sha256(data).hexdigest()!=expected:
-              raise SystemExit('Private HAR SHA-256 mismatch')
+              code=error.response.get('Error',{}).get('Code','UNKNOWN')
+              raise SystemExit('Unable to list private R2 bucket (check account ID, token scope and bucket): '+code)
+          if listing.get('IsTruncated'):
+              raise SystemExit('Private R2 bucket has over 1000 objects; narrow lookup required')
+          entries=listing.get('Contents',[])
+          print('Private R2 bucket preflight: objects visible =',len(entries))
+          candidates=[o for o in entries if o.get('Key')==key or
+            (o.get('Key','').endswith('.har') and 0<o.get('Size',0)<=limit)]
+          candidates.sort(key=lambda o: (o.get('Key')!=key,o.get('Key','')))
+          if not candidates:
+              raise SystemExit('No eligible HAR visible with these R2 credentials; check CLOUDFLARE_ACCOUNT_ID and R2 token account/bucket')
+          data=None
+          for object in candidates:
+              try:
+                  body=s3.get_object(Bucket=bucket,Key=object['Key'])['Body']
+              except ClientError as error:
+                  code=error.response.get('Error',{}).get('Code','UNKNOWN')
+                  if code in ('NoSuchKey','404'):
+                      continue
+                  raise SystemExit('R2 object read failed: '+code)
+              blob=body.read(limit+1)
+              body.close()
+              if len(blob)<=limit and hashlib.sha256(blob).hexdigest()==expected:
+                  data=blob
+                  print('Checksum-pinned private HAR found; no object names disclosed')
+                  break
+          if data is None:
+              raise SystemExit('No eligible R2 HAR matches pinned SHA-256; verify account and secret hash before replay')
           out=pathlib.Path(os.environ['RUNNER_TEMP'],'private-scoop.har')
           out.write_bytes(data)
           out.chmod(0o600)
