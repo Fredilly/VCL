@@ -15,3 +15,14 @@ test('NONE and ambiguity abstention',()=>{
  assert.equal(r.evaluated,2);assert.equal(r.false_exact,0);
 });
 test('duplicates rejected',()=>assert.throws(()=>scoreReviewedReplay({cases:[{id:'1'},{id:'1'}]}),/duplicate/));
+
+test('out-of-roster EXACT without a canonical key is a false Exact; labeled non-EXACT is not',()=>{
+ const o=(id,cls)=>({id,truth:'OUT_OF_ROSTER',reviewed_by:'r',observation:{returned_top_title:'Some bag',returned_top_class:cls}});
+ const r=scoreReviewedReplay({cases:[o('a','EXACT'),o('b','RELATED'),o('c','NONE')]});
+ assert.equal(r.false_exact,1);assert.equal(r.rows[1].outcome,'OUT_OF_ROSTER_LABELED_NON_EXACT');assert.equal(r.rows[2].outcome,'CORRECT_ABSTENTION');
+});
+test('signed exact_verdict scores an EXACT that has no canonical key',()=>{
+ const e=(id,v)=>({id,truth:'IN_ROSTER',true_sku:'fam:x',reviewed_by:'r',exact_verdict:v,observation:{returned_top_title:'t',returned_top_class:'EXACT'}});
+ const r=scoreReviewedReplay({cases:[e('a','MISMATCH'),e('b','MATCH'),e('c','')]});
+ assert.equal(r.false_exact,1);assert.equal(r.correct_sku,1);assert.equal(r.rows[2].outcome,'UNSCORABLE_MISSING_RESULT_ID');
+});

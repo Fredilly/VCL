@@ -16,15 +16,25 @@ export function scoreReviewedReplay(manifest){
   const eligible=signed&&['IN_ROSTER','OUT_OF_ROSTER','AMBIGUOUS'].includes(truth);
   const obs=c.observation??{},predicted=clean(obs.returned_top_canonical_key??obs.returned_top_sku??obs.canonical_key);
   const resultClass=norm(obs.returned_top_class??obs.result_class);
+  // Reviewer-signed verdict on a returned EXACT when the result carries no canonical ID.
+  const verdict=norm(c.exact_verdict);
   const expected=clean(c.true_sku??c.canonical_sku??c.expected_class);
   const none=!predicted&&!clean(obs.returned_top_title)&&(obs.result_count===0||resultClass==='NONE');
   let outcome='UNREVIEWED';
   if(eligible){
    if(truth==='IN_ROSTER'){
     if(!expected||expected==='NONE'||expected==='UNKNOWN')outcome='UNSCORABLE_MISSING_TRUTH_ID';
+    else if(!predicted&&verdict==='MATCH'&&resultClass==='EXACT')outcome='CORRECT_SKU';
+    else if(!predicted&&verdict==='MISMATCH')outcome='WRONG_SKU';
     else if(!predicted)outcome=none?'RETRIEVAL_OR_RESULT_MISSING':'UNSCORABLE_MISSING_RESULT_ID';
     else outcome=predicted===expected?'CORRECT_SKU':'WRONG_SKU';
-   }else if(truth==='OUT_OF_ROSTER')outcome=none?'CORRECT_ABSTENTION':predicted?'OUT_OF_ROSTER_FALSE_MATCH':'UNSCORABLE_RESULT_STATUS';
+   }else if(truth==='OUT_OF_ROSTER'){
+    // An EXACT claim for an out-of-roster product is a false Exact whether or not a canonical key was recorded.
+    if(resultClass==='EXACT')outcome='OUT_OF_ROSTER_FALSE_MATCH';
+    else if(resultClass==='NONE'||none)outcome='CORRECT_ABSTENTION';
+    else if(['SIMILAR','RELATED'].includes(resultClass))outcome='OUT_OF_ROSTER_LABELED_NON_EXACT';
+    else outcome='UNSCORABLE_RESULT_STATUS';
+   }
    else outcome=resultClass==='EXACT'?'AMBIGUOUS_FALSE_EXACT':!predicted?'CORRECT_ABSTENTION':'AMBIGUOUS_MATCH';
   }
   const falseExact=eligible&&resultClass==='EXACT'&&['WRONG_SKU','OUT_OF_ROSTER_FALSE_MATCH','AMBIGUOUS_FALSE_EXACT'].includes(outcome);
