@@ -2403,6 +2403,14 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           verified_mapping: {
             hit: true,
             roster_retrieval: sameVideoVisualCheck.retrieval,
+          // Counts only: establish whether a replay is using imported variants
+          // or falling back to alpha seeds, without disclosing catalog content.
+          roster_sources: {
+            configured: configuredCanonicalRows.length,
+            alpha_seed: alphaCanonicalRows.length,
+            durable: durableMappings.length,
+            canonical_candidates: canonicalRows.length,
+          },
             provenance: verifiedMapping.provenance,
             product_id: verifiedMapping.product_id,
             ...(verifiedMapping.canonical_key ? { canonical_key: verifiedMapping.canonical_key } : {}),
