@@ -35,6 +35,11 @@ function summarize(response) {
     mapping_reason: typeof response?.verified_mapping?.reason === 'string' ? response.verified_mapping.reason : null,
     roster_retrieved: Array.isArray(response?.verified_mapping?.roster_retrieval?.retrieved_keys) ? response.verified_mapping.roster_retrieval.retrieved_keys.length : null,
     roster_unresolved: Array.isArray(response?.verified_mapping?.roster_retrieval?.unresolved_keys) ? response.verified_mapping.roster_retrieval.unresolved_keys.length : null,
+    roster_sources: response?.verified_mapping?.roster_sources && typeof response.verified_mapping.roster_sources === 'object'
+      ? Object.fromEntries(['configured','alpha_seed','durable','canonical_candidates']
+        .filter(key => Number.isSafeInteger(response.verified_mapping.roster_sources[key])
+          && response.verified_mapping.roster_sources[key] >= 0)
+        .map(key => [key, response.verified_mapping.roster_sources[key]])) : null,
     visual_failures: Number.isFinite(response?.verified_mapping?.visual_failures) ? response.verified_mapping.visual_failures : null,
     visual_failure_reasons: response?.verified_mapping?.visual_failure_reasons && typeof response.verified_mapping.visual_failure_reasons === 'object'
       ? Object.fromEntries(Object.entries(response.verified_mapping.visual_failure_reasons)
