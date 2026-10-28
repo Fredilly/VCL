@@ -86,3 +86,15 @@ test('report separates identity, confidence and offer count changes',async()=>{
   assert.equal(result.offers_changed,0);
   assert.equal(result.changed,1);
 });
+
+test('replay includes only bounded roster-source counts, never roster identities',async()=>{
+ const result=await replayHar(har,{endpoint:'https://api.example.test/resolve-products',
+   maxCases:1,fetchImpl:async()=>({ok:true,json:async()=>({
+     products:[],state:'NO_RESULTS',
+     verified_mapping:{roster_sources:{configured:0,alpha_seed:10,durable:73,canonical_candidates:83,
+       secret:'sensitive',invalid:-1}}
+   })})});
+ assert.deepEqual(result.rows[0].current.roster_sources,
+   {configured:0,alpha_seed:10,durable:73,canonical_candidates:83});
+ assert.equal(JSON.stringify(result).includes('sensitive'),false);
+});
