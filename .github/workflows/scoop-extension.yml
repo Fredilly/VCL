@@ -1,0 +1,41 @@
+name: Scoop installable extension
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scoop-extension-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-extension:
+    name: Build Chrome extension
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build Scoop extension
+        run: pnpm --filter @vcl/extension build
+      - name: Verify installable extension
+        run: test -f apps/extension/.output/chrome-mv3/manifest.json
+      - name: Upload Scoop Chrome ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: scoop-chrome-install
+          path: apps/extension/.output/chrome-mv3/
+          if-no-files-found: error
+          retention-days: 30
