@@ -14,7 +14,20 @@ import { loadModule } from '../apps/api/tests/helpers/load-ts.mjs';
 const here = fileURLToPath(new URL('.', import.meta.url));
 const src = resolve(here, '../apps/api/src');
 
-export async function checkRosterImages(platform, contentRef, fetchCatalogImage, rowsFor) {
+/** Plain request with the runtime's defaults (no spoofed headers), to report why a host refused. */
+async function diagnose(url) {
+  try {
+    const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(6000) });
+    const why = `HTTP ${response.status} type=${response.headers.get('content-type') ?? '-'} length=${response.headers.get('content-length') ?? '-'} server=${response.headers.get('server') ?? '-'}${response.headers.get('location') ? ` location=${response.headers.get('location').slice(0, 120)}` : ''}`;
+    await response.body?.cancel();
+    return why;
+  } catch (error) {
+    return `${error?.name ?? 'Error'}: ${String(error?.cause?.code ?? error?.message ?? '').slice(0, 80)}`;
+  }
+}
+
+export async function checkRosterImages(platform, contentRef, fetchCatalogImage, rowsFor, diagnoseFailure = diagnose) {
+  const diagnose = diagnoseFailure;
   const rows = rowsFor(platform, contentRef);
   const results = [];
   for (const { mapping, identity } of rows) {
@@ -25,7 +38,8 @@ export async function checkRosterImages(platform, contentRef, fetchCatalogImage,
     const attempts = [];
     for (const url of urls) {
       const image = await fetchCatalogImage(url).catch(() => null);
-      attempts.push({ url, ok: Boolean(image), mime: image?.mimeType ?? null, bytes: image ? Math.round(image.data.length * 3 / 4) : 0 });
+      attempts.push({ url, ok: Boolean(image), mime: image?.mimeType ?? null, bytes: image ? Math.round(image.data.length * 3 / 4) : 0,
+        ...(image || !diagnose ? {} : { why: await diagnose(url) }) });
     }
     results.push({ product_id: mapping.product_id, title: mapping.title, loadable: attempts.filter(a => a.ok).length, attempts });
   }
@@ -43,7 +57,7 @@ async function main() {
     console.log(`\n${platform}:${ref} — ${report.loadable_skus}/${report.skus} SKUs have a loadable reference image`);
     for (const row of report.results) {
       console.log(`${row.loadable ? 'OK  ' : 'FAIL'} ${row.product_id.padEnd(12)} ${row.title}`);
-      for (const a of row.attempts) console.log(`       ${a.ok ? 'loaded' : 'failed'} ${a.ok ? `${a.mime} ${a.bytes}B ` : ''}${a.url}`);
+      for (const a of row.attempts) console.log(`       ${a.ok ? 'loaded' : 'failed'} ${a.ok ? `${a.mime} ${a.bytes}B ` : `[${a.why ?? 'unknown'}] `}${a.url}`);
     }
     if (!report.skus || report.loadable_skus < report.skus) failed = true;
   }

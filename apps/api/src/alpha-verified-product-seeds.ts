@@ -28,6 +28,8 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     title: 'Louis Vuitton Monogram Side Trunk PM',
     destination: 'https://eu.louisvuitton.com/eng-e1/products/side-trunk-pm-monogram-nvprod7890038v/M2A578',
     image_reference: 'https://eu.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-side-trunk-pm--M2A578_PM2_Front%20view.jpg',
+    // LV's image CDN refuses datacenter fetches; same-variant image on a second host.
+    reference_images: ['https://www.fashionphile.com/cdn/shop/files/8dc572ae3bb8936b8f0d3720be969116.jpg?v=1785625192'],
     provider: 'louisvuitton.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
@@ -231,6 +233,7 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     title: 'Louis Vuitton Vanity Chain Pouch Monogram Brown',
     destination: 'https://us.louisvuitton.com/eng-us/products/vanity-chain-pouch-monogram-reverse-canvas-nvprod5190005v/M47125',
     image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-vanity-chain-pouch--M47125_PM2_Front%20view.jpg',
+    reference_images: ['https://www.fashionphile.com/cdn/shop/files/f87024c43394452776b305c8751cac55.jpg?v=1786042554'],
     provider: 'louisvuitton.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
@@ -288,6 +291,7 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     title: 'Louis Vuitton Monogram Speedy Bandouliere 25',
     destination: 'https://eu.louisvuitton.com/eng-e1/products/speedy-bandouliere-25-monogram-008774/M41113',
     image_reference: 'https://eu.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-speedy-bandouliere-25--M46977_PM2_Front%20view.jpg',
+    reference_images: ['https://www.fashionphile.com/cdn/shop/files/42dfde2b4eeb475008205f29660d8682.jpg?v=1785435824&width=1946'],
     provider: 'louisvuitton.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
