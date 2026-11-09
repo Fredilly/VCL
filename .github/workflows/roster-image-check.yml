@@ -1,0 +1,30 @@
+name: Roster reference images
+
+# Every roster SKU must have a reference image the verifier can download.
+# Network-dependent, so it runs only when roster seed data or this check changes.
+on:
+  pull_request:
+    paths:
+      - 'apps/api/src/alpha-verified-product-seeds.ts'
+      - 'apps/api/src/candidate-images.ts'
+      - 'tools/check-roster-images.mjs'
+      - '.github/workflows/roster-image-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: corepack enable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Download every Handbagholic roster reference image
+        run: node tools/check-roster-images.mjs youtube n9u8ynhBdSo
