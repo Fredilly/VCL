@@ -21,12 +21,14 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     scope: 'entire_video',
     object_type: 'bag',
     brand: 'Louis Vuitton',
-    product_id: 'FP-1977706',
+    // Was resale listing FP-1977706 (one-off item, no image, no longer listed).
+    product_id: 'M2A578',
     candidate_window_start_ms: 24000,
     candidate_window_end_ms: 161000,
     title: 'Louis Vuitton Monogram Side Trunk PM',
-    destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-side-trunk-pm-1977706',
-    provider: 'fashionphile.com',
+    destination: 'https://eu.louisvuitton.com/eng-e1/products/side-trunk-pm-monogram-nvprod7890038v/M2A578',
+    image_reference: 'https://eu.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-side-trunk-pm--M2A578_PM2_Front%20view.jpg',
+    provider: 'louisvuitton.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
       reason: 'visual_confirmed',
@@ -52,6 +54,7 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     candidate_window_end_ms: 228000,
     title: 'Louis Vuitton Vagabond Hobo Bag',
     destination: 'https://uk.louisvuitton.com/eng-gb/products/vagabond-hobo-bag-h39-nvprod7260131v/M28392',
+    image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-vagabond-hobo--M28392_PM2_Front%20view.jpg',
     provider: 'louisvuitton.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
@@ -79,6 +82,8 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     title: 'Louis Vuitton Monogram Roses Neverfull MM',
     destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-roses-neverfull-mm-1925620',
     image_reference: 'https://www.fashionphile.com/cdn/shop/files/42edbf9959473e53ec1c92e1c8327770.jpg?v=1783789851&width=1946',
+    // Same limited-edition variant from another (sold) listing: image fallback only.
+    reference_images: ['https://www.fashionphile.com/cdn/shop/files/5acc8bf2bea9a3b1dfa56ab702cdf3d7.jpg?v=1781558079&width=1946'],
     provider: 'fashionphile.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
@@ -100,12 +105,15 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     scope: 'entire_video',
     object_type: 'bag',
     brand: 'Louis Vuitton',
-    product_id: 'FP-1981368',
+    // Was resale listing FP-1981368 (one-off item, no image, no longer listed).
+    product_id: 'M46197',
     candidate_window_start_ms: 335000,
     candidate_window_end_ms: 399000,
     title: 'Louis Vuitton Monogram CarryAll MM',
-    destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-carryall-mm-1981368',
-    provider: 'fashionphile.com',
+    destination: 'https://us.louisvuitton.com/eng-us/products/carryall-mm-monogram-nvprod3770015v/M46197',
+    image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-carryall-mm--M46197_PM2_Front%20view.jpg',
+    reference_images: ['https://www.fashionphile.com/cdn/shop/files/effab10a58628492830a35cd4931dbd6.jpg?v=1792490797'],
+    provider: 'louisvuitton.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
       reason: 'visual_confirmed',
@@ -126,12 +134,15 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     scope: 'entire_video',
     object_type: 'bag',
     brand: 'Louis Vuitton',
-    product_id: 'FP-1983129',
+    // Was resale listing FP-1983129 (one-off item, no image, no longer listed).
+    product_id: 'M44020',
     candidate_window_start_ms: 402000,
     candidate_window_end_ms: 522000,
     title: 'Louis Vuitton Monogram NeoNoe MM Black',
-    destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-neonoe-mm-black-1983129',
-    provider: 'fashionphile.com',
+    destination: 'https://us.louisvuitton.com/eng-us/products/neonoe-monogram-nvprod290007v/M44020',
+    image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-neonoe-mm--M44020_PM2_Front%20view.jpg',
+    reference_images: ['https://www.fashionphile.com/cdn/shop/files/993d6dd0aaa7f5ebeaab48936a531ea8.jpg?v=1781094461&width=1946'],
+    provider: 'louisvuitton.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
       reason: 'visual_confirmed',
@@ -157,6 +168,7 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     candidate_window_end_ms: 607000,
     title: 'Louis Vuitton Multipass',
     destination: 'https://us.louisvuitton.com/eng-us/products/Multipass-G81-nvprod7770009v/M2A078',
+    image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-multipass--M2A078_PM2_Front%20view.jpg',
     provider: 'louisvuitton.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
@@ -183,7 +195,13 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     candidate_window_end_ms: 671000,
     title: 'Louis Vuitton Trunkie Bag Monogram',
     destination: 'https://uk.louisvuitton.com/eng-gb/products/trunkie-bag-monogram-nvprod6090072v/M14526',
-    image_reference: 'https://uk.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-trunkie-bag--M14526_PM1_Worn%20view.jpg',
+    // Front product shot from the US catalog slug. The previous UK "trunkie-bag"
+    // worn-view URL failed to load in the 2026-10-07 pilot and shows a person.
+    image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-trunkie--M14526_PM2_Front%20view.jpg',
+    reference_images: [
+      'https://www.fashionphile.com/cdn/shop/files/372353b7cd10f9d9f5effeb454e10fa3.jpg?v=1774463044',
+      'https://uk.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-trunkie-bag--M14526_PM1_Worn%20view.jpg',
+    ],
     provider: 'louisvuitton.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
@@ -205,12 +223,15 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     scope: 'entire_video',
     object_type: 'bag',
     brand: 'Louis Vuitton',
-    product_id: 'POSH-6a3f49685919e011180b400c',
+    // Was Poshmark listing 6a3f49685919e011180b400c (one-off, no image).
+    // Reverse-monogram top + brown monogram body = catalog Monogram Reverse M47125.
+    product_id: 'M47125',
     candidate_window_start_ms: 682000,
     candidate_window_end_ms: 741000,
     title: 'Louis Vuitton Vanity Chain Pouch Monogram Brown',
-    destination: 'https://poshmark.com/listing/Louis-Vuitton-Monogram-Vanity-Chain-Pouch-Brown-6a3f49685919e011180b400c',
-    provider: 'poshmark',
+    destination: 'https://us.louisvuitton.com/eng-us/products/vanity-chain-pouch-monogram-reverse-canvas-nvprod5190005v/M47125',
+    image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-vanity-chain-pouch--M47125_PM2_Front%20view.jpg',
+    provider: 'louisvuitton.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
       reason: 'visual_confirmed',
@@ -235,8 +256,10 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     candidate_window_start_ms: 744000,
     candidate_window_end_ms: 805000,
     title: 'Louis Vuitton High Rise Monogram Bumbag',
-    destination: 'https://poshmark.com/listing/Louis-Vuitton-High-Rise-Monogram-Bumbag-M46784-Full-Set-Receipt-6abd335f046d1f7c1de21801',
-    provider: 'poshmark',
+    destination: 'https://us.louisvuitton.com/eng-us/products/high-rise-monogram-nvprod4690067v/M46784',
+    image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-high-rise--M46784_PM2_Front%20view.jpg',
+    reference_images: ['https://www.fashionphile.com/cdn/shop/files/b34a22f674175f4b7ed7490a8003814d.jpg?v=1776160965&width=1946'],
+    provider: 'louisvuitton.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
       reason: 'visual_confirmed',
@@ -257,12 +280,15 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     scope: 'entire_video',
     object_type: 'bag',
     brand: 'Louis Vuitton',
-    product_id: 'FP-1985008',
+    // Was resale listing FP-1985008 (one-off item, no image, no longer listed).
+    // Classic monogram Speedy B 25; LV now catalogs M41113 as M46977.
+    product_id: 'M46977',
     candidate_window_start_ms: 805000,
     candidate_window_end_ms: 955000,
     title: 'Louis Vuitton Monogram Speedy Bandouliere 25',
-    destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-speedy-bandouliere-25-1985008',
-    provider: 'fashionphile.com',
+    destination: 'https://eu.louisvuitton.com/eng-e1/products/speedy-bandouliere-25-monogram-008774/M41113',
+    image_reference: 'https://eu.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-speedy-bandouliere-25--M46977_PM2_Front%20view.jpg',
+    provider: 'louisvuitton.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
       reason: 'visual_confirmed',

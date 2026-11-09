@@ -36,6 +36,13 @@ export type VerifiedProductMapping = {
   title: string;
   destination: string;
   image_reference?: string | null;
+  /**
+   * Extra catalog images of this same variant on other hosts. Visual evidence
+   * only: they never become merchant offers and never establish Exact by
+   * themselves. They let the verifier still compare pixels when one image host
+   * blocks or times out.
+   */
+  reference_images?: string[] | null;
   price?: string | null;
   currency?: string | null;
   provider?: string | null;
@@ -129,6 +136,12 @@ export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProd
       title: (record.title as string).trim(),
       destination: (record.destination as string).trim(),
       image_reference: typeof record.image_reference === 'string' && record.image_reference.trim() ? record.image_reference.trim() : null,
+      ...(Array.isArray(record.reference_images)
+        ? { reference_images: (record.reference_images as unknown[])
+          .filter((url): url is string => typeof url === 'string' && /^https:\/\//i.test(url.trim()))
+          .map(url => url.trim().slice(0, 1200))
+          .slice(0, 6) }
+        : {}),
       price: typeof record.price === 'string' && record.price.trim() ? record.price.trim() : null,
       currency: typeof record.currency === 'string' && record.currency.trim() ? record.currency.trim().toUpperCase().slice(0, 8) : null,
       provider: typeof record.provider === 'string' && record.provider.trim() ? record.provider.trim() : null,

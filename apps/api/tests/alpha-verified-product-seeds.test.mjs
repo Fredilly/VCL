@@ -289,16 +289,16 @@ test('Handbagholic partner roster exposes ten creator-verified LV candidates for
   const rows = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo');
   const ids = new Set(rows.map(({ mapping }) => mapping.product_id));
   assert.deepEqual(ids, new Set([
-    'FP-1977706',
+    'M2A578',
     'M28392',
     'FP-1925620',
-    'FP-1981368',
-    'FP-1983129',
+    'M46197',
+    'M44020',
     'M2A078',
     'M14526',
-    'POSH-6a3f49685919e011180b400c',
+    'M47125',
     'M46784',
-    'FP-1985008',
+    'M46977',
   ]));
   assert.ok(rows.every(({ mapping }) => mapping.scope === 'entire_video'));
   assert.ok(rows.every(({ mapping }) => mapping.provenance === 'creator_verified'));
@@ -371,7 +371,7 @@ test('Handbagholic partner roster preserves all candidates across appearance win
 
   const trunkie = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 620046);
   assert.ok(trunkie.some(({ mapping }) => mapping.product_id === 'M14526'));
-  assert.ok(trunkie.find(({ mapping }) => mapping.product_id === 'M14526')?.mapping.image_reference?.includes('M14526_PM1_Worn'));
+  assert.ok(trunkie.find(({ mapping }) => mapping.product_id === 'M14526')?.mapping.image_reference?.includes('M14526_PM2_Front'));
 
   const gap = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 320000);
   assert.equal(gap.length, 10);
@@ -448,4 +448,46 @@ test('configured multi-product roster can be canonicalized without code-specific
 
   const allRows = partner.verifiedRosterCanonicalRowsForContent(mappings, 'youtube', 'partner-video');
   assert.equal([...allRows.map(({ mapping }) => mapping.product_id)].sort().join(','), 'A,B');
+});
+
+// Root cause of the 2026-10-07 Handbagholic pilot: 8 of 10 roster SKUs had no
+// reference image, so the verifier skipped them and compared each crop against
+// only the one or two imaged (usually wrong) bags. Every roster SKU must carry
+// pixels to compare against.
+test('every Handbagholic roster SKU has a reference image the verifier can compare', () => {
+  const rows = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo');
+  assert.equal(rows.length, 10);
+  for (const { mapping, identity } of rows) {
+    assert.match(mapping.image_reference ?? '', /^https:\/\//, `${mapping.product_id} lacks image_reference`);
+    assert.ok((identity.visual_references ?? []).length >= 1, `${mapping.product_id} lacks visual reference`);
+  }
+});
+
+test('Handbagholic roster offers point at current catalog pages, not one-off resale listings', () => {
+  const rows = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo');
+  // The Roses Neverfull is a 2009 limited edition with no current catalog page.
+  const catalog = rows.filter(({ mapping }) => mapping.product_id !== 'FP-1925620');
+  assert.ok(catalog.every(({ mapping }) => /^M[0-9A-Z]{4,5}$/.test(mapping.product_id)));
+  assert.ok(catalog.every(({ mapping }) => new URL(mapping.destination).hostname.endsWith('louisvuitton.com')));
+});
+
+test('fallback reference images are visual evidence only and never become offers', () => {
+  const [carryall] = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 350000)
+    .filter(({ mapping }) => mapping.product_id === 'M46197');
+  assert.ok(carryall);
+  const refs = carryall.identity.visual_references ?? [];
+  const fallback = refs.find(ref => ref.image_url.includes('fashionphile.com'));
+  assert.equal(fallback?.provenance, 'web_verified');
+  assert.equal(refs[0].provenance, 'merchant_verified');
+  assert.ok(carryall.identity.merchant_refs.every(ref => !ref.destination.includes('fashionphile.com')));
+  assert.ok(carryall.identity.merchant_refs.every(ref => !ref.image_reference?.includes('fashionphile.com')));
+});
+
+test('persisted mappings keep only https fallback reference images', () => {
+  const [mapping] = mappingMod.parseVerifiedProductMappings(JSON.stringify([{
+    platform: 'youtube', content_ref: 'abc', scope: 'entire_video', object_type: 'bag', brand: 'B',
+    product_id: 'P1', title: 'B Bag', destination: 'https://merchant.example.com/p1', provenance: 'admin_verified',
+    reference_images: ['https://cdn.example.com/a.jpg', 'http://cdn.example.com/b.jpg', 42],
+  }]));
+  assert.equal(JSON.stringify(mapping.reference_images), JSON.stringify(['https://cdn.example.com/a.jpg']));
 });
