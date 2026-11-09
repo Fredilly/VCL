@@ -888,7 +888,14 @@ async function confirmSameVideoReuseWithImage(
     }
     if (!merchantRef?.image_reference) continue;
 
+    // Roster-curated same-variant reference images are identity evidence, not
+    // merchant offers. Prefer one when supplied: some official catalog CDNs
+    // reject server-side image fetches even though the listing itself is valid.
+    // Keep the official merchant destination and references untouched.
+    const curatedReference = (candidate.mapping.reference_images ?? [])
+      .find((url) => safeImageUrl(url));
     const imageReferences = [...new Set([
+      curatedReference,
       preferredImage,
       candidate.mapping.image_reference,
       ...(identity.visual_references ?? []).map((ref) => ref.image_url),
@@ -904,7 +911,7 @@ async function confirmSameVideoReuseWithImage(
         brand: identity.brand,
         model: identity.model,
         category: identity.object_type,
-        image_reference: merchantRef.image_reference,
+        image_reference: curatedReference ?? merchantRef.image_reference,
         image_references: imageReferences,
         provenance: 'canonical_verified',
         destination: merchantRef.destination,
