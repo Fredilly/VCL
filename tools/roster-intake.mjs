@@ -1,44 +1,60 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { readListFile } from './roster-list-file.mjs';
 
 /**
  * Turn a partner's product list for one video into an import-ready roster.
  *
- *   node tools/roster-intake.mjs <video-url-or-id> <list-file> [options]
+ *   node tools/roster-intake.mjs [video-url-or-id] <list-file> [options]
  *
  * Works for any brand, category and video host; nothing is handbag- or
  * YouTube-specific.
  *
- * <list-file> can be anything the partner sent: a pasted YouTube description,
- * notes, CSV/TSV export, JSON, or a list of seller links. Use "-" for stdin.
+ * <list-file> can be anything the partner sent: a Word/Google Docs .docx, a
+ * pasted YouTube description, notes, an outline of products with variant notes
+ * and links under each, CSV/TSV export, JSON, or a list of seller links.
+ * Use "-" for stdin. The video can be left out when the list names it.
  *
  * Options:
  *   --brand "Louis Vuitton"   optional default brand for rows that don't name one
  *   --object-type bag         optional default type for rows that don't imply one
  *   --out <dir>               output folder (default: roster-intake/<video>)
+ *   --local                   run on this machine: reads seller pages and images
+ *                             directly, no API session or provider keys needed
+ *                             (no marketplace search)
+ *   --parse-only              structure only: read the list, fetch nothing
  *   --import                  import READY rows into the video's roster afterwards
  *
- * Writes review.md (products on a page), report.json and manifest.json.
- * Requires SCOOP_API_URL (https) and SCOOP_ADMIN_SESSION.
+ * Writes review.md (products on a page), roster.csv (editable, can be fed back
+ * in), report.json and manifest.json.
+ * Without --local/--parse-only, requires SCOOP_API_URL (https) and
+ * SCOOP_ADMIN_SESSION; --import always does.
  */
 
 const RESOLVE_BATCH = 8;
+// One resolve call reads every link of every product in it. Keep the total
+// well inside a Worker invocation's subrequest budget.
+const RESOLVE_LINK_BUDGET = 16;
 const IMPORT_BATCH = 6;
+const USAGE = 'Usage: node tools/roster-intake.mjs [video-url-or-id] <list-file|-> [--brand X] [--object-type TYPE] [--out dir] [--local] [--parse-only] [--import]';
 
 export function parseArgs(argv) {
-  const options = { brand: null, objectType: null, out: null, import: false, positional: [] };
+  const options = { brand: null, objectType: null, out: null, import: false, local: false, parseOnly: false, positional: [] };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--brand') options.brand = argv[++i] ?? null;
     else if (arg === '--object-type') options.objectType = argv[++i] ?? null;
     else if (arg === '--out') options.out = argv[++i] ?? null;
     else if (arg === '--import') options.import = true;
+    else if (arg === '--local') options.local = true;
+    else if (arg === '--parse-only') options.parseOnly = true;
     else if (arg.startsWith('--')) throw new Error(`Unknown option ${arg}`);
     else options.positional.push(arg);
   }
-  const [video, listFile] = options.positional;
-  if (!video || !listFile) throw new Error('Usage: node tools/roster-intake.mjs <video-url-or-id> <list-file|-> [--brand X] [--object-type TYPE] [--out dir] [--import]');
+  if (!options.positional.length || options.positional.length > 2) throw new Error(USAGE);
+  // One argument is the list; the video is then read from the list itself.
+  const [video, listFile] = options.positional.length === 2 ? options.positional : [null, options.positional[0]];
   return { ...options, video, listFile };
 }
 
@@ -46,27 +62,50 @@ export function chunk(values, size) {
   return Array.from({ length: Math.ceil(values.length / size) }, (_, index) => values.slice(index * size, (index + 1) * size));
 }
 
-export async function runRosterIntake({ video, list, defaults = {}, importReady = false, post }) {
+/** Batches of at most `size` products whose links together stay within `linkBudget`. */
+export function chunkByLinks(items, size = RESOLVE_BATCH, linkBudget = RESOLVE_LINK_BUDGET) {
+  const batches = [];
+  let batch = [];
+  let links = 0;
+  for (const item of items) {
+    const weight = Math.max(1, item.urls?.length ?? 0);
+    if (batch.length && (batch.length >= size || links + weight > linkBudget)) { batches.push(batch); batch = []; links = 0; }
+    batch.push(item);
+    links += weight;
+  }
+  if (batch.length) batches.push(batch);
+  return batches;
+}
+
+export async function runRosterIntake({ video, list, defaults = {}, importReady = false, post, importPost = post }) {
   const parsed = await post('/roster-intake', { action: 'parse', video, list, defaults });
+  // The list may name its own video; from here on use what the parser settled on.
+  const videoRef = video ?? parsed.video?.content_ref;
   const resolved = [];
-  for (const items of chunk(parsed.items, RESOLVE_BATCH)) {
-    const batch = await post('/roster-intake', { action: 'resolve', video, items, defaults });
+  for (const items of chunkByLinks(parsed.items)) {
+    const batch = await post('/roster-intake', { action: 'resolve', video: videoRef, items, defaults });
     resolved.push(...batch.items);
   }
-  const built = await post('/roster-intake', { action: 'manifest', video, items: resolved, warnings: parsed.warnings, defaults });
+  const built = await post('/roster-intake', { action: 'manifest', video: videoRef, items: resolved, warnings: parsed.warnings, defaults });
   let imported = null;
   if (importReady && built.manifest.offers.length) {
     let offers = 0;
     let variants = 0;
     // Each batch is all-or-nothing on the server; earlier batches stay committed.
-    for (const batch of chunk(built.manifest.offers, IMPORT_BATCH)) {
-      const result = await post('/partner-roster', { ...built.manifest, offers: batch });
+    // A variant split across batches is safe: the importer merges offers onto
+    // the same identity and a repeated batch is idempotent.
+    const batches = chunk(built.manifest.offers, IMPORT_BATCH);
+    for (const batch of batches) {
+      const result = await importPost('/partner-roster', { ...built.manifest, offers: batch });
       offers += batch.length;
       variants += result.distinct_variants ?? 0;
     }
-    imported = { merchant_offers: offers, variant_rows: variants, batches: Math.ceil(built.manifest.offers.length / IMPORT_BATCH) };
+    imported = { merchant_offers: offers, variant_rows: variants, batches: batches.length };
   }
-  return { video: built.video, summary: built.summary, items: resolved, warnings: parsed.warnings, manifest: built.manifest, review_markdown: built.review_markdown, imported };
+  return {
+    video: built.video, summary: built.summary, items: resolved, warnings: parsed.warnings, manifest: built.manifest,
+    review_markdown: built.review_markdown, roster_csv: built.roster_csv ?? null, imported,
+  };
 }
 
 function poster(base, session) {
@@ -82,17 +121,69 @@ function poster(base, session) {
   };
 }
 
+/**
+ * The same parse -> resolve -> manifest steps as POST /roster-intake, run in
+ * this process from the built API code. Seller pages and images are fetched
+ * straight from this machine; there is no marketplace search without provider
+ * keys, so rows that need one stay NEEDS_REVIEW.
+ */
+export async function localPoster({ fetchPages = true, dist = new URL('../apps/api/dist/src/', import.meta.url) } = {}) {
+  const load = async name => {
+    const file = new URL(name, dist);
+    if (!existsSync(fileURLToPath(file))) throw new Error('API build not found. Run: pnpm --filter @vcl/api build');
+    return import(pathToFileURL(fileURLToPath(file)).href);
+  };
+  const intake = await load('roster-intake.js');
+  let deps = null;
+  if (fetchPages) {
+    const [catalog, images] = [await load('partner-catalog.js'), await load('candidate-images.js')];
+    deps = {
+      metadata: url => catalog.fetchPartnerCatalogMetadata(url).catch(() => null),
+      imageLoads: async url => Boolean(await images.fetchCatalogImage(url).catch(() => null)),
+      search: async () => [],
+    };
+  }
+  return async (path, body) => {
+    if (path !== '/roster-intake') throw new Error('Importing needs the API: set SCOOP_API_URL and SCOOP_ADMIN_SESSION');
+    const defaults = body.defaults ?? {};
+    const stated = typeof body.video === 'string' && body.video.trim() ? intake.parseVideoRef(body.video, defaults) : null;
+    if (body.action === 'parse') {
+      const parsed = intake.parseRosterIntake(body.list, defaults, stated);
+      const video = stated ?? (parsed.video_url ? intake.parseVideoRef(parsed.video_url, defaults) : null);
+      if (!video) throw new Error('A video URL or ID is required (none given and none found in the list)');
+      return { video, ...parsed };
+    }
+    if (body.action === 'resolve') {
+      return { video: stated, items: deps ? await intake.resolveRosterIntake(body.items, deps) : body.items.map(intake.uncheckedIntakeItem) };
+    }
+    return {
+      video: stated,
+      summary: intake.summarizeIntake(body.items),
+      manifest: intake.buildRosterManifest(stated, body.items),
+      review_markdown: intake.renderIntakeReview(stated, body.items, body.warnings ?? []),
+      roster_csv: intake.renderIntakeCsv(body.items),
+    };
+  };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const base = process.env.SCOOP_API_URL;
   const session = process.env.SCOOP_ADMIN_SESSION;
-  if (!base || !session || !base.startsWith('https://')) throw new Error('SCOOP_API_URL (HTTPS) and SCOOP_ADMIN_SESSION are required');
-  const list = readFileSync(args.listFile === '-' ? 0 : args.listFile, 'utf8');
+  const hasApi = Boolean(base && session && base.startsWith('https://'));
+  const local = args.local || args.parseOnly;
+  if (!local && !hasApi) throw new Error('SCOOP_API_URL (HTTPS) and SCOOP_ADMIN_SESSION are required. To run on this machine without them, add --local (or --parse-only to just read the list).');
+  if (args.import && !hasApi) throw new Error('--import needs SCOOP_API_URL (HTTPS) and SCOOP_ADMIN_SESSION');
+  if (args.import && args.parseOnly) throw new Error('--parse-only checks nothing, so there is nothing to import');
+  const list = readListFile(args.listFile);
   const defaults = { ...(args.brand ? { brand: args.brand } : {}), ...(args.objectType ? { object_type: args.objectType } : {}) };
-  const result = await runRosterIntake({ video: args.video, list, defaults, importReady: args.import, post: poster(base, session) });
+  const apiPost = hasApi ? poster(base, session) : null;
+  const post = local ? await localPoster({ fetchPages: !args.parseOnly }) : apiPost;
+  const result = await runRosterIntake({ video: args.video, list, defaults, importReady: args.import, post, importPost: apiPost ?? post });
   const out = resolve(args.out ?? join('roster-intake', result.video.content_ref.replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 80)));
   mkdirSync(out, { recursive: true });
   writeFileSync(join(out, 'review.md'), result.review_markdown);
+  if (result.roster_csv) writeFileSync(join(out, 'roster.csv'), result.roster_csv);
   writeFileSync(join(out, 'manifest.json'), `${JSON.stringify(result.manifest, null, 2)}\n`);
   writeFileSync(join(out, 'report.json'), `${JSON.stringify({ video: result.video, summary: result.summary, imported: result.imported, warnings: result.warnings, items: result.items }, null, 2)}\n`);
   console.log(JSON.stringify({ ...result.summary, imported: result.imported, review: join(out, 'review.md') }, null, 2));

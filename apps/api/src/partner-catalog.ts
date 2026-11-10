@@ -12,6 +12,10 @@ export type PartnerCatalogMetadata = ProductPageMetadata & {
   color?: string | null;
   material?: string | null;
   resolution?: 'resolved' | 'ambiguous' | 'unavailable';
+  /** schema.org availability of the linked offer (InStock, SoldOut ...), when the page states it. */
+  availability?: string | null;
+  /** Final HTTP status of the seller page. Lets a caller tell a removed listing (404/410) from a blocked or markup-less one. */
+  http_status?: number | null;
 };
 
 type RecordValue = Record<string, unknown>;
@@ -122,6 +126,7 @@ export function extractPartnerCatalogMetadata(html: string, sourceUrl: string): 
     canonical_url: source, image_reference: imageUrl(product.image, source),
     price: offer && typeof offer.price === 'number' ? String(offer.price) : string(offer?.price),
     currency: string(offer?.priceCurrency),
+    availability: (string(offer?.availability) ?? '').replace(/^https?:\/\/schema\.org\//i, '') || null,
   };
 }
 
@@ -145,7 +150,7 @@ export async function fetchPartnerCatalogMetadata(destination: string, fetchImpl
       }
       if (!response.ok || !/text\/html|application\/xhtml\+xml/i.test(response.headers.get('content-type') ?? '') || !response.body) {
         await response.body?.cancel();
-        return empty('unavailable');
+        return { ...empty('unavailable'), http_status: response.status };
       }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -157,8 +162,13 @@ export async function fetchPartnerCatalogMetadata(destination: string, fetchImpl
         if (bytes > 2_500_000) { await reader.cancel(); return empty('unavailable'); }
         html += decoder.decode(value, { stream: true });
       }
-      return extractPartnerCatalogMetadata(html + decoder.decode(), url);
+      return { ...extractPartnerCatalogMetadata(html + decoder.decode(), url), http_status: response.status };
     }
-  } catch { /* Preserve unresolved links as errors at import, never guesses. */ }
+  } catch {
+    // Preserve unresolved links as errors at import, never guesses. Status 0 = the
+    // site could not be reached at all (network, DNS, timeout), as opposed to a
+    // page that answered without usable product markup.
+    return { ...empty('unavailable'), http_status: 0 };
+  }
   return empty('unavailable');
 }

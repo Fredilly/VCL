@@ -38,7 +38,7 @@ import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemA
 import { fetchProductPageMetadata } from './product-page-enrichment.js';
 import { recoverVerifiedProductImage } from './verified-image-recovery.js';
 import { ALPHA_VERIFIED_PRODUCT_SEEDS, alphaVerifiedCanonicalRowsForContent, alphaVerifiedCanonicalIdentitiesExcludingContent } from './alpha-verified-product-seeds.js';
-import { buildRosterManifest, parseRosterIntake, parseVideoRef, renderIntakeReview, resolveRosterIntake, summarizeIntake, type IntakeDefaults, type IntakeDependencies, type IntakeItem, type IntakeSearchHit, type ResolvedIntakeItem } from './roster-intake.js';
+import { buildRosterManifest, parseRosterIntake, parseVideoRef, renderIntakeCsv, renderIntakeReview, resolveRosterIntake, summarizeIntake, type IntakeDefaults, type IntakeDependencies, type IntakeItem, type IntakeSearchHit, type ResolvedIntakeItem } from './roster-intake.js';
 import { fetchPartnerCatalogMetadata } from './partner-catalog.js';
 import { fetchCatalogImage } from './candidate-images.js';
 import { preparePartnerRoster, ingestPartnerRoster, buildCorrectionBundle, cacheLearningImage, learningImage, persistCorrectionBundle, assetDigest, type RosterOfferInput, type CorrectionBundle } from './partner-learning.js';
@@ -2048,11 +2048,16 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           action?: unknown; video?: unknown; list?: unknown; items?: unknown; defaults?: IntakeDefaults; warnings?: unknown;
         };
         const defaults: IntakeDefaults = body.defaults && typeof body.defaults === 'object' ? body.defaults : {};
-        const video = parseVideoRef(typeof body.video === 'string' ? body.video : '', defaults);
+        const statedVideo = typeof body.video === 'string' && body.video.trim() ? parseVideoRef(body.video, defaults) : null;
         if (body.action === 'parse') {
           if (typeof body.list !== 'string' && (typeof body.list !== 'object' || body.list === null)) return jsonResponse({ error: 'list is required' }, 400);
-          return jsonResponse({ video, ...parseRosterIntake(body.list, defaults) });
+          // A list that opens with its own video link does not need the video repeated.
+          const parsed = parseRosterIntake(body.list, defaults, statedVideo);
+          const video = statedVideo ?? (parsed.video_url ? parseVideoRef(parsed.video_url, defaults) : null);
+          if (!video) return jsonResponse({ error: 'A video URL or ID is required (none given and none found in the list)' }, 422);
+          return jsonResponse({ video, ...parsed });
         }
+        const video = statedVideo ?? parseVideoRef('', defaults);
         if (body.action === 'resolve') {
           const items = Array.isArray(body.items) ? body.items as IntakeItem[] : [];
           if (!items.length) return jsonResponse({ error: 'items are required' }, 400);
@@ -2068,6 +2073,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             summary: summarizeIntake(items),
             manifest: buildRosterManifest(video, items),
             review_markdown: renderIntakeReview(video, items, warnings),
+            roster_csv: renderIntakeCsv(items),
           });
         }
         return jsonResponse({ error: 'action must be parse, resolve or manifest' }, 400);

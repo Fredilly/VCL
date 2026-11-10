@@ -2,6 +2,10 @@ import { safeImageUrl } from './candidate-images.js';
 import type { ProductCandidate, ProductQuery } from './commerce.js';
 import type { PartnerCatalogMetadata } from './partner-catalog.js';
 import type { RosterOfferInput } from './partner-learning.js';
+import {
+  brandFromHeadings, familyName, groupVariantId, isGroupVariantId, linkEvidence, looksLikeOutline, parseOutline,
+  plainListText, shortHash, variantLabel,
+} from './roster-outline.js';
 import { productType } from './verification-evidence.js';
 
 /**
@@ -9,9 +13,20 @@ import { productType } from './verification-evidence.js';
  * (pasted description, chaotic notes, CSV/TSV export, JSON, bare links) into
  * reviewed, import-ready roster rows.
  *
+ * Two shapes are read:
+ * - flat lists, one product per line/row (descriptions, CSV, JSON, link dumps);
+ * - outlines, where a numbered product family has variant notes and each note
+ *   has seller links under it. There the roster row is the *variant*, and all
+ *   links under the note are offers of that one variant (see roster-outline.ts).
+ *
  * Trust rules, same as the partner-roster importer:
- * - A row is READY only with an explicit SKU/GTIN, brand, title, object type,
- *   at least one purchasable offer and a reference image that actually loads.
+ * - A row is READY only with an identity (below), brand, title, object type,
+ *   at least one live offer and a reference image that actually loads.
+ * - Identity, strongest first: a SKU/GTIN the partner stated; a manufacturer
+ *   code stated by every link of the variant; a seller page's own SKU (kept
+ *   merchant-namespaced); or, for a variant the partner named and grouped
+ *   without any code, a video-local variant id. A video-local id can never
+ *   join another video or another seller's catalog.
  * - Search hits become offers only when their listing carries the same SKU/GTIN.
  *   A name-only lookalike is shown for review and never imported.
  * - SKUs inferred from search consensus are proposals for a human, never READY.
@@ -41,7 +56,25 @@ export type IntakeItem = {
   timestamp_ms: number | null;
   candidate_window_start_ms?: number;
   candidate_window_end_ms?: number;
+  /** Outline lists only: the numbered family this variant sits under. */
+  section?: number | null;
+  family?: string | null;
+  variant?: string | null;
+  /** How the parser arrived at `sku`. Absent on flat lists (= stated by the partner). */
+  sku_basis?: 'partner' | 'link' | 'partner_group';
+  /** Manufacturer codes stated by individual links but not adopted as this row's SKU. */
+  link_codes?: Array<{ code: string; url: string }>;
+  /** Merchant listing id per link (FP-1991017, POSH-..., EBAY-...). */
+  listing_ids?: Record<string, string>;
+  /** partner_unsure | partner_could_not_find */
+  flags?: string[];
+  /** The partner's own side remarks, kept verbatim for the reviewer. */
+  remarks?: string[];
+  /** Machine notes for the reviewer that do not block import. */
+  hints?: string[];
 };
+
+export type SkuSource = 'partner' | 'link' | 'partner_group' | 'merchant_page';
 
 export type IntakeStatus = 'READY' | 'NEEDS_REVIEW' | 'UNRESOLVED';
 
@@ -53,6 +86,13 @@ export type IntakeOffer = {
   price: string | null;
   currency: string | null;
   merchant_item_id: string | null;
+  /** What reading the seller page told us. `unread` = reachable or blocked, but no product markup. */
+  page?: 'resolved' | 'ambiguous' | 'unread' | 'blocked' | 'unreachable';
+  /** The page says this listing is sold/out of stock: kept as evidence, never imported as an offer. */
+  sold_out?: boolean;
+  /** This listing's own photo, when it loads. */
+  image?: string | null;
+  seller_sku?: string | null;
 };
 
 export type ResolvedIntakeItem = IntakeItem & {
@@ -61,9 +101,15 @@ export type ResolvedIntakeItem = IntakeItem & {
   offers: IntakeOffer[];
   verified_image: string | null;
   fallback_images: string[];
-  proposed_skus: Array<{ sku: string; support: number }>;
-  /** partner = stated by the partner (may join sellers); merchant_page = read off one seller page (namespaced). */
-  sku_source: 'partner' | 'merchant_page' | null;
+  proposed_skus: Array<{ sku: string; support: number; source?: 'partner_link' | 'listings' }>;
+  /**
+   * partner / link = stated by the partner or by every link they gave (may join sellers by code);
+   * partner_group = video-local id for a variant the partner named without a code;
+   * merchant_page = read off one seller page (namespaced).
+   */
+  sku_source: SkuSource | null;
+  /** Reviewer notes that do not block import (mixed sizes, removed listings ...). */
+  notes?: string[];
   review_candidates: Array<{ title: string; destination: string; provider: string; price: string | null }>;
 };
 
@@ -78,7 +124,10 @@ export type IntakeDependencies = {
 export const INTAKE_LIMITS = {
   maxItems: 100,
   maxResolveBatch: 8,
-  maxLinksPerItem: 5,
+  maxLinksPerItem: 8,
+  maxResolveLinks: 24,
+  maxVerifiedImages: 3,
+  maxImageAttempts: 6,
   maxSearchOffers: 3,
   maxReviewCandidates: 5,
   lastWindowMs: 300_000,
@@ -287,7 +336,12 @@ export function parseLine(line: string, index: number): { item: IntakeItem | nul
   const gtin = GTIN_RE.exec(rest);
   if (gtin) { item.gtin = gtin[1]; rest = rest.replace(gtin[0], ' '); }
   const labeled = LABELED_SKU_RE.exec(rest);
-  if (labeled) { item.sku = labeled[1].replace(/[.,;:]+$/, ''); rest = rest.replace(labeled[0], ' '); }
+  // "S-lock style fasteners" and "SKU FOR this video" are prose: a labelled
+  // code needs a digit, or an explicit "SKU: ABCDE" separator.
+  if (labeled && (/\d/.test(labeled[1]) || /[:#]\s*[A-Za-z0-9]/.test(labeled[0]))) {
+    item.sku = labeled[1].replace(/[.,;:]+$/, '');
+    rest = rest.replace(labeled[0], ' ');
+  }
   const price = PRICE_RE.exec(rest);
   if (price) { item.price = price[0].trim(); rest = rest.replace(price[0], ' '); }
   if (!item.gtin) {
@@ -586,23 +640,115 @@ export function assignCandidateWindows(items: IntakeItem[]): IntakeItem[] {
   });
 }
 
-export function parseRosterIntake(input: unknown, defaults: IntakeDefaults = {}): { items: IntakeItem[]; warnings: string[] } {
+/**
+ * Outline list -> one roster row per variant the partner named. Every link
+ * under a variant note is an offer of that variant; nothing here decides that
+ * two listings match, the partner's grouping does.
+ */
+function itemsFromOutline(text: string, defaults: IntakeDefaults, video: VideoRef | null, warnings: string[]): { items: IntakeItem[]; video_url: string | null } {
+  const draft = parseOutline(text, defaults.brand);
+  const headingParse = new Map<string, IntakeItem | null>();
+  const parsedHeading = (heading: string) => {
+    if (!headingParse.has(heading)) headingParse.set(heading, parseLine(heading, 0).item);
+    return headingParse.get(heading) ?? null;
+  };
+  const headingTitles = draft.groups.map(group => parsedHeading(group.heading)?.title ?? group.heading);
+  const statedBrand = bounded(defaults.brand, 120);
+  const brand = statedBrand ?? brandFromHeadings(headingTitles);
+  if (!statedBrand && brand) warnings.push(`Brand read from the headings: ${brand}. Pass --brand to override.`);
+  warnings.push(...draft.warnings);
+
+  let scope = video?.content_ref ?? '';
+  if (!scope && draft.video_url) { try { scope = parseVideoRef(draft.video_url, defaults).content_ref; } catch { /* keep empty */ } }
+  if (!scope) scope = `L${shortHash(text)}`;
+
+  const items: IntakeItem[] = [];
+  for (const group of draft.groups) {
+    const heading = parsedHeading(group.heading);
+    const gap = group.flags.includes('partner_could_not_find');
+    const note = group.note ? parseLine(group.note, 0).item : null;
+    const family = familyName(heading?.title ?? group.heading, brand);
+    const variant = group.note ? variantLabel(note?.title ?? group.note, heading?.title ?? group.heading, brand).label : null;
+    const item = emptyItem(items.length + 1, [group.heading, group.note].filter(Boolean).join(' / '));
+    item.section = group.section;
+    item.family = family;
+    item.variant = variant;
+    item.title = bounded(variant ? `${family} - ${variant}` : family, 300);
+    item.brand = brand;
+    item.object_type = inferObjectType(`${group.heading} ${group.note ?? ''}`, defaults.object_type);
+    item.urls = group.links.map(link => link.url);
+    item.image_reference = group.image_reference ?? note?.image_reference ?? null;
+    item.price = note?.price ?? (group.note ? null : heading?.price ?? null);
+    item.timestamp_ms = note?.timestamp_ms ?? heading?.timestamp_ms ?? null;
+    item.gtin = note?.gtin ?? (group.note ? null : heading?.gtin ?? null);
+    item.flags = [...new Set(group.flags)];
+    item.remarks = group.remarks.map(remark => remark.slice(0, 300));
+    item.listing_ids = Object.fromEntries(group.links.filter(link => link.listing_id).map(link => [link.url, link.listing_id!]));
+    const hints: string[] = [];
+
+    // Identity. A code the partner wrote next to the variant wins. Otherwise a
+    // manufacturer code counts only when every link of the variant states the
+    // same one; a code on some links is a suggestion for the reviewer.
+    const stated = note?.sku ?? (group.note ? null : heading?.sku ?? null);
+    const linkCodes = group.links.flatMap(link => link.codes.map(code => ({ code, url: link.url })));
+    const distinct = [...new Set(linkCodes.map(entry => normalizeCode(entry.code)))];
+    if (stated) { item.sku = stated; item.sku_basis = 'partner'; }
+    else if (item.gtin) item.sku_basis = 'partner';
+    else if (!gap && distinct.length === 1 && group.links.length > 0 && group.links.every(link => link.codes.length === 1)) {
+      item.sku = linkCodes[0].code;
+      item.sku_basis = 'link';
+    } else {
+      item.sku = groupVariantId(scope, group.section, family, variant);
+      item.sku_basis = 'partner_group';
+      if (linkCodes.length) item.link_codes = linkCodes;
+      if (distinct.length > 1) hints.push(`codes_differ:${distinct.join(', ')}`);
+    }
+    const sizes = [...new Set(group.links.flatMap(link => link.sizes))];
+    if (sizes.length > 1) hints.push(`sizes_mixed:${sizes.join(', ')}`);
+    if (group.search_pages.length) hints.push(`search_page_ignored:${group.search_pages.length}`);
+    if (group.links.length > INTAKE_LIMITS.maxLinksPerItem) hints.push(`links_over_limit:${group.links.length}`);
+    // A listing whose own name shares no word with the family is probably filed
+    // under the wrong heading. Only judged when the URL carries a readable name.
+    const familyWords = new Set(significantWords(family, brand));
+    for (const link of group.links) {
+      let name = '';
+      try { name = decodeURIComponent(new URL(link.url).pathname.split('/').filter(Boolean).pop() ?? ''); } catch { /* no name */ }
+      const nameWords = significantWords(name, brand).filter(word => /[a-z]/.test(word));
+      if (familyWords.size && nameWords.length >= 3 && !nameWords.some(word => [...familyWords].some(wanted => word.includes(wanted) || wanted.includes(word)))) {
+        hints.push(`link_names_other_product:${link.merchant}`);
+      }
+    }
+    item.hints = hints;
+    items.push(item);
+  }
+  return { items, video_url: draft.video_url };
+}
+
+export function parseRosterIntake(input: unknown, defaults: IntakeDefaults = {}, video: VideoRef | null = null): { items: IntakeItem[]; warnings: string[]; video_url: string | null; layout: 'outline' | 'flat' } {
   const warnings: string[] = [];
   let items: IntakeItem[] | null = null;
+  let videoUrl: string | null = null;
+  let layout: 'outline' | 'flat' = 'flat';
 
   if (typeof input !== 'string') items = parseJson(input);
   else {
-    const text = input.replace(/\r\n?/g, '\n').replace(/^﻿/, '');
-    const trimmed = text.trim();
-    if (/^[[{]/.test(trimmed)) {
-      try { items = parseJson(JSON.parse(trimmed)); } catch { /* not JSON; fall through to text */ }
+    // JSON is tried on the untouched input: un-escaping Markdown would corrupt it.
+    const rawTrimmed = input.replace(/^\uFEFF/, '').trim();
+    if (/^[[{]/.test(rawTrimmed)) {
+      try { items = parseJson(JSON.parse(rawTrimmed)); } catch { /* not JSON; fall through to text */ }
     }
+    const text = plainListText(input);
     if (!items) {
       const lines = text.split('\n');
       const firstLine = lines.find(line => line.trim()) ?? '';
       const delimiter = looksDelimited(firstLine);
       if (delimiter) items = parseDelimited(lines.slice(lines.indexOf(firstLine)), delimiter);
-      else {
+      else if (looksLikeOutline(text)) {
+        const outline = itemsFromOutline(text, defaults, video, warnings);
+        items = outline.items;
+        videoUrl = outline.video_url;
+        layout = 'outline';
+      } else {
         const plan = unknownDelimitedPlan(lines);
         const body = plan?.skipHeader ? lines.slice(lines.indexOf(firstLine) + 1) : lines;
         items = parseTextLines(body, warnings, plan?.delimiter);
@@ -610,7 +756,7 @@ export function parseRosterIntake(input: unknown, defaults: IntakeDefaults = {})
     }
   }
   if (!items) throw new Error('Could not read a product list from this input');
-  items = dropPreamble(items, warnings);
+  if (layout === 'flat') items = dropPreamble(items, warnings);
 
   const withDefaults = items.map(item => ({
     ...item,
@@ -621,7 +767,7 @@ export function parseRosterIntake(input: unknown, defaults: IntakeDefaults = {})
   if (deduped.length < withDefaults.length) warnings.push(`Merged ${withDefaults.length - deduped.length} duplicate SKU line(s)`);
   if (deduped.length > INTAKE_LIMITS.maxItems) throw new Error(`Too many products (${deduped.length}); split the list into ${INTAKE_LIMITS.maxItems}-item parts`);
   if (!deduped.length) throw new Error('No products found in this input');
-  return { items: assignCandidateWindows(deduped), warnings };
+  return { items: assignCandidateWindows(deduped), warnings, video_url: videoUrl, layout };
 }
 
 function significantWords(text: string | null, brand: string | null): string[] {
@@ -661,27 +807,48 @@ function buildIntakeQuery(item: IntakeItem): ProductQuery | null {
   };
 }
 
+const SOLD_OUT = /sold\s*out|out\s*of\s*stock|discontinued/i;
+
 export async function resolveIntakeItem(item: IntakeItem, deps: IntakeDependencies): Promise<ResolvedIntakeItem> {
   const reasons: string[] = [];
+  const notes: string[] = [...(item.hints ?? [])];
   const offers: IntakeOffer[] = [];
   const imageCandidates: string[] = [];
   const reviewCandidates: ResolvedIntakeItem['review_candidates'] = [];
   const proposals = new Map<string, number>();
   const resolved: IntakeItem = { ...item, urls: [...item.urls] };
   if (resolved.image_reference) imageCandidates.push(resolved.image_reference);
-  // Only a partner-stated SKU/GTIN may join offers across merchants. A code
-  // read off one merchant's page stays namespaced to that merchant, exactly as
-  // the partner-roster importer treats auto-discovered SKUs.
-  let skuSource: 'partner' | 'merchant_page' | null = resolved.sku || resolved.gtin ? 'partner' : null;
+  // A code the partner stated (or that every link they gave states) may join
+  // offers across merchants. A video-local variant id never searches or joins
+  // by code: its only offers are the links the partner put under that variant.
+  // A code read off one merchant's page stays namespaced to that merchant,
+  // exactly as the partner-roster importer treats auto-discovered SKUs.
+  const basis = item.sku_basis ?? (isGroupVariantId(resolved.sku) ? 'partner_group' : 'partner');
+  let skuSource: SkuSource | null = resolved.sku || resolved.gtin ? basis : null;
+  const grouped = skuSource === 'partner_group';
   let pageCode: string | null = null;
+  let removedLinks = 0;
 
   // 1. Seller links the partner supplied. Their catalog markup can fill gaps,
   //    but a page whose SKU contradicts the partner's SKU is never used.
   for (const url of resolved.urls.slice(0, INTAKE_LIMITS.maxLinksPerItem)) {
     if (!safeImageUrl(url)) { reasons.push(`link_not_public_https:${url.slice(0, 120)}`); continue; }
     const metadata = await deps.metadata(url).catch(() => null);
+    if (metadata?.http_status === 404 || metadata?.http_status === 410) {
+      // The listing is gone. One-off resale links do this constantly; importing
+      // them is how a roster ends up with offers nobody can buy.
+      removedLinks++;
+      notes.push(`link_removed:${hostOf(url)}`);
+      continue;
+    }
     const rawPageSku = metadata?.sku || null;
-    if (skuSource === 'partner' && resolved.sku && rawPageSku && normalizeCode(rawPageSku) !== normalizeCode(resolved.sku)) {
+    const listingId = resolved.listing_ids?.[url] ?? linkEvidence(url).listing_id;
+    const stockNumber = listingId ? listingId.replace(/^[A-Z]+-/, '') : null;
+    // A reseller's page SKU is usually its own stock number (the id in its URL),
+    // not a competing manufacturer code. That is not a contradiction.
+    const ownStockNumber = Boolean(rawPageSku && stockNumber && normalizeCode(rawPageSku) === normalizeCode(stockNumber));
+    if ((skuSource === 'partner' || skuSource === 'link') && resolved.sku && rawPageSku && !ownStockNumber
+      && normalizeCode(rawPageSku) !== normalizeCode(resolved.sku) && !textCarriesCode(metadata?.title, resolved.sku)) {
       reasons.push(`link_sku_mismatch:${hostOf(url)} lists ${rawPageSku}, partner listed ${resolved.sku}`);
       continue;
     }
@@ -691,21 +858,31 @@ export async function resolveIntakeItem(item: IntakeItem, deps: IntakeDependenci
       skuSource = 'merchant_page';
       pageCode = rawPageSku;
     }
+    // Manufacturer codes in a listing's title are suggestions for the reviewer.
+    if (grouped && metadata?.title) for (const code of codeTokens(metadata.title)) proposals.set(code, (proposals.get(code) ?? 0) + 1);
     resolved.title ??= bounded(metadata?.title, 300);
     resolved.brand ??= bounded(metadata?.brand, 120);
     resolved.object_type ??= bounded(metadata?.object_type, 100) ?? inferObjectType(metadata?.title ?? null, null);
-    if (metadata?.image_reference) imageCandidates.push(metadata.image_reference);
+    const pageImage = metadata?.image_reference && safeImageUrl(metadata.image_reference) ? metadata.image_reference : null;
+    if (pageImage) imageCandidates.push(pageImage);
+    const soldOut = SOLD_OUT.test(metadata?.availability ?? '');
+    if (soldOut) notes.push(`offer_sold_out:${hostOf(url)}`);
+    const status = metadata?.http_status ?? null;
     offers.push({
       destination: url, source: 'partner_link', provider: hostOf(url),
       title: bounded(metadata?.title, 300), price: metadata?.price ?? resolved.price ?? null,
-      currency: metadata?.currency ?? null, merchant_item_id: null,
+      currency: metadata?.currency ?? null, merchant_item_id: stockNumber,
+      page: metadata?.resolution === 'resolved' ? 'resolved' : metadata?.resolution === 'ambiguous' ? 'ambiguous'
+        : status === 0 ? 'unreachable' : status !== null && status >= 400 ? 'blocked' : 'unread',
+      sold_out: soldOut, image: pageImage, seller_sku: rawPageSku,
     });
   }
+  const live = () => offers.filter(offer => !offer.sold_out);
 
-  // 2. Marketplace search (eBay etc.) when we still lack an offer or an image.
+  // 2. Marketplace search (eBay etc.) when we still lack a live offer or an image.
   //    Only listings that carry the same SKU/GTIN count as this product.
-  if (!offers.length || !imageCandidates.length) {
-    const searchCode = skuSource === 'merchant_page' ? pageCode : resolved.sku;
+  if (!live().length || !imageCandidates.length) {
+    const searchCode = skuSource === 'merchant_page' ? pageCode : grouped ? null : resolved.sku;
     const query = buildIntakeQuery({ ...resolved, sku: searchCode });
     const hits = query ? await deps.search(query).catch(() => [] as IntakeSearchHit[]) : [];
     let searchOffers = 0;
@@ -736,35 +913,50 @@ export async function resolveIntakeItem(item: IntakeItem, deps: IntakeDependenci
       if (reviewCandidates.length < INTAKE_LIMITS.maxReviewCandidates) {
         reviewCandidates.push({ title: hit.title.slice(0, 200), destination: hit.destination, provider, price: hit.price });
       }
-      // No SKU from the partner: gather codes that independent listings of the
+      // No code from the partner: gather codes that independent listings of the
       // same named product agree on. These are proposals for a human only.
-      if (!skuSource && titleOverlap(resolved.title, hit.title, resolved.brand) >= 0.6) {
+      if ((!skuSource || grouped) && titleOverlap(resolved.title, hit.title, resolved.brand) >= 0.6) {
         for (const code of codeTokens(hit.title)) proposals.set(code, (proposals.get(code) ?? 0) + 1);
       }
     }
   }
 
-  // 3. A reference image that actually loads. Missing pixels are exactly why
-  //    roster SKUs were silently skipped by the verifier before.
+  // 3. Reference images that actually load. Missing pixels are exactly why
+  //    roster SKUs were silently skipped by the verifier before. Several
+  //    listings of one variant give the verifier several real photos of it.
   const uniqueImages = [...new Set(imageCandidates.filter(url => safeImageUrl(url)))];
-  let verifiedImage: string | null = null;
-  for (const url of uniqueImages) {
-    if (await deps.imageLoads(url).catch(() => false)) { verifiedImage = url; break; }
+  const loaded: string[] = [];
+  for (const url of uniqueImages.slice(0, INTAKE_LIMITS.maxImageAttempts)) {
+    if (loaded.length >= INTAKE_LIMITS.maxVerifiedImages) break;
+    if (await deps.imageLoads(url).catch(() => false)) loaded.push(url);
   }
+  const verifiedImage = loaded[0] ?? null;
+  for (const offer of offers) if (offer.image && !loaded.includes(offer.image)) offer.image = null;
   const fallbackImages = uniqueImages.filter(url => url !== verifiedImage).slice(0, 2);
 
-  const proposedSkus = [...proposals.entries()]
-    .filter(([, support]) => support >= 2)
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .slice(0, 3)
-    .map(([sku, support]) => ({ sku, support }));
+  const linkProposals = new Map<string, number>();
+  for (const { code } of resolved.link_codes ?? []) linkProposals.set(code, (linkProposals.get(code) ?? 0) + 1);
+  const proposedSkus: ResolvedIntakeItem['proposed_skus'] = [
+    ...[...linkProposals.entries()].map(([sku, support]) => ({ sku, support, source: 'partner_link' as const })),
+    ...[...proposals.entries()]
+      .filter(([sku, support]) => support >= 2 && !linkProposals.has(sku))
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([sku, support]) => ({ sku, support, source: 'listings' as const })),
+  ].slice(0, 3);
 
+  if (resolved.flags?.includes('partner_could_not_find')) reasons.push('partner_could_not_find');
+  if (resolved.flags?.includes('partner_unsure')) reasons.push('partner_unsure');
   if (!resolved.sku && !resolved.gtin) reasons.push(proposedSkus.length ? 'sku_missing_proposal_needs_review' : 'sku_missing');
   if (!resolved.brand) reasons.push('brand_missing');
   if (!resolved.title) reasons.push('title_missing');
   if (!resolved.object_type) reasons.push('object_type_missing');
-  if (!offers.length) reasons.push(reviewCandidates.length ? 'no_sku_matched_offer' : 'no_offer');
-  if (!verifiedImage) reasons.push(uniqueImages.length ? 'image_unavailable' : 'image_missing');
+  if (!live().length) {
+    reasons.push(offers.length ? 'offers_sold_out' : removedLinks ? 'links_removed'
+      : reviewCandidates.length ? 'no_sku_matched_offer' : 'no_offer');
+  }
+  // Nothing answered at all: say that, rather than "no image", so the fix is obvious.
+  const unreachable = offers.length > 0 && offers.every(offer => offer.page === 'unreachable');
+  if (!verifiedImage) reasons.push(uniqueImages.length ? 'image_unavailable' : unreachable ? 'sellers_unreachable' : 'image_missing');
 
   const status: IntakeStatus = !reasons.length ? 'READY'
     : offers.length || reviewCandidates.length || proposedSkus.length || resolved.sku || resolved.gtin ? 'NEEDS_REVIEW'
@@ -780,18 +972,48 @@ export async function resolveIntakeItem(item: IntakeItem, deps: IntakeDependenci
     proposed_skus: proposedSkus,
     sku_source: skuSource,
     review_candidates: reviewCandidates,
+    notes,
+  };
+}
+
+/**
+ * Structure-only result for a run that deliberately fetches nothing: the rows,
+ * identities and links exactly as read from the list, all marked unchecked.
+ * Never READY, so nothing unchecked can reach the importer.
+ */
+export function uncheckedIntakeItem(item: IntakeItem): ResolvedIntakeItem {
+  const basis = item.sku_basis ?? (isGroupVariantId(item.sku) ? 'partner_group' : 'partner');
+  const linkProposals = new Map<string, number>();
+  for (const { code } of item.link_codes ?? []) linkProposals.set(code, (linkProposals.get(code) ?? 0) + 1);
+  return {
+    ...item,
+    status: 'NEEDS_REVIEW',
+    reasons: ['not_checked', ...(item.flags ?? []).filter(flag => flag === 'partner_could_not_find' || flag === 'partner_unsure')],
+    offers: item.urls.slice(0, INTAKE_LIMITS.maxLinksPerItem).map(url => ({
+      destination: url, source: 'partner_link' as const, provider: hostOf(url), title: null, price: null, currency: null,
+      merchant_item_id: (item.listing_ids?.[url] ?? '').replace(/^[A-Z]+-/, '') || null, page: 'unread' as const,
+    })),
+    verified_image: null,
+    fallback_images: [],
+    proposed_skus: [...linkProposals.entries()].map(([sku, support]) => ({ sku, support, source: 'partner_link' as const })).slice(0, 3),
+    sku_source: item.sku || item.gtin ? basis : null,
+    review_candidates: [],
+    notes: [...(item.hints ?? [])],
   };
 }
 
 export async function resolveRosterIntake(items: IntakeItem[], deps: IntakeDependencies): Promise<ResolvedIntakeItem[]> {
   if (items.length > INTAKE_LIMITS.maxResolveBatch) throw new Error(`Resolve at most ${INTAKE_LIMITS.maxResolveBatch} products per request`);
+  // Every link is a seller-page read plus image reads; bound the whole request, not just the row count.
+  const links = items.reduce((sum, item) => sum + Math.min(item.urls?.length ?? 0, INTAKE_LIMITS.maxLinksPerItem), 0);
+  if (links > INTAKE_LIMITS.maxResolveLinks) throw new Error(`Resolve at most ${INTAKE_LIMITS.maxResolveLinks} seller links per request`);
   const out: ResolvedIntakeItem[] = [];
   // Sequential on purpose: bounded edge subrequests and polite merchant/API load.
   for (const item of items) out.push(await resolveIntakeItem(item, deps));
   return out;
 }
 
-/** Import manifest for POST /partner-roster. Only READY rows; every offer of a SKU merges into one identity. */
+/** Import manifest for POST /partner-roster. Only READY rows; every live offer of a variant merges into one identity. */
 export function buildRosterManifest(video: VideoRef, items: ResolvedIntakeItem[]): {
   platform: string; content_ref: string; offers: RosterOfferInput[];
 } {
@@ -800,13 +1022,16 @@ export function buildRosterManifest(video: VideoRef, items: ResolvedIntakeItem[]
     if (item.status !== 'READY' || !item.verified_image) continue;
     const sku = (item.sku ?? item.gtin)!;
     for (const offer of item.offers) {
+      if (offer.sold_out) continue;
       offers.push({
         destination: offer.destination,
         sku,
         title: item.title!,
         brand: item.brand!,
         object_type: item.object_type!,
-        image_reference: item.verified_image,
+        ...(item.family ? { family: item.family } : {}),
+        // Each listing keeps its own photo when it loaded: more real pixels of the same variant.
+        image_reference: offer.image ?? item.verified_image,
         ...(offer.merchant_item_id ? { merchant_item_id: offer.merchant_item_id } : {}),
         ...(typeof item.candidate_window_start_ms === 'number' && typeof item.candidate_window_end_ms === 'number'
           ? { candidate_window_start_ms: item.candidate_window_start_ms, candidate_window_end_ms: item.candidate_window_end_ms }
@@ -817,16 +1042,21 @@ export function buildRosterManifest(video: VideoRef, items: ResolvedIntakeItem[]
   return { platform: video.platform, content_ref: video.content_ref, offers };
 }
 
+const liveOffers = (item: ResolvedIntakeItem) => item.offers.filter(offer => !offer.sold_out);
+
 export function summarizeIntake(items: ResolvedIntakeItem[]) {
   const count = (status: IntakeStatus) => items.filter(item => item.status === status).length;
   return {
     products: items.length,
+    families: new Set(items.map(item => item.family).filter(Boolean)).size,
     ready: count('READY'),
     needs_review: count('NEEDS_REVIEW'),
     unresolved: count('UNRESOLVED'),
-    offers: items.reduce((sum, item) => sum + (item.status === 'READY' ? item.offers.length : 0), 0),
-    partner_link_offers: items.reduce((sum, item) => sum + item.offers.filter(offer => offer.source === 'partner_link').length, 0),
-    sku_search_offers: items.reduce((sum, item) => sum + item.offers.filter(offer => offer.source === 'sku_search').length, 0),
+    offers: items.reduce((sum, item) => sum + (item.status === 'READY' ? liveOffers(item).length : 0), 0),
+    partner_link_offers: items.reduce((sum, item) => sum + liveOffers(item).filter(offer => offer.source === 'partner_link').length, 0),
+    sku_search_offers: items.reduce((sum, item) => sum + liveOffers(item).filter(offer => offer.source === 'sku_search').length, 0),
+    video_local_identities: items.filter(item => item.sku_source === 'partner_group').length,
+    partner_gaps: items.filter(item => item.flags?.includes('partner_could_not_find')).length,
   };
 }
 
@@ -849,8 +1079,24 @@ const REASON_TEXT: Record<string, string> = {
   object_type_missing: 'Product type unknown (bag, shoes, shirt...). Pass --object-type or add a type column.',
   no_offer: 'No seller link and no marketplace listing carries this SKU.',
   no_sku_matched_offer: 'Marketplace results found, but none list this exact SKU. Lookalikes are shown for review only.',
+  offers_sold_out: 'Every seller link the partner gave is marked sold out. Needs a live listing.',
+  links_removed: 'Every seller link the partner gave has been taken down. Needs a live listing.',
+  sellers_unreachable: 'None of the seller pages could be reached from where this ran, so there is no reference image yet. Re-run from another network or through the API.',
   image_missing: 'No reference image found. The verifier cannot compare pixels without one.',
   image_unavailable: 'Reference images found but none could be downloaded.',
+  not_checked: 'Seller pages and images were not checked in this run.',
+  partner_could_not_find: 'The partner could not find this variant online. It appears in the video but has no listing yet.',
+  partner_unsure: 'The partner was not sure about a link here. Check it shows the right variant, then remove their note to import.',
+};
+
+const NOTE_TEXT: Record<string, (detail: string) => string> = {
+  sizes_mixed: detail => `Listings span sizes ${detail}. Kept as one variant because the partner grouped them; split the note per size if a viewer must land on the exact size.`,
+  codes_differ: detail => `Links state different manufacturer codes (${detail}), so no single code was adopted.`,
+  search_page_ignored: detail => `${detail} search-results link ignored (not a product).`,
+  links_over_limit: detail => `${detail} links listed; only the first ${INTAKE_LIMITS.maxLinksPerItem} are checked.`,
+  link_removed: detail => `${detail} listing has been taken down; not imported.`,
+  offer_sold_out: detail => `${detail} listing is sold out; its photo is still used as a reference, the link is not imported.`,
+  link_names_other_product: detail => `${detail} listing's name does not mention this product. Check it belongs here.`,
 };
 
 function reasonText(reason: string): string {
@@ -861,33 +1107,74 @@ function reasonText(reason: string): string {
   return REASON_TEXT[code] ?? reason;
 }
 
+function noteText(note: string): string {
+  const [code, detail] = note.split(/:(.+)/);
+  return NOTE_TEXT[code]?.(detail ?? '') ?? note;
+}
+
+function identityText(item: ResolvedIntakeItem): string {
+  const suggestion = item.proposed_skus.length ? `; suggested ${item.proposed_skus.map(p => p.sku).join(', ')}` : '';
+  if (item.sku_source === 'merchant_page') return `${item.sku} (from seller page${item.proposed_skus.length ? `; confirm ${item.proposed_skus[0].sku}` : ''})`;
+  if (item.sku_source === 'partner_group') return `video-local${suggestion}`;
+  if (item.sku_source === 'link') return `${item.sku} (from the partner's link)`;
+  return item.sku ?? item.gtin ?? (item.proposed_skus.length ? `proposed: ${item.proposed_skus.map(p => p.sku).join(', ')}` : '—');
+}
+
+function offersText(item: ResolvedIntakeItem): string {
+  return item.offers.map(offer => `${offer.sold_out ? '~~' : ''}[${md(offer.provider)}](${offer.destination})${offer.sold_out ? '~~ (sold out)' : ''}${offer.source === 'sku_search' ? ' (search)' : ''}`).join('<br>') || '—';
+}
+
 /** "Products on a page": what to import, what to ask the partner for. */
 export function renderIntakeReview(video: VideoRef, items: ResolvedIntakeItem[], warnings: string[] = []): string {
   const summary = summarizeIntake(items);
+  const outline = items.some(item => item.family);
+  // A structure-only run says so once, instead of on every row.
+  const unchecked = items.length > 0 && items.every(item => item.reasons.includes('not_checked'));
   const lines: string[] = [
     `# Roster intake: ${video.platform} ${video.content_ref}`,
     '',
-    `**${summary.ready} of ${summary.products} products ready to import** (${summary.offers} offers). ${summary.needs_review} need review, ${summary.unresolved} unresolved.`,
+    `**${summary.ready} of ${summary.products} ${outline ? 'variants' : 'products'} ready to import** (${summary.offers} offers${outline ? `, ${summary.families} product families` : ''}). ${summary.needs_review} need review, ${summary.unresolved} unresolved.`,
     '',
-    'READY rows have an explicit SKU, a purchasable offer and a reference image that loads. Importing them makes each SKU a roster candidate for this video; EXACT still requires the visual verifier on the viewer\'s frame.',
-    '',
-    '| # | Time | Status | Product | SKU | Offers | Image |',
-    '|---|---|---|---|---|---|---|',
+    'READY rows have an identity, a live offer and a reference image that loads. Importing them makes each one a roster candidate for this video; EXACT still requires the visual verifier on the viewer\'s frame.',
   ];
-  for (const item of items) {
-    const offers = item.offers.map(offer => `[${md(offer.provider)}](${offer.destination})${offer.source === 'sku_search' ? ' (search)' : ''}`).join('<br>');
-    const image = item.verified_image ? `[image](${item.verified_image})` : '—';
-    const sku = item.sku_source === 'merchant_page' ? `${item.sku} (from seller page${item.proposed_skus.length ? `; confirm ${item.proposed_skus[0].sku}` : ''})`
-      : item.sku ?? item.gtin ?? (item.proposed_skus.length ? `proposed: ${item.proposed_skus.map(p => p.sku).join(', ')}` : '—');
-    lines.push(`| ${item.index} | ${formatTime(item.timestamp_ms)} | ${item.status} | ${md([item.brand, item.title].filter(Boolean).join(' — '))} | ${md(sku)} | ${offers || '—'} | ${image} |`);
+  if (unchecked) lines.push('', '**Structure only.** This run read the list but did not open any seller page or image, so nothing is READY yet. Run without `--parse-only` to check links and images.');
+  if (summary.video_local_identities) {
+    lines.push('', `${summary.video_local_identities} variant(s) have no manufacturer code, so they carry a **video-local** id: "the thing this partner calls X in this video". It joins only the links the partner listed under that variant, and never matches another video or catalog. Add a code next to the variant in the list to upgrade it.`);
   }
-  const followUps = items.filter(item => item.status !== 'READY');
+  if (outline) {
+    const sections = new Map<string, ResolvedIntakeItem[]>();
+    for (const item of items) {
+      const key = `${item.section ?? ''}|${item.family ?? item.title ?? ''}`;
+      sections.set(key, [...(sections.get(key) ?? []), item]);
+    }
+    for (const rows of sections.values()) {
+      const [first] = rows;
+      lines.push('', `## ${first.section != null ? `${first.section}. ` : ''}${md(first.family ?? first.title ?? 'Unnamed product')}${first.timestamp_ms != null ? ` (${formatTime(first.timestamp_ms)})` : ''}`, '',
+        '| # | Variant | Status | Identity | Offers | Image |', '|---|---|---|---|---|---|');
+      for (const item of rows) {
+        const image = item.verified_image ? `[image](${item.verified_image})` : '—';
+        lines.push(`| ${item.index} | ${md(item.variant ?? '(as titled)')} | ${item.status} | ${md(identityText(item))} | ${offersText(item)} | ${image} |`);
+      }
+    }
+  } else {
+    lines.push('', '| # | Time | Status | Product | SKU | Offers | Image |', '|---|---|---|---|---|---|---|');
+    for (const item of items) {
+      const image = item.verified_image ? `[image](${item.verified_image})` : '—';
+      lines.push(`| ${item.index} | ${formatTime(item.timestamp_ms)} | ${item.status} | ${md([item.brand, item.title].filter(Boolean).join(' — '))} | ${md(identityText(item))} | ${offersText(item)} | ${image} |`);
+    }
+  }
+  const shownReasons = (item: ResolvedIntakeItem) => item.reasons.filter(reason => !(unchecked && reason === 'not_checked'));
+  const followUps = items.filter(item => unchecked
+    ? shownReasons(item).length || item.notes?.length || item.remarks?.length || item.proposed_skus.length
+    : item.status !== 'READY' || item.notes?.length);
   if (followUps.length) {
     lines.push('', '## Needs attention', '');
     for (const item of followUps) {
       lines.push(`### ${item.index}. ${md(item.title ?? item.sku ?? 'Unnamed product')} — ${item.status}`, '');
-      for (const reason of item.reasons) lines.push(`- ${reasonText(reason)}`);
-      if (item.proposed_skus.length) lines.push(`- Proposed SKU(s): ${item.proposed_skus.map(p => `${p.sku} (${p.support} listings)`).join(', ')}`);
+      for (const reason of shownReasons(item)) lines.push(`- ${reasonText(reason)}`);
+      for (const note of item.notes ?? []) lines.push(`- Note: ${noteText(note)}`);
+      for (const remark of item.remarks ?? []) lines.push(`- Partner wrote: "${md(remark).slice(0, 200)}"`);
+      if (item.proposed_skus.length) lines.push(`- Suggested SKU(s), not applied: ${item.proposed_skus.map(p => `${p.sku} (${p.source === 'partner_link' ? `stated by ${p.support} of the partner's links` : `${p.support} listings`})`).join(', ')}`);
       if (item.review_candidates.length) {
         lines.push('- Lookalike listings (not imported):');
         for (const candidate of item.review_candidates) lines.push(`  - [${md(candidate.title)}](${candidate.destination}) — ${md(candidate.provider)}${candidate.price ? ` — ${md(candidate.price)}` : ''}`);
@@ -897,4 +1184,24 @@ export function renderIntakeReview(video: VideoRef, items: ResolvedIntakeItem[],
   }
   if (warnings.length) lines.push('', '## Parser notes', '', ...warnings.map(warning => `- ${md(warning)}`));
   return `${lines.join('\n')}\n`;
+}
+
+const csvCell = (value: unknown) => {
+  const text = value == null ? '' : String(value);
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+/**
+ * The cleaned roster as a spreadsheet. Edit it (add a code, drop a link, fix a
+ * name) and feed the CSV back into intake: what the sheet states wins.
+ */
+export function renderIntakeCsv(items: ResolvedIntakeItem[]): string {
+  const header = ['section', 'family', 'variant label', 'title', 'brand', 'type', 'sku', 'identity basis', 'status', 'links', 'image', 'needs'];
+  const rows = items.map(item => [
+    item.section ?? '', item.family ?? '', item.variant ?? '', item.title ?? '', item.brand ?? '', item.object_type ?? '',
+    item.sku ?? item.gtin ?? '', item.sku_source ?? '', item.status,
+    liveOffers(item).filter(offer => offer.source === 'partner_link').map(offer => offer.destination).join(' '),
+    item.verified_image ?? '', item.reasons.map(reason => reason.split(':')[0]).join(' '),
+  ]);
+  return `${[header, ...rows].map(row => row.map(csvCell).join(',')).join('\n')}\n`;
 }

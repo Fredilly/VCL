@@ -135,7 +135,7 @@ test('a SKU read off one seller page stays namespaced; other sellers with that c
   assert.equal(out.sku, 'merchant:shop.co:M46197:||');
   assert.equal(out.sku_source, 'merchant_page');
   same(out.offers.map(offer => offer.source), ['partner_link']);
-  same(out.proposed_skus, [{ sku: 'M46197', support: 2 }]);
+  same(out.proposed_skus, [{ sku: 'M46197', support: 2, source: 'listings' }]);
   assert.equal(out.review_candidates[0].destination, 'https://www.ebay.com/itm/1');
   // No seller image and the lookalike's image is not borrowed.
   assert.ok(out.reasons.includes('image_missing'));
@@ -171,7 +171,7 @@ test('a name with no SKU gets proposals from agreeing listings but is never READ
   ] });
   const out = await intake.resolveIntakeItem(item({}), d);
   assert.equal(out.status, 'NEEDS_REVIEW');
-  same(out.proposed_skus, [{ sku: 'M46197', support: 2 }]);
+  same(out.proposed_skus, [{ sku: 'M46197', support: 2, source: 'listings' }]);
   assert.equal(out.offers.length, 0);
   assert.ok(out.reasons.includes('sku_missing_proposal_needs_review'));
 });
@@ -233,7 +233,9 @@ test('resolve requests are bounded', async () => {
 
 test('CLI orchestration: parse once, resolve in batches of 8, import READY offers in batches of 6', async () => {
   same(parseArgs(['n9u8ynhBdSo', 'list.txt', '--brand', 'Louis Vuitton', '--import']).brand, 'Louis Vuitton');
-  assert.throws(() => parseArgs(['only-video']), /Usage/);
+  assert.throws(() => parseArgs([]), /Usage/);
+  // One argument is the list file; the video then comes from the list itself.
+  same([parseArgs(['list.docx']).video, parseArgs(['list.docx']).listFile], [null, 'list.docx']);
   same(chunk([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]]);
   const calls = [];
   const parsedItems = Array.from({ length: 10 }, (_, i) => ({ index: i + 1 }));
