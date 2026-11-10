@@ -345,6 +345,16 @@ export function canonicalProductIdentity(input: CanonicalIdentityInput): Canonic
         namespace: null,
         vector_id: null,
       }] : []),
+      // Same-variant fallback images on other hosts. Ranked below the merchant
+      // image and never attached to an offer.
+      ...(mapping.reference_images ?? []).map((imageUrl) => ({
+        reference_key: `reference:${imageUrl}`,
+        image_url: imageUrl,
+        provenance: 'web_verified' as const,
+        viewpoint: null,
+        namespace: null,
+        vector_id: null,
+      })),
     ]),
   };
 }

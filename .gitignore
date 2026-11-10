@@ -5,6 +5,9 @@ dist/
 .env
 .env.*
 !.env.example
+# Wrangler local secrets (never commit)
+.dev.vars
+.dev.vars.*
 .DS_Store
 coverage/
 .wrangler/

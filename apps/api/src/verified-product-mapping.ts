@@ -36,6 +36,21 @@ export type VerifiedProductMapping = {
   title: string;
   destination: string;
   image_reference?: string | null;
+  /**
+   * Extra catalog images of this same variant on other hosts. Visual evidence
+   * only: they never become merchant offers and never establish Exact by
+   * themselves. They let the verifier still compare pixels when one image host
+   * blocks or times out.
+   */
+  reference_images?: string[] | null;
+  /**
+   * Set when a roster candidate is creator-verified but no loadable same-variant
+   * reference image exists yet. The row stays visible as a candidate, but it
+   * carries no pixels, so the verifier cannot compare it and it must never be
+   * returned as Exact from text evidence alone. The roster image check reports
+   * these rows explicitly instead of silently skipping them.
+   */
+  reference_image_status?: 'pending_partner_image' | null;
   price?: string | null;
   currency?: string | null;
   provider?: string | null;
@@ -129,6 +144,15 @@ export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProd
       title: (record.title as string).trim(),
       destination: (record.destination as string).trim(),
       image_reference: typeof record.image_reference === 'string' && record.image_reference.trim() ? record.image_reference.trim() : null,
+      ...(Array.isArray(record.reference_images)
+        ? { reference_images: (record.reference_images as unknown[])
+          .filter((url): url is string => typeof url === 'string' && /^https:\/\//i.test(url.trim()))
+          .map(url => url.trim().slice(0, 1200))
+          .slice(0, 6) }
+        : {}),
+      ...(record.reference_image_status === 'pending_partner_image'
+        ? { reference_image_status: 'pending_partner_image' as const }
+        : {}),
       price: typeof record.price === 'string' && record.price.trim() ? record.price.trim() : null,
       currency: typeof record.currency === 'string' && record.currency.trim() ? record.currency.trim().toUpperCase().slice(0, 8) : null,
       provider: typeof record.provider === 'string' && record.provider.trim() ? record.provider.trim() : null,
@@ -215,8 +239,18 @@ export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProduc
   const platform = normalize(input.platform);
   const contentRef = normalizeContentRef(input.platform, input.contentRef);
   const mappings = [...parseVerifiedProductMappings(input.rawRegistry), ...(input.mappings ?? [])];
+  // Pending status is a property of the SKU, not of one storage row. If any
+  // roster row marks a SKU pending, a stale durable mapping for the same SKU
+  // must not resolve it either.
+  const pendingSkus = new Set(mappings
+    .filter((mapping) => mapping.reference_image_status === 'pending_partner_image')
+    .map((mapping) => normalize(mapping.product_id)));
   const matches = mappings.filter((mapping) => {
     if (mapping.provenance === 'test_fixture' && !input.allowTestFixtures) return false;
+    // A roster candidate without loadable same-variant pixels cannot be visually
+    // verified. Never let text evidence promote it to Exact.
+    if (mapping.reference_image_status === 'pending_partner_image') return false;
+    if (pendingSkus.has(normalize(mapping.product_id))) return false;
     const timestampMatches = mapping.scope === 'entire_video'
       || (typeof input.timestampMs === 'number'
         && typeof mapping.timestamp_start_ms === 'number'
@@ -263,6 +297,10 @@ export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProduc
       provider: merged.provider ?? mapping.provider ?? null,
       canonical_key: merged.canonical_key ?? mapping.canonical_key ?? null,
       track_id: merged.track_id ?? mapping.track_id ?? null,
+      reference_image_status: merged.reference_image_status ?? mapping.reference_image_status ?? null,
+      ...(merged.reference_images?.length || mapping.reference_images?.length
+        ? { reference_images: merged.reference_images?.length ? merged.reference_images : mapping.reference_images }
+        : {}),
       trusted_observations: merged.trusted_observations?.length
         ? merged.trusted_observations
         : mapping.trusted_observations,

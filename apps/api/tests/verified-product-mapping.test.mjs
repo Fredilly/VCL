@@ -298,6 +298,58 @@ test('equivalent durable and seed mappings merge richer metadata without changin
 });
 
 
+test('a pending SKU cannot be resolved through a stale durable mapping for the same product', () => {
+  const hit = mod.lookupVerifiedProductMapping({
+    mappings: [
+      {
+        platform: 'youtube', content_ref: 'n9u8ynhBdSo', scope: 'entire_video', object_type: 'bag',
+        brand: 'Louis Vuitton', product_id: 'M28392', title: 'Louis Vuitton Vagabond Hobo Bag',
+        destination: 'https://uk.louisvuitton.com/eng-gb/products/vagabond-hobo-bag-h39-nvprod7260131v/M28392',
+        image_reference: null,
+        reference_image_status: 'pending_partner_image',
+        provenance: 'creator_verified',
+      },
+      {
+        platform: 'youtube', content_ref: 'n9u8ynhBdSo', scope: 'entire_video', object_type: 'bag',
+        brand: 'Louis Vuitton', product_id: 'M28392', title: 'Louis Vuitton Vagabond Hobo Bag',
+        destination: 'https://uk.louisvuitton.com/eng-gb/products/vagabond-hobo-bag-h39-nvprod7260131v/M28392',
+        image_reference: 'https://example.com/stale-vagabond.jpg',
+        provenance: 'admin_verified',
+      },
+    ],
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: 'n9u8ynhBdSo',
+    description: { ...shirt, category: 'accessories', subcategory: 'bag', search_terms: ['Louis Vuitton Vagabond Hobo M28392'] },
+  });
+  assert.equal(hit, null);
+});
+
+test('equivalent durable and seed mappings merge fallback reference images', () => {
+  const base = {
+    platform: 'youtube', content_ref: 'n9u8ynhBdSo', scope: 'entire_video', object_type: 'bag',
+    brand: 'Louis Vuitton', product_id: 'M46977', title: 'Louis Vuitton Monogram Speedy Bandouliere 25',
+    destination: 'https://eu.louisvuitton.com/eng-e1/products/speedy-bandouliere-25-monogram-nvprod5320019v/M46977',
+    provenance: 'admin_verified',
+  };
+  const hit = mod.lookupVerifiedProductMapping({
+    mappings: [
+      { ...base, image_reference: null },
+      {
+        ...base,
+        image_reference: 'https://eu.louisvuitton.com/x.jpg',
+        reference_images: ['https://www.fashionphile.com/cdn/shop/files/x.jpg'],
+      },
+    ],
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: 'n9u8ynhBdSo',
+    description: { ...shirt, category: 'accessories', subcategory: 'bag', search_terms: ['Louis Vuitton Speedy Bandouliere 25'] },
+  });
+  assert.equal(JSON.stringify(hit?.reference_images), JSON.stringify(['https://www.fashionphile.com/cdn/shop/files/x.jpg']));
+  assert.equal(hit?.destination, base.destination);
+});
+
 test('contextual SKU text selects the correct product among multiple verified products in one video', () => {
   const mappings = [
     {

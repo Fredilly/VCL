@@ -371,7 +371,7 @@ test('Handbagholic partner roster preserves all candidates across appearance win
 
   const trunkie = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 620046);
   assert.ok(trunkie.some(({ mapping }) => mapping.product_id === 'M14526'));
-  assert.ok(trunkie.find(({ mapping }) => mapping.product_id === 'M14526')?.mapping.image_reference?.includes('M14526_PM1_Worn'));
+  assert.ok(trunkie.find(({ mapping }) => mapping.product_id === 'M14526')?.mapping.image_reference?.includes('M14526_PM2_Front'));
 
   const gap = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 320000);
   assert.equal(gap.length, 10);
@@ -448,4 +448,155 @@ test('configured multi-product roster can be canonicalized without code-specific
 
   const allRows = partner.verifiedRosterCanonicalRowsForContent(mappings, 'youtube', 'partner-video');
   assert.equal([...allRows.map(({ mapping }) => mapping.product_id)].sort().join(','), 'A,B');
+});
+
+// Root cause of the 2026-10-07 Handbagholic pilot: 8 of 10 roster SKUs had no
+// reference image, so the verifier skipped them and compared each crop against
+// only the one or two imaged (usually wrong) bags. Every roster SKU must either
+// carry pixels or be explicitly marked pending so the gap is visible.
+test('every Handbagholic roster SKU has a loadable image or is explicitly pending', () => {
+  const rows = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo');
+  assert.equal(rows.length, 10);
+  const pending = rows.filter(({ mapping }) => mapping.reference_image_status === 'pending_partner_image');
+  assert.deepEqual(new Set(pending.map(({ mapping }) => mapping.product_id)), new Set(['M28392', 'M2A078']));
+  for (const { mapping, identity } of rows) {
+    if (mapping.reference_image_status === 'pending_partner_image') {
+      assert.equal(mapping.image_reference ?? null, null, `${mapping.product_id} pending row must not carry an unverified image`);
+      assert.equal((identity.visual_references ?? []).length, 0, `${mapping.product_id} pending row must not expose visual references`);
+      continue;
+    }
+    assert.match(mapping.image_reference ?? '', /^https:\/\//, `${mapping.product_id} lacks image_reference`);
+    assert.ok((identity.visual_references ?? []).length >= 1, `${mapping.product_id} lacks visual reference`);
+  }
+});
+
+test('pending-image roster candidates never resolve as Exact from text evidence', () => {
+  const hit = mappingMod.lookupVerifiedProductMapping({
+    mappings: seedMod.ALPHA_VERIFIED_PRODUCT_SEEDS,
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: 'n9u8ynhBdSo',
+    timestampMs: 180000,
+    description: {
+      category: 'accessories',
+      subcategory: 'bag',
+      brand_candidate: 'Louis Vuitton',
+      model_candidate: 'Vagabond Hobo M28392',
+      color: 'black',
+      material: 'leather',
+      style_attributes: ['leather'],
+      visible_text: [],
+      logos_markings: ['Louis Vuitton'],
+      distinctive_features: ['Vagabond Hobo'],
+      hardware_details: [],
+      shape_silhouette: ['hobo bag'],
+      search_terms: ['Louis Vuitton Vagabond Hobo M28392'],
+      confidence: 0.99,
+      identity_confidence: 0.98,
+    },
+  });
+  assert.equal(hit, null);
+});
+
+test('persisted mappings preserve pending partner image status', () => {
+  const [mapping] = mappingMod.parseVerifiedProductMappings(JSON.stringify([{
+    platform: 'youtube', content_ref: 'abc', scope: 'entire_video', object_type: 'bag', brand: 'B',
+    product_id: 'P1', title: 'B Bag', destination: 'https://merchant.example.com/p1', provenance: 'creator_verified',
+    reference_image_status: 'pending_partner_image',
+  }]));
+  assert.equal(mapping.reference_image_status, 'pending_partner_image');
+});
+
+// Commercial destinations are frozen at the values the alpha shipped with. A
+// reference-image fix must never quietly re-anchor a live offer: each replacement
+// catalog page has to be verified and signed off per SKU before it goes live.
+const HANDBAGHOLIC_FROZEN_OFFERS = {
+  'FP-1977706': {
+    destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-side-trunk-pm-1977706',
+    provider: 'fashionphile.com',
+  },
+  'M28392': {
+    destination: 'https://uk.louisvuitton.com/eng-gb/products/vagabond-hobo-bag-h39-nvprod7260131v/M28392',
+    provider: 'louisvuitton.com',
+  },
+  'FP-1925620': {
+    destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-roses-neverfull-mm-1925620',
+    provider: 'fashionphile.com',
+  },
+  'FP-1981368': {
+    destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-carryall-mm-1981368',
+    provider: 'fashionphile.com',
+  },
+  'FP-1983129': {
+    destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-neonoe-mm-black-1983129',
+    provider: 'fashionphile.com',
+  },
+  'M2A078': {
+    destination: 'https://us.louisvuitton.com/eng-us/products/Multipass-G81-nvprod7770009v/M2A078',
+    provider: 'louisvuitton.com',
+  },
+  'M14526': {
+    destination: 'https://uk.louisvuitton.com/eng-gb/products/trunkie-bag-monogram-nvprod6090072v/M14526',
+    provider: 'louisvuitton.com',
+  },
+  'POSH-6a3f49685919e011180b400c': {
+    destination: 'https://poshmark.com/listing/Louis-Vuitton-Monogram-Vanity-Chain-Pouch-Brown-6a3f49685919e011180b400c',
+    provider: 'poshmark',
+  },
+  'M46784': {
+    destination: 'https://poshmark.com/listing/Louis-Vuitton-High-Rise-Monogram-Bumbag-M46784-Full-Set-Receipt-6abd335f046d1f7c1de21801',
+    provider: 'poshmark',
+  },
+  'FP-1985008': {
+    destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-speedy-bandouliere-25-1985008',
+    provider: 'fashionphile.com',
+  },
+};
+
+test('Handbagholic commercial destinations stay frozen until each replacement is verified', () => {
+  const rows = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo');
+  assert.equal(rows.length, 10);
+  for (const { mapping } of rows) {
+    const frozen = HANDBAGHOLIC_FROZEN_OFFERS[mapping.product_id];
+    assert.ok(frozen, `unexpected roster SKU ${mapping.product_id}`);
+    assert.equal(mapping.destination, frozen.destination, `${mapping.product_id} destination drifted`);
+    assert.equal(mapping.provider, frozen.provider, `${mapping.product_id} provider drifted`);
+  }
+});
+
+test('reference-image improvements do not change roster offer identity', () => {
+  const rows = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo');
+  for (const { mapping, identity } of rows) {
+    assert.equal(identity.merchant_refs.length, 1, `${mapping.product_id} must expose exactly one live offer`);
+    assert.equal(identity.merchant_refs[0].destination, mapping.destination);
+    assert.equal(identity.merchant_refs[0].image_reference, mapping.image_reference ?? null);
+  }
+  const imageUrls = rows
+    .filter(({ mapping }) => mapping.reference_image_status !== 'pending_partner_image')
+    .map(({ mapping }) => mapping.image_reference);
+  assert.equal(new Set(imageUrls).size, imageUrls.length, 'roster image references must be unique');
+});
+
+test('fallback reference images are visual evidence only and never become offers', () => {
+  const [carryall] = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 350000)
+    .filter(({ mapping }) => mapping.product_id === 'FP-1981368');
+  assert.ok(carryall);
+  const refs = carryall.identity.visual_references ?? [];
+  const fallback = refs.find(ref => ref.image_url.includes('fashionphile.com/cdn/shop/files/effab10a'));
+  assert.equal(fallback?.provenance, 'web_verified');
+  // The official catalog image stays the primary visual reference; the curated
+  // fallback is only reached when the official CDN refuses the fetch.
+  assert.equal(refs[0].provenance, 'merchant_verified');
+  assert.ok(refs[0].image_url.includes('M46197'));
+  assert.equal(carryall.identity.merchant_refs.length, 1);
+  assert.equal(carryall.identity.merchant_refs[0].image_reference, carryall.mapping.image_reference);
+});
+
+test('persisted mappings keep only https fallback reference images', () => {
+  const [mapping] = mappingMod.parseVerifiedProductMappings(JSON.stringify([{
+    platform: 'youtube', content_ref: 'abc', scope: 'entire_video', object_type: 'bag', brand: 'B',
+    product_id: 'P1', title: 'B Bag', destination: 'https://merchant.example.com/p1', provenance: 'admin_verified',
+    reference_images: ['https://cdn.example.com/a.jpg', 'http://cdn.example.com/b.jpg', 42],
+  }]));
+  assert.equal(JSON.stringify(mapping.reference_images), JSON.stringify(['https://cdn.example.com/a.jpg']));
 });

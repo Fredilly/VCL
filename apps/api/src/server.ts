@@ -888,11 +888,19 @@ async function confirmSameVideoReuseWithImage(
     }
     if (!merchantRef?.image_reference) continue;
 
+    // Roster-curated same-variant reference images are fallback evidence, never
+    // primary identity evidence. They must not outrank the merchant/partner
+    // reference: a mislabelled curated image would otherwise convert a blocked
+    // official CDN into a false Exact. The verifier walks image_references in
+    // order and only falls back when a fetch fails.
+    const curatedReferences = (candidate.mapping.reference_images ?? [])
+      .filter((url) => safeImageUrl(url));
     const imageReferences = [...new Set([
       preferredImage,
       candidate.mapping.image_reference,
       ...(identity.visual_references ?? []).map((ref) => ref.image_url),
       ...identity.merchant_refs.map((ref) => ref.image_reference),
+      ...curatedReferences,
     ].filter((url): url is string => Boolean(url && safeImageUrl(url))))];
 
     rows.push({
@@ -983,6 +991,7 @@ async function confirmSameVideoReuseWithImage(
         ...(row.identity.visual_references ?? []).map(ref => ref.image_url),
         row.candidate.mapping.image_reference,
         ...row.identity.merchant_refs.map(ref => ref.image_reference),
+        ...(row.candidate.mapping.reference_images ?? []),
       ].filter((url): url is string => Boolean(url && safeImageUrl(url) && url !== row.product.image_reference));
       const alternate = [...new Set(references)][0] ?? null;
       const recovered = alternate ?? await recoverVerifiedProductImage(
