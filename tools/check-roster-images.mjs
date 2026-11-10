@@ -14,15 +14,29 @@ import { loadModule } from '../apps/api/tests/helpers/load-ts.mjs';
 const here = fileURLToPath(new URL('.', import.meta.url));
 const src = resolve(here, '../apps/api/src');
 
-/** Plain request with the runtime's defaults (no spoofed headers), to report why a host refused. */
+/** Plain request with the runtime's defaults (no spoofed headers), to report why a host refused.
+ *  The body is drained on purpose: the runtime rejects an image while streaming it,
+ *  so a header-only probe can report "HTTP 200" for an image that never arrives. */
 async function diagnose(url) {
+  const started = Date.now();
+  const elapsed = () => `${Date.now() - started}ms`;
   try {
     const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(6000) });
-    const why = `HTTP ${response.status} type=${response.headers.get('content-type') ?? '-'} length=${response.headers.get('content-length') ?? '-'} server=${response.headers.get('server') ?? '-'}${response.headers.get('location') ? ` location=${response.headers.get('location').slice(0, 120)}` : ''}`;
-    await response.body?.cancel();
-    return why;
+    const header = `HTTP ${response.status} type=${response.headers.get('content-type') ?? '-'} length=${response.headers.get('content-length') ?? '-'} server=${response.headers.get('server') ?? '-'}${response.headers.get('location') ? ` location=${response.headers.get('location').slice(0, 120)}` : ''}`;
+    let bytes = 0;
+    try {
+      if (response.body) {
+        for await (const chunk of response.body) {
+          bytes += chunk.byteLength;
+          if (bytes > 3_000_000) break;
+        }
+      }
+    } catch (error) {
+      return `${header} body=${bytes}B body_error=${error?.name ?? 'Error'} after ${elapsed()}`;
+    }
+    return `${header} body=${bytes}B after ${elapsed()}`;
   } catch (error) {
-    return `${error?.name ?? 'Error'}: ${String(error?.cause?.code ?? error?.message ?? '').slice(0, 80)}`;
+    return `${error?.name ?? 'Error'}: ${String(error?.cause?.code ?? error?.message ?? '').slice(0, 80)} after ${elapsed()}`;
   }
 }
 

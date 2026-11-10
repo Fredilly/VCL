@@ -1,0 +1,222 @@
+name: PR-only private replay (local worker)
+
+# Replays the private Handbagholic HAR against the CURRENT branch code running in
+# a throwaway local `wrangler dev` worker. It never deploys, never calls the
+# production domain, and never writes to production Product Memory.
+#
+# Credentials are the ones already used by production operations:
+#   - bucket-scoped R2 token: SCOOP_REPLAY_R2_ACCESS_KEY_ID / _SECRET_ACCESS_KEY
+#   - CLOUDFLARE_ACCOUNT_ID, SCOOP_REPLAY_HAR_SHA256, SCOOP_REPLAY_HAR_OBJECT_KEY
+#   - provider keys, same names as apps/api/secrets.registry.json
+#     (OPENROUTER_API_KEY or GEMINI_API_KEY, plus BRAVE_SEARCH_API_KEY or SERPAPI_API_KEY)
+#
+# Manual only: it spends paid resolver calls.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag or SHA to replay (defaults to this branch)'
+        required: false
+        default: ''
+      case_limit:
+        description: 'Maximum resolver calls (1-38); start with 3'
+        required: true
+        default: '3'
+        type: choice
+        options: ['1','3','5','10','22','38']
+      confirm:
+        description: 'Type LOCAL_REPLAY to confirm a paid local replay'
+        required: true
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-private-replay
+  cancel-in-progress: false
+
+jobs:
+  replay:
+    if: inputs.confirm == 'LOCAL_REPLAY'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      R2_ACCESS_KEY_ID: ${{ secrets.SCOOP_REPLAY_R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.SCOOP_REPLAY_R2_SECRET_ACCESS_KEY }}
+      R2_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      HAR_SHA256: ${{ secrets.SCOOP_REPLAY_HAR_SHA256 }}
+      HAR_OBJECT_KEY: ${{ secrets.SCOOP_REPLAY_HAR_OBJECT_KEY }}
+      SCOOP_REPLAY_CONTENT_REF: n9u8ynhBdSo
+      SCOOP_REPLAY_MAX_CASES: ${{ inputs.case_limit }}
+      SCOOP_HAR_REPLAY_CONFIRM: 'YES'
+      # Local worker only. Never point this at api.vcl.article6.org.
+      SCOOP_REPLAY_HAR_ENDPOINT: http://localhost:8787/resolve-products
+      WRANGLER_SEND_METRICS: 'false'
+
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Refuse production endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$SCOOP_REPLAY_HAR_ENDPOINT" in
+            http://localhost:8787/resolve-products) ;;
+            *) echo 'Refusing a non-local replay endpoint'; exit 1 ;;
+          esac
+          if grep -nE '^ *run: *(pnpm .*)?wrangler deploy' .github/workflows/pr-private-replay.yml; then
+            echo 'This workflow must never deploy'; exit 1
+          fi
+
+      - name: Download private HAR using bucket-scoped R2 credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 -m pip install --quiet boto3
+          python3 - <<'PY'
+          import hashlib, os, pathlib
+          import boto3
+          from botocore.config import Config
+          from botocore.exceptions import ClientError
+          required=('R2_ACCESS_KEY_ID','R2_SECRET_ACCESS_KEY','R2_ACCOUNT_ID','HAR_SHA256','HAR_OBJECT_KEY')
+          if any(not os.environ.get(k) for k in required):
+              raise SystemExit('Missing private R2 replay credentials or checksum secret')
+          expected=os.environ['HAR_SHA256'].strip().lower()
+          if len(expected)!=64 or any(c not in '0123456789abcdef' for c in expected):
+              raise SystemExit('Invalid HAR SHA-256')
+          s3=boto3.client('s3',
+            endpoint_url='https://'+os.environ['R2_ACCOUNT_ID']+'.r2.cloudflarestorage.com',
+            aws_access_key_id=os.environ['R2_ACCESS_KEY_ID'],
+            aws_secret_access_key=os.environ['R2_SECRET_ACCESS_KEY'],
+            region_name='auto',config=Config(signature_version='s3v4',
+              connect_timeout=15,read_timeout=45,retries={'max_attempts':2}))
+          bucket='scoop-private-replays'
+          key=os.environ['HAR_OBJECT_KEY']
+          if not key.startswith('private-replay/') or '..' in key or not key.endswith('.har'):
+              raise SystemExit('HAR key must be a private-replay/*.har object')
+          limit=16*1024*1024
+          try:
+              listing=s3.list_objects_v2(Bucket=bucket, MaxKeys=1000)
+          except ClientError as error:
+              code=error.response.get('Error',{}).get('Code','UNKNOWN')
+              raise SystemExit('Unable to list private R2 bucket (check account ID, token scope and bucket): '+code)
+          if listing.get('IsTruncated'):
+              raise SystemExit('Private R2 bucket has over 1000 objects; narrow lookup required')
+          entries=listing.get('Contents',[])
+          print('Private R2 bucket preflight: objects visible =',len(entries))
+          candidates=[o for o in entries if o.get('Key')==key or
+            (o.get('Key','').endswith('.har') and 0<o.get('Size',0)<=limit)]
+          candidates.sort(key=lambda o: (o.get('Key')!=key,o.get('Key','')))
+          if not candidates:
+              raise SystemExit('No eligible HAR visible with these R2 credentials')
+          data=None
+          for object in candidates:
+              try:
+                  body=s3.get_object(Bucket=bucket,Key=object['Key'])['Body']
+              except ClientError as error:
+                  code=error.response.get('Error',{}).get('Code','UNKNOWN')
+                  if code in ('NoSuchKey','404'):
+                      continue
+                  raise SystemExit('R2 object read failed: '+code)
+              blob=body.read(limit+1)
+              body.close()
+              if len(blob)<=limit and hashlib.sha256(blob).hexdigest()==expected:
+                  data=blob
+                  print('Checksum-pinned private HAR found; no object names disclosed')
+                  break
+          if data is None:
+              raise SystemExit('No eligible R2 HAR matches pinned SHA-256')
+          out=pathlib.Path(os.environ['RUNNER_TEMP'],'private-scoop.har')
+          out.write_bytes(data)
+          out.chmod(0o600)
+          print('Private HAR downloaded and checksum verified')
+          PY
+
+      - name: Write local-only provider credentials
+        shell: bash
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+          SERPAPI_API_KEY: ${{ secrets.SERPAPI_API_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          if [ -z "${OPENROUTER_API_KEY}${GEMINI_API_KEY}" ]; then
+            echo 'Missing vision credential: configure OPENROUTER_API_KEY or GEMINI_API_KEY (see apps/api/secrets.registry.json)'
+            exit 1
+          fi
+          if [ -z "${BRAVE_SEARCH_API_KEY}${SERPAPI_API_KEY}" ]; then
+            echo 'Missing commerce credential: configure BRAVE_SEARCH_API_KEY or SERPAPI_API_KEY'
+            exit 1
+          fi
+          : > apps/api/.dev.vars
+          for name in OPENROUTER_API_KEY GEMINI_API_KEY BRAVE_SEARCH_API_KEY SERPAPI_API_KEY; do
+            value="${!name:-}"
+            [ -n "$value" ] && printf '%s=%s\n' "$name" "$value" >> apps/api/.dev.vars
+          done
+          # Benchmark mode disables alpha invite and rate-limit guardrails locally.
+          printf 'BENCHMARK_MODE=true\n' >> apps/api/.dev.vars
+
+      - name: Start local worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @vcl/api exec wrangler dev --port 8787 --local --ip 127.0.0.1 \
+            > "$RUNNER_TEMP/wrangler-dev.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/wrangler.pid"
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8787/health > /dev/null 2>&1; then
+              echo 'Local worker is healthy'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'Local worker did not become healthy'
+          tail -40 "$RUNNER_TEMP/wrangler-dev.log" || true
+          exit 1
+
+      - name: Replay selected Handbagholic resolver calls locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/replay-scoop-har-resolver.mjs \
+            "$RUNNER_TEMP/private-scoop.har" \
+            "$RUNNER_TEMP/pr-replay-report.json" \
+            "$SCOOP_REPLAY_HAR_ENDPOINT"
+
+      - name: Upload metadata-only replay report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-local-replay-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/pr-replay-report.json
+            ${{ runner.temp }}/wrangler-dev.log
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Stop worker and remove private material
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/wrangler.pid" ]; then kill "$(cat "$RUNNER_TEMP/wrangler.pid")" 2>/dev/null || true; fi
+          rm -f apps/api/.dev.vars "$RUNNER_TEMP/private-scoop.har"

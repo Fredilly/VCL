@@ -252,11 +252,18 @@ export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProduc
   const platform = normalize(input.platform);
   const contentRef = normalizeContentRef(input.platform, input.contentRef);
   const mappings = [...parseVerifiedProductMappings(input.rawRegistry), ...(input.mappings ?? [])];
+  // Pending status is a property of the SKU, not of one storage row. If any
+  // roster row marks a SKU pending, a stale durable mapping for the same SKU
+  // must not resolve it either.
+  const pendingSkus = new Set(mappings
+    .filter((mapping) => mapping.reference_image_status === 'pending_partner_image')
+    .map((mapping) => normalize(mapping.product_id)));
   const matches = mappings.filter((mapping) => {
     if (mapping.provenance === 'test_fixture' && !input.allowTestFixtures) return false;
     // A roster candidate without loadable same-variant pixels cannot be visually
     // verified. Never let text evidence promote it to Exact.
     if (mapping.reference_image_status === 'pending_partner_image') return false;
+    if (pendingSkus.has(normalize(mapping.product_id))) return false;
     const timestampMatches = mapping.scope === 'entire_video'
       || (typeof input.timestampMs === 'number'
         && typeof mapping.timestamp_start_ms === 'number'
@@ -304,6 +311,15 @@ export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProduc
       canonical_key: merged.canonical_key ?? mapping.canonical_key ?? null,
       track_id: merged.track_id ?? mapping.track_id ?? null,
       reference_image_status: merged.reference_image_status ?? mapping.reference_image_status ?? null,
+      ...(merged.reference_images?.length || mapping.reference_images?.length
+        ? { reference_images: merged.reference_images?.length ? merged.reference_images : mapping.reference_images }
+        : {}),
+      ...(merged.retired_destinations?.length || mapping.retired_destinations?.length
+        ? { retired_destinations: [...new Set([
+          ...(merged.retired_destinations ?? []),
+          ...(mapping.retired_destinations ?? []),
+        ])] }
+        : {}),
       trusted_observations: merged.trusted_observations?.length
         ? merged.trusted_observations
         : mapping.trusted_observations,
