@@ -346,3 +346,32 @@ test('malformed verifier JSON is retried once and successful retry preserves com
   assert.equal(result.failure_reasons.model_json_retry, 1);
   assert.equal(result.usage.requests, 2);
 });
+
+
+test('hard verifier rate limit stops later batches and returns their reserved budget', async () => {
+  const { candidate, description } = example(apparelCases[0]);
+  let modelCalls = 0, imageCalls = 0;
+  const { compareCandidateImages, imageRequestBudget } = loadModule(filename, { fetch: async (url) => {
+    if (String(url).includes('openrouter.ai')) {
+      modelCalls++;
+      return new Response('rate limited', { status: 429 });
+    }
+    imageCalls++;
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+  } });
+  const products = Array.from({ length: 18 }, (_, i) => ({
+    ...candidate, id: 'rate-limit-' + i, image_reference: `https://cdn.shopify.com/test-${i}.png`,
+  }));
+  const budget = imageRequestBudget();
+  const result = await compareCandidateImages(
+    'key', 'model', image, description, products, undefined, budget, { provider: 'openrouter' },
+  );
+  // Two batches may already be in flight together; later batches must not call the failed provider.
+  assert.equal(modelCalls, 2);
+  assert.equal(result.compared, 0);
+  assert.equal(result.failures, 18);
+  assert.equal(result.failure_reasons.model_http_429, 12);
+  assert.equal(result.failure_reasons.model_provider_unavailable, 6);
+  assert.ok(imageCalls <= 18);
+  assert.ok(budget.remaining >= 0);
+});

@@ -236,6 +236,9 @@ export async function compareCandidateImages(
   const timingStarted = Date.now();
   const timing: ImageVerification['timing'] = { image_fetch_ms: 0, model_ms: 0, total_ms: 0, batches: [] };
   const failure = (reason: string, count = 1) => { failure_reasons[reason] = (failure_reasons[reason] ?? 0) + count; };
+  // Stop spending provider calls for this interaction after a hard auth/rate-limit response.
+  // Comparisons stay unknown; no provider failure can promote a candidate.
+  let providerUnavailableReason: string | null = null;
   // Six thumbnails + one source stay under the inline payload limit, even at MAX_BYTES.
   const batches = Array.from({ length: Math.ceil(products.length / 6) }, (_, i) => products.slice(i * 6, i * 6 + 6));
   // Pre-allocate budget in deterministic batch order before any concurrent work.
@@ -285,6 +288,17 @@ export async function compareCandidateImages(
       failures += batch.length;
       failure('image_budget', batch.length);
       budget.remaining += batchBudget.remaining; // return unused budget to shared pool
+      batchBudget.remaining = 0;
+      batchTiming.total_ms = Date.now() - batchStarted;
+      timing.batches.push(batchTiming);
+      return;
+    }
+    if (providerUnavailableReason) {
+      // This batch was pre-reserved before an earlier concurrent batch failed.
+      // Return its unused reservations and mark the candidates unknown without fetching images.
+      failures += batch.length;
+      failure('model_provider_unavailable', batch.length);
+      budget.remaining += batchBudget.remaining;
       batchBudget.remaining = 0;
       batchTiming.total_ms = Date.now() - batchStarted;
       timing.batches.push(batchTiming);
@@ -344,7 +358,11 @@ export async function compareCandidateImages(
               method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(12000),
               body: JSON.stringify({ systemInstruction: { parts: [{ text: INSTRUCTIONS }] }, contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', responseSchema, temperature: 0, maxOutputTokens: 12000 } }),
             });
-        if (!response.ok) { failure(`model_http_${response.status}`, images.length); await response.body?.cancel(); failures += images.length; return; }
+        if (!response.ok) {
+          failure(`model_http_${response.status}`, images.length);
+          if ([401, 403, 429].includes(response.status)) providerUnavailableReason = `model_http_${response.status}`;
+          await response.body?.cancel(); failures += images.length; return;
+        }
         const payload = await response.json() as any;
         if (verificationProvider === 'openrouter') {
           usage.prompt_tokens += usageNumber(payload.usage?.prompt_tokens);
@@ -399,6 +417,7 @@ export async function compareCandidateImages(
               });
           if (!retryResponse.ok) {
             failure(`model_http_${retryResponse.status}`, images.length);
+            if ([401, 403, 429].includes(retryResponse.status)) providerUnavailableReason = `model_http_${retryResponse.status}`;
             await retryResponse.body?.cancel();
             failures += images.length;
             return;
