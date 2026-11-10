@@ -98,3 +98,31 @@ test('replay includes only bounded roster-source counts, never roster identities
    {configured:0,alpha_seed:10,durable:73,canonical_candidates:83});
  assert.equal(JSON.stringify(result).includes('sensitive'),false);
 });
+
+test('a request for more cases than the pinned HAR holds fails before any paid call',async()=>{
+ let calls=0;
+ await assert.rejects(replayHar(har,{endpoint:'https://api.example.test/resolve-products',maxCases:38,
+  fetchImpl:async()=>{calls++;return {ok:true,json:async()=>({products:[],state:'NONE'})};}}),
+  /Requested 38 replay cases but the pinned HAR contains 1/);
+ // The guard must run before the first request, so a mis-sized corpus costs nothing.
+ assert.equal(calls,0);
+});
+
+test('the report keeps the replayed corpus separate from the historical baseline',async()=>{
+ const result=await replayHar(har,{endpoint:'https://api.example.test/resolve-products',maxCases:1,
+  fetchImpl:async()=>({ok:true,json:async()=>({products:[{title:'Trunkie',result_class:'SIMILAR',identity_key:'sku:trunkie'}],state:'RESULTS'})})});
+ assert.equal(result.corpus.available_cases,1);
+ assert.equal(result.corpus.requested_cases,1);
+ assert.match(result.corpus.note,/not the historical roster-outliers baseline/);
+ assert.equal(result.acceptance.accuracy_verified,false);
+});
+
+test('omitting the case budget replays every available case instead of an arbitrary cap',async()=>{
+ let calls=0;
+ const result=await replayHar(har,{endpoint:'https://api.example.test/resolve-products',
+  fetchImpl:async()=>{calls++;return {ok:true,json:async()=>({products:[],state:'NONE'})};}});
+ assert.equal(calls,1);
+ assert.equal(result.count,1);
+ assert.equal(result.corpus.requested_cases,1);
+ assert.notEqual(result.acceptance.status,'INCOMPLETE_SAMPLE');
+});

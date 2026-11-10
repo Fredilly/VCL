@@ -13,8 +13,15 @@ test('image parser rejects invalid confidence, absent source and duplicate/inven
   assert.equal(parseComparisons({ source: comparison.source, candidates: [row] }, 1).size, 1);
   assert.equal(parseComparisons({ source: {}, candidates: [row] }, 1).size, 0);
   assert.equal(parseComparisons({ source: comparison.source, candidates: [row, row] }, 1).size, 0);
-  for (const mutation of [{ index: 9 }, { index: -1 }, { confidence: '0.99' }, { confidence: 2 }, { similarity: NaN }]) {
+  for (const mutation of [{ index: 9 }, { index: -1 }, { confidence: 2 }, { similarity: NaN }]) {
     assert.equal(parseComparisons({ source: comparison.source, candidates: [{ ...row, ...mutation }] }, 1).size, 0);
+  }
+  // A numeric string is an unambiguous encoding of the same in-range number, so
+  // it is accepted. Range and parseability are still enforced, so a provider
+  // cannot smuggle in a value the schema would have rejected.
+  assert.equal(parseComparisons({ source: comparison.source, candidates: [{ ...row, confidence: '0.99' }] }, 1).size, 1);
+  for (const confidence of ['1.5', '-0.1', 'high', '', null, 'NaN']) {
+    assert.equal(parseComparisons({ source: comparison.source, candidates: [{ ...row, confidence }] }, 1).size, 0, String(confidence));
   }
 });
 
@@ -345,4 +352,196 @@ test('malformed verifier JSON is retried once and successful retry preserves com
   assert.equal(result.failures, 0);
   assert.equal(result.failure_reasons.model_json_retry, 1);
   assert.equal(result.usage.requests, 2);
+});
+
+// --- Provider-neutral validation and bounded recovery -----------------------
+// These cover the 2026-11-10 live replay, where 60 comparisons were dropped as
+// model_schema and 94 provider calls were refused with 429.
+
+test('provider-neutral payloads are normalised without inventing evidence', () => {
+  const { comparison } = example(apparelCases[0]);
+  const row = { index: 0, attributes: comparison.candidate, ...comparison };
+  // Documented key plus the aliases a provider may use for the same list.
+  for (const key of ['candidates', 'comparisons', 'results', 'items']) {
+    assert.equal(parseComparisons({ source: comparison.source, [key]: [row] }, 1).size, 1, key);
+  }
+  // A list without source evidence is still a rejection, not a comparison.
+  assert.equal(parseComparisons([row], 1).size, 0);
+  // Candidate evidence that omits basis is downgraded to metadata, never pixels.
+  const attrs = { ...comparison.candidate, color: { value: 'black', confidence: 0.9 } };
+  const parsed = parseComparisons({ source: comparison.source, candidates: [{ ...row, attributes: attrs }] }, 1);
+  assert.equal(parsed.get(0).candidate.color.basis, 'metadata');
+  // A bare string asserts a value but no confidence, so it cannot promote.
+  const bare = parseComparisons({ source: comparison.source, candidates: [{ ...row, attributes: { color: 'black' } }] }, 1);
+  assert.equal(bare.get(0).candidate.color.confidence, 0);
+  assert.equal(bare.get(0).candidate.color.basis, 'metadata');
+});
+
+test('source evidence still requires an explicit image basis', () => {
+  const { comparison } = example(apparelCases[0]);
+  const row = { index: 0, attributes: comparison.candidate, ...comparison };
+  // Every source observation downgraded to metadata means no image evidence.
+  const metadataSource = Object.fromEntries(Object.entries(comparison.source)
+    .map(([key, value]) => [key, { ...value, basis: 'metadata' }]));
+  assert.equal(parseComparisons({ source: metadataSource, candidates: [row] }, 1).size, 0);
+  // Omitting basis entirely on the source side is also not pixels.
+  const basisless = Object.fromEntries(Object.entries(comparison.source)
+    .map(([key, value]) => [key, { value: value.value, confidence: value.confidence }]));
+  assert.equal(parseComparisons({ source: basisless, candidates: [row] }, 1).size, 0);
+});
+
+test('one-based indexes fail closed instead of shifting evidence onto a neighbour', () => {
+  const { comparison } = example(apparelCases[0]);
+  const oneBased = [1, 2].map((index) => ({ index, attributes: comparison.candidate, ...comparison }));
+  const diagnostics = [];
+  assert.equal(parseComparisons({ source: comparison.source, candidates: oneBased }, 2, diagnostics).size, 0);
+  assert.ok(diagnostics.includes('index_base'));
+  const zeroBased = [0, 1].map((index) => ({ index, attributes: comparison.candidate, ...comparison }));
+  assert.equal(parseComparisons({ source: comparison.source, candidates: zeroBased }, 2).size, 2);
+});
+
+test('a schema shortfall triggers exactly one bounded recovery call', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  let modelCalls = 0;
+  const { compareCandidateImages } = loadModule(filename, { fetch: async (url) => {
+    if (!String(url).includes('generativelanguage')) {
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+    }
+    modelCalls++;
+    // The first reply drops the required similarity, which the validator rejects.
+    const text = modelCalls === 1
+      ? JSON.stringify({ source: comparison.source, candidates: [{ index: 0, attributes: comparison.candidate, confidence: 0.9, matching_details: [] }] })
+      : JSON.stringify({ source: comparison.source, candidates: [{ index: 0, attributes: comparison.candidate, ...comparison }] });
+    return Response.json({ candidates: [{ content: { parts: [{ text }] } }] });
+  } });
+  const result = await compareCandidateImages('key', 'model', image, description, [candidate], undefined, undefined, { maxAttempts: 2, backoffMs: 0 });
+  assert.equal(modelCalls, 2);
+  assert.equal(result.compared, 1);
+  assert.equal(result.failures, 0);
+  assert.equal(result.failure_reasons.model_recovered, 1);
+});
+
+test('recovery is bounded: an unusable provider is not retried indefinitely', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  let modelCalls = 0;
+  const { compareCandidateImages } = loadModule(filename, { fetch: async (url) => {
+    if (!String(url).includes('generativelanguage')) {
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+    }
+    modelCalls++;
+    return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+      source: comparison.source, candidates: [{ index: 0, attributes: comparison.candidate, confidence: 0.9 }] }) }] } }] });
+  } });
+  const result = await compareCandidateImages('key', 'model', image, description, [candidate], undefined, undefined, { maxAttempts: 2, backoffMs: 0 });
+  assert.equal(modelCalls, 2);
+  assert.equal(result.compared, 0);
+  assert.equal(result.failures, 1);
+  assert.equal(result.failure_reasons.model_schema_confidence, 1);
+});
+
+test('schema failures name the validation step that rejected the payload', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  const { compareCandidateImages } = loadModule(filename, { fetch: async (url) => {
+    if (!String(url).includes('generativelanguage')) {
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+    }
+    return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+      source: comparison.source, candidates: [{ index: 'first', attributes: comparison.candidate, ...comparison }] }) }] } }] });
+  } });
+  const result = await compareCandidateImages('key', 'model', image, description, [candidate], undefined, undefined, { maxAttempts: 1 });
+  assert.equal(result.compared, 0);
+  assert.equal(result.failure_reasons.model_schema_index, 1);
+});
+
+test('a transient verifier 429 is retried with backoff and then succeeds', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  let modelCalls = 0;
+  const { compareCandidateImages } = loadModule(filename, { fetch: async (url) => {
+    if (!String(url).includes('openrouter.ai')) {
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+    }
+    modelCalls++;
+    if (modelCalls === 1) return new Response('rate limited', { status: 429 });
+    return Response.json({ choices: [{ message: { content: JSON.stringify({
+      source: comparison.source, candidates: [{ index: 0, attributes: comparison.candidate, ...comparison }] }) } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, cost: 0.0001 } });
+  } });
+  const result = await compareCandidateImages('key', 'model', image, description, [candidate], undefined, undefined,
+    { provider: 'openrouter', maxAttempts: 2, backoffMs: 1 });
+  assert.equal(modelCalls, 2);
+  assert.equal(result.compared, 1);
+  assert.equal(result.failures, 0);
+  assert.equal(result.failure_reasons.model_http_429, undefined);
+  assert.equal(result.usage.cost_usd, 0.0001);
+});
+
+test('a hard verifier rate limit stops later batches and returns their reserved budget', async () => {
+  const { candidate, description } = example(apparelCases[0]);
+  let modelCalls = 0, imageCalls = 0;
+  const { compareCandidateImages, imageRequestBudget } = loadModule(filename, { fetch: async (url) => {
+    if (String(url).includes('openrouter.ai')) {
+      modelCalls++;
+      return new Response('rate limited', { status: 429 });
+    }
+    imageCalls++;
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+  } });
+  const products = Array.from({ length: 18 }, (_, i) => ({
+    ...candidate, id: 'rate-limit-' + i, image_reference: `https://cdn.shopify.com/test-${i}.png`,
+  }));
+  const budget = imageRequestBudget();
+  const result = await compareCandidateImages(
+    'key', 'model', image, description, products, undefined, budget,
+    { provider: 'openrouter', maxAttempts: 2, backoffMs: 0, concurrency: 2 },
+  );
+  // Two batches may already be in flight together and each spends its bounded
+  // retry; later batches must not call the failed provider at all.
+  assert.equal(modelCalls, 4);
+  assert.equal(result.compared, 0);
+  assert.equal(result.failures, 18);
+  assert.equal(result.failure_reasons.model_http_429, 12);
+  assert.equal(result.failure_reasons.model_provider_unavailable, 6);
+  assert.equal(result.provider_unavailable, 'model_http_429');
+  assert.ok(imageCalls <= 18);
+  assert.ok(budget.remaining >= 0);
+});
+
+test('verifier concurrency is bounded and configurable', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  const products = Array.from({ length: 18 }, (_, i) => ({
+    ...candidate, id: 'concurrency-' + i, image_reference: `https://cdn.shopify.com/concurrency-${i}.png`,
+  }));
+  for (const [concurrency, expected] of [[1, 1], [2, 2]]) {
+    let inFlight = 0, peak = 0;
+    const { compareCandidateImages } = loadModule(filename, { fetch: async (url) => {
+      if (!String(url).includes('generativelanguage')) {
+        return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+      }
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight--;
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: comparison.source, candidates: [] }) }] } }] });
+    } });
+    await compareCandidateImages('key', 'model', image, description, products, undefined, undefined,
+      { concurrency, maxAttempts: 1 });
+    assert.equal(peak, expected, `concurrency ${concurrency}`);
+  }
+});
+
+test('a datacenter-blocked host is fetched last without losing its evidence', () => {
+  const { candidateImageUrls } = loadModule(filename);
+  const blocked = 'https://us.louisvuitton.com/images/is/image/lv/1/x--M46197_PM2_Front%20view.jpg';
+  const working = 'https://www.fashionphile.com/cdn/shop/files/effab10a.jpg?v=1';
+  const product = { ...example(apparelCases[0]).candidate, image_reference: blocked, image_references: [working] };
+  const urls = candidateImageUrls(product);
+  // The working same-variant reference is tried first...
+  assert.equal(urls[0], working);
+  // ...and the blocked catalog URL is still evidence, just last.
+  assert.deepEqual(new Set(urls), new Set([blocked, working]));
+  assert.equal(urls[urls.length - 1], blocked);
+  // Ordering is stable for hosts that are not blocked.
+  const plain = { ...product, image_reference: 'https://cdn.shopify.com/a.jpg', image_references: ['https://cdn.shopify.com/b.jpg'] };
+  // Array.from keeps the comparison in this realm; the module runs in a vm context.
+  assert.deepEqual(Array.from(candidateImageUrls(plain)), ['https://cdn.shopify.com/a.jpg', 'https://cdn.shopify.com/b.jpg']);
 });

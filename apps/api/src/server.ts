@@ -9,7 +9,7 @@ import { parseSelectionPoint, TargetLocalizationError, type SelectionPoint } fro
 import { CommerceNoResultsError, buildProductQueryVariants, type CommerceProvider, type ProductCandidate, type ProductContext, type ProductQuery } from './commerce.js';
 import { classifyCanonicalRelationship, highConfidenceMetadataContradiction, verifyCandidate, rankVerified } from './candidate-verification.js';
 import { canonical } from './verification-evidence.js';
-import { candidateKey, compareCandidateImages, parseSourceImage, imageRequestBudget, safeImageUrl } from './candidate-images.js';
+import { candidateKey, compareCandidateImages, parseSourceImage, imageRequestBudget, safeImageUrl, type VerifierOptions } from './candidate-images.js';
 import type { ImageComparison } from './verification-evidence.js';
 import { EbayAuth } from './ebay-auth.js';
 import { EbayCommerceProvider, ebayItemIdForLiveLookup } from './ebay-commerce.js';
@@ -89,6 +89,27 @@ export interface Env {
   ALPHA_ACCESS_LEDGER?: AlphaAccessNamespaceLike;
   VERIFIED_PRODUCT_LEDGER?: VerifiedProductLedgerNamespaceLike;
   ADMIN_ACCESS_LEDGER?: AdminAccessNamespaceLike;
+  VERIFIER_CONCURRENCY?: string;
+  VERIFIER_PACING_MS?: string;
+  VERIFIER_MAX_ATTEMPTS?: string;
+}
+
+/**
+ * Verifier transport controls, read from the environment so a replay run can
+ * pace provider calls without changing production defaults. Each value is
+ * clamped in compareCandidateImages; an absent or invalid value falls back to
+ * the built-in default rather than failing the request.
+ */
+export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIER_PACING_MS' | 'VERIFIER_MAX_ATTEMPTS'>, useOpenRouter: boolean): VerifierOptions {
+  const concurrency = Number(env.VERIFIER_CONCURRENCY);
+  const pacing = Number(env.VERIFIER_PACING_MS);
+  const attempts = Number(env.VERIFIER_MAX_ATTEMPTS);
+  return {
+    provider: useOpenRouter ? 'openrouter' : 'gemini',
+    ...(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 4 ? { concurrency } : {}),
+    ...(Number.isFinite(pacing) && pacing >= 0 && pacing <= 5000 ? { pacingMs: pacing } : {}),
+    ...(Number.isInteger(attempts) && attempts >= 1 && attempts <= 3 ? { maxAttempts: attempts } : {}),
+  };
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
@@ -556,7 +577,7 @@ export async function refreshVerifiedOffers(
         needsVisual.slice(0, 8),
         visual.context,
         imageRequestBudget(),
-        { provider: useOpenRouter ? 'openrouter' : 'gemini' },
+        verifierOptions(visual.env, useOpenRouter),
       ).catch(() => null);
 
       if (images) {
@@ -945,7 +966,7 @@ async function confirmSameVideoReuseWithImage(
     rows.map((row) => row.product),
     context,
     budget,
-    { provider: useOpenRouter ? 'openrouter' : 'gemini' },
+    verifierOptions(env, useOpenRouter),
   ).catch(() => null);
 
   if (!images) {
@@ -1010,7 +1031,7 @@ async function confirmSameVideoReuseWithImage(
         recoveredRows.map((row) => row.product),
         context,
         budget,
-        { provider: useOpenRouter ? 'openrouter' : 'gemini' },
+        verifierOptions(env, useOpenRouter),
       ).catch(() => null);
 
       if (retryVerification) {
@@ -1184,7 +1205,7 @@ async function confirmCrossVideoReuseWithImage(
     rows.map((row) => row.product),
     context,
     imageRequestBudget(),
-    { provider: useOpenRouter ? 'openrouter' : 'gemini' },
+    verifierOptions(env, useOpenRouter),
   ).catch(() => null);
   if (!images) {
     return {
