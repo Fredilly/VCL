@@ -545,3 +545,48 @@ test('a datacenter-blocked host is fetched last without losing its evidence', ()
   // Array.from keeps the comparison in this realm; the module runs in a vm context.
   assert.deepEqual(Array.from(candidateImageUrls(plain)), ['https://cdn.shopify.com/a.jpg', 'https://cdn.shopify.com/b.jpg']);
 });
+
+test('a 429 retry honours the provider retry-after instead of a fixed backoff', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  let modelCalls = 0;
+  const started = Date.now();
+  const { compareCandidateImages } = loadModule(filename, { fetch: async (url) => {
+    if (!String(url).includes('openrouter.ai')) {
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+    }
+    modelCalls++;
+    if (modelCalls === 1) {
+      // 0.05s is the same order as the provider's own quota hint, kept tiny so
+      // the test measures that the header is used, not how long it is.
+      return new Response('rate limited', { status: 429, headers: { 'retry-after': '0.05' } });
+    }
+    return Response.json({ choices: [{ message: { content: JSON.stringify({
+      source: comparison.source, candidates: [{ index: 0, attributes: comparison.candidate, ...comparison }] }) } }] });
+  } });
+  const result = await compareCandidateImages('key', 'model', image, description, [candidate], undefined, undefined,
+    { provider: 'openrouter', maxAttempts: 2, backoffMs: 0 });
+  assert.equal(modelCalls, 2);
+  assert.equal(result.compared, 1);
+  // backoffMs is 0, so any delay at all must have come from Retry-After.
+  assert.ok(Date.now() - started >= 45);
+});
+
+test('an unusable source block reports why it was rejected', () => {
+  const { comparison } = example(apparelCases[0]);
+  const row = { index: 0, attributes: comparison.candidate, ...comparison };
+  const code = (payload) => {
+    const diagnostics = [];
+    parseComparisons(payload, 1, diagnostics);
+    return diagnostics.find((entry) => entry.startsWith('source'));
+  };
+  // No source block at all.
+  assert.equal(code({ candidates: [row] }), 'source_missing');
+  // Source answered, but every observation is labelled metadata rather than pixels.
+  const metadataSource = Object.fromEntries(Object.entries(comparison.source)
+    .map(([key, value]) => [key, { ...value, basis: 'metadata' }]));
+  assert.equal(code({ source: metadataSource, candidates: [row] }), 'source_no_image_basis');
+  // Source labelled as pixels but no usable value.
+  const emptySource = Object.fromEntries(Object.keys(comparison.source)
+    .map((key) => [key, { value: null, confidence: 0.2, basis: 'image' }]));
+  assert.equal(code({ source: emptySource, candidates: [row] }), 'source_no_value');
+});

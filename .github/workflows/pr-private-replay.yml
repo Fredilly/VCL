@@ -58,8 +58,8 @@ jobs:
       # model_http_429 events because batches were fired back to back; pace the
       # calls and keep one batch in flight so a rate limit is not self-inflicted.
       VERIFIER_CONCURRENCY: '1'
-      VERIFIER_PACING_MS: '1500'
-      VERIFIER_MAX_ATTEMPTS: '2'
+      VERIFIER_PACING_MS: '2500'
+      VERIFIER_MAX_ATTEMPTS: '3'
 
     steps:
       - name: Checkout target ref
