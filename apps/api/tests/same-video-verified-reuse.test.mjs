@@ -634,6 +634,24 @@ test('structural roster retrieval keeps true SKU despite misleading model and OC
 });
 
 
+test('pending partner image candidates never enter any same-video reuse path', () => {
+  const pendingMapping = {
+    ...mapping,
+    canonical_key: identity.canonical_key,
+    track_id: identity.canonical_key,
+    reference_image_status: 'pending_partner_image',
+  };
+  const candidate = { mapping: pendingMapping, identity: { ...identity, model: 'SKU-123' } };
+
+  assert.equal(mod.eligibleSameVideoCanonicalCandidates({ description, candidates: [candidate] }).length, 0);
+  assert.equal(mod.distinctiveTextSameVideoReuse({ description, candidates: [candidate] }).mapping, null);
+  assert.equal(mod.exactModelSameVideoReuse({
+    description: { ...description, model_candidate: 'SKU-123' },
+    candidates: [candidate],
+  }).mapping, null);
+  assert.equal(mod.resolveSameVideoReuse({ description, candidates: [candidate] }).mapping, null);
+});
+
 test('missing comparison does not erase a separately verified roster winner when coverage fail-closed is disabled', () => {
   const secondMapping = { ...mapping, product_id: 'merchant-item-2', canonical_key: 'product:v1:shirt-2' };
   const secondIdentity = { ...identity, canonical_key: 'product:v1:shirt-2' };

@@ -548,6 +548,29 @@ test('fallback reference images are visual evidence only and never become offers
   assert.ok(carryall.identity.merchant_refs.every(ref => !ref.image_reference?.includes('fashionphile.com')));
 });
 
+test('re-anchored roster SKUs retire the dead resale listing instead of resurrecting it', () => {
+  const rows = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo');
+  const reAnchored = rows.filter(({ mapping }) => (mapping.retired_destinations ?? []).length > 0);
+  assert.equal(reAnchored.length, 6, 'six Handbagholic SKUs moved off one-off resale listings');
+  for (const { mapping, identity } of reAnchored) {
+    for (const destination of mapping.retired_destinations) {
+      assert.notEqual(destination, mapping.destination, `${mapping.product_id} still points at its retired listing`);
+      assert.equal(identity.merchant_refs.some((ref) => ref.destination === destination), false,
+        `${mapping.product_id} exposes a retired destination as a live offer`);
+    }
+    assert.equal(JSON.stringify(identity.retired_destinations), JSON.stringify(mapping.retired_destinations));
+  }
+});
+
+test('persisted mappings keep retired destinations so Product Memory can retire old offers', () => {
+  const [mapping] = mappingMod.parseVerifiedProductMappings(JSON.stringify([{
+    platform: 'youtube', content_ref: 'abc', scope: 'entire_video', object_type: 'bag', brand: 'B',
+    product_id: 'P1', title: 'B Bag', destination: 'https://merchant.example.com/p1', provenance: 'admin_verified',
+    retired_destinations: ['https://resale.example.com/old-1', 'ftp://resale.example.com/old-2', 42],
+  }]));
+  assert.equal(JSON.stringify(mapping.retired_destinations), JSON.stringify(['https://resale.example.com/old-1']));
+});
+
 test('persisted mappings keep only https fallback reference images', () => {
   const [mapping] = mappingMod.parseVerifiedProductMappings(JSON.stringify([{
     platform: 'youtube', content_ref: 'abc', scope: 'entire_video', object_type: 'bag', brand: 'B',

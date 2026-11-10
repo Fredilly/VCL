@@ -51,6 +51,13 @@ export type VerifiedProductMapping = {
    * these rows explicitly instead of silently skipping them.
    */
   reference_image_status?: 'pending_partner_image' | null;
+  /**
+   * Destinations this roster row replaces (retired one-off resale listings).
+   * Product Memory keeps every merchant ref it has ever seen, so without this
+   * a dead Fashionphile/Poshmark listing would keep resurfacing as a previously
+   * verified Exact offer after the SKU was re-anchored to a current catalog page.
+   */
+  retired_destinations?: string[] | null;
   price?: string | null;
   currency?: string | null;
   provider?: string | null;
@@ -152,6 +159,12 @@ export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProd
         : {}),
       ...(record.reference_image_status === 'pending_partner_image'
         ? { reference_image_status: 'pending_partner_image' as const }
+        : {}),
+      ...(Array.isArray(record.retired_destinations)
+        ? { retired_destinations: (record.retired_destinations as unknown[])
+          .filter((url): url is string => typeof url === 'string' && /^https?:\/\//i.test(url.trim()))
+          .map(url => url.trim().slice(0, 1200))
+          .slice(0, 8) }
         : {}),
       price: typeof record.price === 'string' && record.price.trim() ? record.price.trim() : null,
       currency: typeof record.currency === 'string' && record.currency.trim() ? record.currency.trim().toUpperCase().slice(0, 8) : null,

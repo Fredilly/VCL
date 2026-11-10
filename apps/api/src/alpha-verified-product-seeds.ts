@@ -28,6 +28,7 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     title: 'Louis Vuitton Monogram Side Trunk PM',
     destination: 'https://eu.louisvuitton.com/eng-e1/products/side-trunk-pm-monogram-nvprod7890038v/M2A578',
     image_reference: 'https://eu.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-side-trunk-pm--M2A578_PM2_Front%20view.jpg',
+    retired_destinations: ['https://www.fashionphile.com/products/louis-vuitton-monogram-side-trunk-pm-1977706'],
     // LV's image CDN refuses datacenter fetches; same-variant image on a second host.
     reference_images: ['https://www.fashionphile.com/cdn/shop/files/8dc572ae3bb8936b8f0d3720be969116.jpg?v=1785625192'],
     provider: 'louisvuitton.com',
@@ -117,6 +118,7 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     title: 'Louis Vuitton Monogram CarryAll MM',
     destination: 'https://us.louisvuitton.com/eng-us/products/carryall-mm-monogram-nvprod3770015v/M46197',
     image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-carryall-mm--M46197_PM2_Front%20view.jpg',
+    retired_destinations: ['https://www.fashionphile.com/products/louis-vuitton-monogram-carryall-mm-1981368'],
     reference_images: ['https://www.fashionphile.com/cdn/shop/files/effab10a58628492830a35cd4931dbd6.jpg?v=1792490797'],
     provider: 'louisvuitton.com',
     trusted_observations: [{
@@ -146,6 +148,7 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     title: 'Louis Vuitton Monogram NeoNoe MM Black',
     destination: 'https://us.louisvuitton.com/eng-us/products/neonoe-monogram-nvprod290007v/M44020',
     image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-neonoe-mm--M44020_PM2_Front%20view.jpg',
+    retired_destinations: ['https://www.fashionphile.com/products/louis-vuitton-monogram-neonoe-mm-black-1983129'],
     reference_images: ['https://www.fashionphile.com/cdn/shop/files/993d6dd0aaa7f5ebeaab48936a531ea8.jpg?v=1781094461&width=1946'],
     provider: 'louisvuitton.com',
     trusted_observations: [{
@@ -239,6 +242,7 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     title: 'Louis Vuitton Vanity Chain Pouch Monogram Brown',
     destination: 'https://us.louisvuitton.com/eng-us/products/vanity-chain-pouch-monogram-reverse-canvas-nvprod5190005v/M47125',
     image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-vanity-chain-pouch--M47125_PM2_Front%20view.jpg',
+    retired_destinations: ['https://poshmark.com/listing/Louis-Vuitton-Monogram-Vanity-Chain-Pouch-Brown-6a3f49685919e011180b400c'],
     reference_images: ['https://www.fashionphile.com/cdn/shop/files/f87024c43394452776b305c8751cac55.jpg?v=1786042554'],
     provider: 'louisvuitton.com',
     trusted_observations: [{
@@ -267,6 +271,7 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     title: 'Louis Vuitton High Rise Monogram Bumbag',
     destination: 'https://us.louisvuitton.com/eng-us/products/high-rise-monogram-nvprod4690067v/M46784',
     image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-high-rise--M46784_PM2_Front%20view.jpg',
+    retired_destinations: ['https://poshmark.com/listing/Louis-Vuitton-High-Rise-Monogram-Bumbag-M46784-Full-Set-Receipt-6abd335f046d1f7c1de21801'],
     reference_images: ['https://www.fashionphile.com/cdn/shop/files/b34a22f674175f4b7ed7490a8003814d.jpg?v=1776160965&width=1946'],
     provider: 'louisvuitton.com',
     trusted_observations: [{
@@ -297,6 +302,7 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     title: 'Louis Vuitton Monogram Speedy Bandouliere 25',
     destination: 'https://eu.louisvuitton.com/eng-e1/products/speedy-bandouliere-25-monogram-nvprod5320019v/M46977',
     image_reference: 'https://eu.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-speedy-bandouliere-25--M46977_PM2_Front%20view.jpg',
+    retired_destinations: ['https://www.fashionphile.com/products/louis-vuitton-monogram-speedy-bandouliere-25-1985008'],
     reference_images: ['https://www.fashionphile.com/cdn/shop/files/42dfde2b4eeb475008205f29660d8682.jpg?v=1785435824&width=1946'],
     provider: 'louisvuitton.com',
     trusted_observations: [{

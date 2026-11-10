@@ -464,6 +464,11 @@ export function eligibleSameVideoCanonicalCandidates(input: {
   for (const candidate of input.candidates) {
     const { mapping, identity } = candidate;
     if (!mapping.canonical_key || mapping.canonical_key !== identity.canonical_key) continue;
+    // A creator-verified SKU with no loadable same-variant pixels cannot be
+    // visually compared. Keep it out of every reuse path, including the
+    // distinctive-text and exact-model shortcuts, instead of promoting it from
+    // text evidence alone.
+    if (mapping.reference_image_status === 'pending_partner_image') continue;
     if (!unique.has(identity.canonical_key)) unique.set(identity.canonical_key, candidate);
   }
 

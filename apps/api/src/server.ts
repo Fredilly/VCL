@@ -32,7 +32,7 @@ import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, create
 import { lookupVerifiedProductMapping, parseVerifiedProductMappings, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { backfillLegacyAdminCanonicalMappings, consolidateCanonicalProducts, durableCanonicalCandidates, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
 import { eligibleSameVideoCanonicalCandidates, resolveSameVideoReuse, identityWithTrustedVpmObservations, rankSameVideoRosterCandidates, retrieveSameVideoRosterCandidates, unresolvedRosterCandidateKeys, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
-import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, preferredCanonicalReference, type CanonicalProductIdentity } from './canonical-product-memory.js';
+import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, normalizeDestination, preferredCanonicalReference, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
 import { fetchProductPageMetadata } from './product-page-enrichment.js';
@@ -612,8 +612,17 @@ export async function refreshVerifiedOffers(
   if (mapping.canonical_key && visual?.env) {
     const remembered = await durableCanonicalProductIdentity(visual.env, mapping.canonical_key).catch(() => null);
     if (remembered) {
+      // Product Memory keeps every merchant ref it ever saw. A retired one-off
+      // resale listing must not be resurrected as a live Exact offer after the
+      // SKU was re-anchored to a current catalog page.
+      const retired = new Set([
+        ...(remembered.retired_destinations ?? []),
+        ...(mapping.retired_destinations ?? []),
+      ].map(normalizeDestination).filter(Boolean));
       rememberedExact = remembered.merchant_refs
-        .filter((ref) => Boolean(ref.destination))
+        .filter((ref) => Boolean(ref.destination)
+          && ref.offer_status !== 'superseded'
+          && !retired.has(normalizeDestination(ref.destination)))
         .map((ref) => makeExact({
           id: ref.item_id || ref.destination,
           title: remembered.title,
@@ -888,18 +897,19 @@ async function confirmSameVideoReuseWithImage(
     }
     if (!merchantRef?.image_reference) continue;
 
-    // Roster-curated same-variant reference images are identity evidence, not
-    // merchant offers. Prefer one when supplied: some official catalog CDNs
-    // reject server-side image fetches even though the listing itself is valid.
-    // Keep the official merchant destination and references untouched.
-    const curatedReference = (candidate.mapping.reference_images ?? [])
-      .find((url) => safeImageUrl(url));
+    // Roster-curated same-variant reference images are fallback evidence, never
+    // primary identity evidence. They must not outrank the merchant/partner
+    // reference: a mislabelled curated image would otherwise convert a blocked
+    // official CDN into a false Exact. The verifier walks image_references in
+    // order and only falls back when a fetch fails.
+    const curatedReferences = (candidate.mapping.reference_images ?? [])
+      .filter((url) => safeImageUrl(url));
     const imageReferences = [...new Set([
-      curatedReference,
       preferredImage,
       candidate.mapping.image_reference,
       ...(identity.visual_references ?? []).map((ref) => ref.image_url),
       ...identity.merchant_refs.map((ref) => ref.image_reference),
+      ...curatedReferences,
     ].filter((url): url is string => Boolean(url && safeImageUrl(url))))];
 
     rows.push({
@@ -911,7 +921,7 @@ async function confirmSameVideoReuseWithImage(
         brand: identity.brand,
         model: identity.model,
         category: identity.object_type,
-        image_reference: curatedReference ?? merchantRef.image_reference,
+        image_reference: merchantRef.image_reference,
         image_references: imageReferences,
         provenance: 'canonical_verified',
         destination: merchantRef.destination,
@@ -990,6 +1000,7 @@ async function confirmSameVideoReuseWithImage(
         ...(row.identity.visual_references ?? []).map(ref => ref.image_url),
         row.candidate.mapping.image_reference,
         ...row.identity.merchant_refs.map(ref => ref.image_reference),
+        ...(row.candidate.mapping.reference_images ?? []),
       ].filter((url): url is string => Boolean(url && safeImageUrl(url) && url !== row.product.image_reference));
       const alternate = [...new Set(references)][0] ?? null;
       const recovered = alternate ?? await recoverVerifiedProductImage(
@@ -1146,7 +1157,8 @@ async function confirmCrossVideoReuseWithImage(
   const rows = candidates.slice(0, 8).flatMap((candidate) => {
     const identity = candidate.identity;
     if (!identity) return [];
-    const merchant = identity.merchant_refs.find((ref) => Boolean(ref.image_reference && ref.destination));
+    const merchant = identity.merchant_refs.find((ref) => ref.offer_status !== 'superseded'
+      && Boolean(ref.image_reference && ref.destination));
     if (!merchant?.image_reference) return [];
     return [{
       candidate,
