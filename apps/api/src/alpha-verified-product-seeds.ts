@@ -56,7 +56,7 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     candidate_window_end_ms: 228000,
     title: 'Louis Vuitton Vagabond Hobo Bag',
     destination: 'https://uk.louisvuitton.com/eng-gb/products/vagabond-hobo-bag-h39-nvprod7260131v/M28392',
-    image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-vagabond-hobo--M28392_PM2_Front%20view.jpg',
+    image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-vagabond-hobo--M28392_PM2_Front%20view.jpg?wid=400',
     provider: 'louisvuitton.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
@@ -170,7 +170,7 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     candidate_window_end_ms: 607000,
     title: 'Louis Vuitton Multipass',
     destination: 'https://us.louisvuitton.com/eng-us/products/Multipass-G81-nvprod7770009v/M2A078',
-    image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-multipass--M2A078_PM2_Front%20view.jpg',
+    image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-multipass--M2A078_PM2_Front%20view.jpg?wid=400',
     provider: 'louisvuitton.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
@@ -289,7 +289,7 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     candidate_window_start_ms: 805000,
     candidate_window_end_ms: 955000,
     title: 'Louis Vuitton Monogram Speedy Bandouliere 25',
-    destination: 'https://eu.louisvuitton.com/eng-e1/products/speedy-bandouliere-25-monogram-008774/M41113',
+    destination: 'https://eu.louisvuitton.com/eng-e1/products/speedy-bandouliere-25-monogram-nvprod5320019v/M46977',
     image_reference: 'https://eu.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-speedy-bandouliere-25--M46977_PM2_Front%20view.jpg',
     reference_images: ['https://www.fashionphile.com/cdn/shop/files/42dfde2b4eeb475008205f29660d8682.jpg?v=1785435824&width=1946'],
     provider: 'louisvuitton.com',

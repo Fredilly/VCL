@@ -471,6 +471,24 @@ test('Handbagholic roster offers point at current catalog pages, not one-off res
   assert.ok(catalog.every(({ mapping }) => new URL(mapping.destination).hostname.endsWith('louisvuitton.com')));
 });
 
+test('Handbagholic LV destinations end on the canonical product SKU', () => {
+  const rows = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo');
+  const lvRows = rows.filter(({ mapping }) => {
+    const host = new URL(mapping.destination).hostname;
+    return host === 'louisvuitton.com' || host.endsWith('.louisvuitton.com');
+  });
+  assert.ok(lvRows.length > 0);
+  for (const { mapping } of lvRows) {
+    const destinationSku = new URL(mapping.destination).pathname.split('/').filter(Boolean).at(-1);
+    assert.equal(destinationSku, mapping.product_id,
+      `${mapping.product_id} destination points at ${destinationSku}`);
+    assert.ok(mapping.image_reference?.includes(`--${mapping.product_id}_`),
+      `${mapping.product_id} image reference points at a different SKU`);
+  }
+  const imageUrls = lvRows.map(({ mapping }) => mapping.image_reference);
+  assert.equal(new Set(imageUrls).size, imageUrls.length, 'LV roster image references must be unique');
+});
+
 test('fallback reference images are visual evidence only and never become offers', () => {
   const [carryall] = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 350000)
     .filter(({ mapping }) => mapping.product_id === 'M46197');
