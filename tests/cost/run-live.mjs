@@ -286,7 +286,8 @@ function focusClip(rect, point) {
 }
 
 const { list: initialTargets, launched } = await ensureBrowser();
-let pageTarget = initialTargets.find((target) => target.type === 'page' && /^https?:|about:blank/.test(target.url));
+let pageTarget = initialTargets.find((target) => target.type === 'page' && /^https?:|about:blank/.test(target.url))
+  ?? initialTargets.find((target) => target.type === 'page');
 if (!pageTarget) throw new Error('No browser page target found.');
 const page = await new Cdp(pageTarget.webSocketDebuggerUrl).open();
 await page.send('Page.enable');
