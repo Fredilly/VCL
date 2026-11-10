@@ -54,6 +54,12 @@ jobs:
       # Local worker only. Never point this at api.vcl.article6.org.
       SCOOP_REPLAY_HAR_ENDPOINT: http://localhost:8787/resolve-products
       WRANGLER_SEND_METRICS: 'false'
+      # Verifier transport controls. The 2026-11-10 burst replay produced 94
+      # model_http_429 events because batches were fired back to back; pace the
+      # calls and keep one batch in flight so a rate limit is not self-inflicted.
+      VERIFIER_CONCURRENCY: '1'
+      VERIFIER_PACING_MS: '2500'
+      VERIFIER_MAX_ATTEMPTS: '3'
 
     steps:
       - name: Checkout target ref
@@ -175,6 +181,11 @@ jobs:
           done
           # Benchmark mode disables alpha invite and rate-limit guardrails locally.
           printf 'BENCHMARK_MODE=true\n' >> apps/api/.dev.vars
+          # Verifier pacing and concurrency controls, from the job env above.
+          for name in VERIFIER_CONCURRENCY VERIFIER_PACING_MS VERIFIER_MAX_ATTEMPTS; do
+            value="${!name:-}"
+            [ -n "$value" ] && printf '%s=%s\n' "$name" "$value" >> apps/api/.dev.vars
+          done
 
       - name: Start local worker
         shell: bash

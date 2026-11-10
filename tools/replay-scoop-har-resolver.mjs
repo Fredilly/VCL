@@ -74,12 +74,20 @@ export function harvestReplayRequests(har, {contentRef=null}={}) {
   }
   return cases;
 }
-export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImpl=fetch,timeoutMs=45000,maxCases=30}={}) {
+export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImpl=fetch,timeoutMs=45000,maxCases=Infinity}={}) {
   const url=new URL(endpoint);
   if(url.protocol!=='https:' && !(url.hostname==='localhost' && url.protocol==='http:')) throw new Error('HTTPS required for live resolver');
   if(url.pathname!=='/resolve-products')throw new Error('Endpoint must be /resolve-products');
-  if(!Number.isInteger(maxCases)||maxCases<1||maxCases>100)throw new Error('Invalid case budget');
-  const cases=harvestReplayRequests(har,{contentRef}).slice(0,maxCases), rows=[];
+  if(maxCases!==Infinity&&(!Number.isInteger(maxCases)||maxCases<1||maxCases>100))throw new Error('Invalid case budget');
+  const available=harvestReplayRequests(har,{contentRef});
+  const requested=Number.isFinite(maxCases)?maxCases:available.length;
+  // Fail before spending a single paid call. Silently replaying a smaller sample
+  // than requested is how a 22-selection HAR was reported as a 36-selection run.
+  if(requested>available.length)throw new Error(
+    `Requested ${requested} replay cases but the pinned HAR contains ${available.length}. `+
+    `The pinned HAR is its own session and is not the historical 36-selection roster-outliers baseline. `+
+    `Request ${available.length} or fewer, or pin the HAR that holds the corpus you mean to replay.`);
+  const cases=available.slice(0,requested), rows=[];
   // Live alpha guard requires an install identifier. Use a new isolated UUID
   // per replay run rather than reusing the original user's installation ID.
   const replayInstallId=randomUUID();
@@ -156,14 +164,19 @@ export async function replayHar(har,{endpoint,contentRef=null,auth=null,fetchImp
       r.current?.mapping_reason === 'incomplete_comparison').length,
   };
   const acceptance = {
-    status: rows.length !== maxCases ? 'INCOMPLETE_SAMPLE'
+    status: rows.length !== requested ? 'INCOMPLETE_SAMPLE'
       : evidence.cases_with_missing_sku_image_reference || evidence.unresolved_roster_comparisons
         ? 'BLOCKED_MISSING_VISUAL_EVIDENCE' : 'UNLABELED_NEEDS_GROUND_TRUTH',
     accuracy_verified: false,
     reason: 'Request completion and changed shopping offers never prove correct SKU identity.',
   };
   return {version:1,mode:'recorded_description_and_frame_resolver_replay',
-    evaluation:'UNLABELED_NO_ACCURACY_CLAIM', evidence, acceptance, count:rows.length,
+    evaluation:'UNLABELED_NO_ACCURACY_CLAIM',
+    // Keep the replayed corpus explicitly separate from the historical baseline
+    // file so a 22-case session can never be read as the 36-case corpus.
+    corpus:{available_cases:available.length,requested_cases:requested,
+      note:'Case count comes from the pinned HAR. It is an independent session and is not the historical roster-outliers baseline under tests/benchmark/roster-outliers/runs/.'},
+    evidence, acceptance, count:rows.length,
     completed:rows.filter(r=>r.status==='OK').length,
     changed:rows.filter(r=>r.changed).length,
     identity_changed:rows.filter(r=>r.identity_changed).length,
@@ -182,6 +195,7 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
     auth:process.env.SCOOP_READER_BASIC_AUTH||null,
     maxCases:Number(process.env.SCOOP_REPLAY_MAX_CASES || '5')});
   writeFileSync(output,JSON.stringify(result,null,2)+'\n',{flag:'wx',mode:0o600});
-  console.log(JSON.stringify({count:result.count,completed:result.completed,changed:result.changed, evidence:result.evidence, acceptance:result.acceptance},null,2));
+  console.log(JSON.stringify({count:result.count,completed:result.completed,changed:result.changed, corpus:result.corpus, evidence:result.evidence, acceptance:result.acceptance},null,2));
   if(result.completed!==result.count)process.exitCode=1;
+  if(result.count!==result.corpus.requested_cases)process.exitCode=1;
 }
