@@ -42,6 +42,26 @@ registry):
 Nothing is requested in chat and no secret is committed. If a provider key is
 missing the job stops before making a paid call.
 
+### Current gap
+
+The repository currently has the R2 and Cloudflare secrets, but **not** the
+vision or commerce provider keys: those live only as Cloudflare Worker secrets
+and Wrangler cannot read them back. Mirror them once, interactively, from the
+same secure store that `pnpm secret:add` uses:
+
+```sh
+gh secret set OPENROUTER_API_KEY     # paste at the prompt, never in chat/commits
+gh secret set BRAVE_SEARCH_API_KEY
+gh secret set SERPAPI_API_KEY        # optional second commerce fallback
+gh secret set GEMINI_API_KEY         # optional direct Gemini fallback
+```
+
+Until that is done, the PR-only replay job fails closed at the credential step
+and no paid call is made. The alternative — replaying against a Cloudflare
+preview version — needs no new secrets but shares the production Durable
+Objects, so it is **not** side-effect free and is not the default path.
+
+
 ## Known limits
 
 - `wrangler dev` needs workerd, which requires macOS 13.5+ or Linux. This
