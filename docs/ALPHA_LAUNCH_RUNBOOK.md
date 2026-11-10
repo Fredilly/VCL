@@ -49,6 +49,17 @@ Tracked in #128.
 11. Confirm provider failure produces a retryable/unavailable state rather than a fabricated result.
 12. Confirm no raw video is stored.
 
+## Recognition changes (roster / reference images)
+
+Any change that touches capture, selection, localization, vision, prompts, product retrieval, verification, ranking, or commerce behavior — including roster reference images and the roster intake harness (#422, #423) — is gated on measured replay, not on offline coverage:
+
+1. Run the original 36 Handbagholic selections against the changed code and compare with `tests/benchmark/roster-outliers/runs/2026-10-07-pr353-pilot-baseline.json`. The baseline is **4 returned EXACT of 36**, not 4 correct identifications.
+2. Review per-crop ground truth and report correct identifications and false EXACT separately from `PROVIDER_BLOCKED`.
+3. Record a new immutable Golden run under `tests/golden/runs/` using the frozen cases. Do not edit a Golden case to make it pass.
+4. Only then may the PR claim an accuracy change.
+
+Until those steps exist, a roster PR is an image/offer-quality change only and must stay in draft. Missing provider credentials are a blocker to run the replay, not a reason to skip it.
+
 ## Affiliate smoke test
 
 Do this only after #128 eBay setup is complete:
