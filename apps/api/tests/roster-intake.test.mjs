@@ -284,3 +284,112 @@ test('HTTP: /roster-intake requires an admin session and runs parse -> resolve -
   assert.equal(built.manifest.offers[0].candidate_window_start_ms, 335000);
   assert.match(built.review_markdown, /1 of 1 products ready/);
 });
+
+// --- Arbitrary brands and categories -------------------------------------
+// The harness must not assume a handbag video, a Louis Vuitton roster or a
+// YouTube URL. These cases use other categories, other brands and other hosts.
+
+test('product type inference is not handbag-specific', () => {
+  const { items } = intake.parseRosterIntake([
+    'Kith cap KHMA050113-001',
+    'Mizzen+Main shirt 1WS-1916',
+    'Nike sneakers DD1391-100',
+    'Hermès silk scarf H123456',
+    'West Elm chair 12345678',
+    'Sony headphones WH-1000XM5',
+    'Ceramic mug 98765432',
+  ].join('\n'));
+  const bySku = Object.fromEntries(items.map(row => [row.sku, row.object_type]));
+  assert.equal(bySku['KHMA050113-001'], 'cap');
+  assert.equal(bySku['1WS-1916'], 'shirt');
+  assert.equal(bySku['DD1391-100'], 'sneakers');
+  assert.equal(bySku['H123456'], 'scarf');
+  assert.equal(bySku['12345678'], 'chair');
+  assert.equal(bySku['WH-1000XM5'], 'headphones');
+  assert.equal(bySku['98765432'], 'mug');
+});
+
+test('all-digit article numbers and non-USD prices are read without a brand hint', () => {
+  const { items } = intake.parseRosterIntake([
+    '1. Cuir sneaker 12345678 1.299,00 €',
+    '2. Silk sari 98765432 ₹12,499',
+    '3. Leather belt 11223344 GBP 89.99',
+    '4. Linen shirt 55667788 1499 SEK',
+  ].join('\n'));
+  assert.equal(items.length, 4);
+  const bySku = Object.fromEntries(items.map(row => [row.sku, row]));
+  assert.equal(bySku['12345678'].price, '1.299,00 €');
+  assert.equal(bySku['98765432'].price, '₹12,499');
+  assert.equal(bySku['11223344'].price, 'GBP 89.99');
+  assert.equal(bySku['55667788'].price, '1499 SEK');
+  assert.ok(items.every(row => !/\d/.test(row.title ?? '')), 'prices and codes stay out of titles');
+});
+
+test('video references are not YouTube-only', () => {
+  same(intake.parseVideoRef('https://vimeo.com/123456789'), { platform: 'vimeo.com', content_ref: 'https://vimeo.com/123456789' });
+  same(intake.parseVideoRef('https://www.tiktok.com/@creator/video/7300000000'), { platform: 'tiktok.com', content_ref: 'https://www.tiktok.com/@creator/video/7300000000' });
+  same(intake.parseVideoRef('instagram-reel-42', { platform: 'instagram' }), { platform: 'instagram', content_ref: 'instagram-reel-42' });
+});
+
+test('intro and chapter rows are dropped from a plain numbered list', () => {
+  const { items, warnings } = intake.parseRosterIntake([
+    'MY FAVORITE THINGS 2026!!',
+    '0:00 Intro',
+    '1. Ceramic mug 98765432',
+    '2. Wool scarf H123456',
+    '3. Oak chair 12345678',
+  ].join('\n'));
+  same(items.map(row => row.title), ['Ceramic mug', 'Wool scarf', 'Oak chair']);
+  assert.ok(warnings.some(w => /intro text/.test(w)));
+});
+
+test('the same link twice is one product even without a SKU', () => {
+  const { items, warnings } = intake.parseRosterIntake([
+    'https://shop.example.com/p/1',
+    'https://shop.example.com/p/1',
+    'https://shop.example.com/p/2',
+  ].join('\n'));
+  assert.equal(items.length, 2);
+  assert.ok(warnings.some(w => /duplicate/.test(w)));
+});
+
+test('nested JSON exports are accepted', () => {
+  const { items } = intake.parseRosterIntake({
+    data: { products: [{ title: 'Linen shirt', sku: 'SH-1001', url: 'https://shop.example.com/shirt' }] },
+  });
+  assert.equal(items.length, 1);
+  assert.equal(items[0].sku, 'SH-1001');
+  assert.equal(items[0].object_type, 'shirt');
+});
+
+test('a non-bag product resolves through a seller page with no category assumptions', async () => {
+  const shoePage = {
+    sku: 'DD1391-100', variant_id: null, title: 'Nike Dunk Low Retro', brand: 'Nike',
+    object_type: 'sneakers', canonical_url: null, image_reference: 'https://img.shop/DD1391-100.jpg',
+    price: '110.00', currency: 'USD', resolution: 'resolved',
+  };
+  const d = deps({ pages: { 'https://shop.example.com/dunk': shoePage } });
+  const out = await intake.resolveIntakeItem(item({
+    title: 'Nike Dunk Low Retro', brand: 'Nike', object_type: 'sneakers', urls: ['https://shop.example.com/dunk'],
+  }), d);
+  assert.equal(out.status, 'READY');
+  assert.equal(out.sku, 'DD1391-100');
+  assert.equal(out.verified_image, 'https://img.shop/DD1391-100.jpg');
+  assert.equal(out.offers[0].provider, 'shop.example.com');
+});
+
+test('exports with unrecognised headers are read as free text instead of dropped', () => {
+  const csv = [
+    'Produkt;Artikelnummer;Preis;Link',
+    'Sneaker;DD1391-100;110 EUR;https://shop.example.com/dunk',
+    'Beanie;KHMA050113-001;35 EUR;https://shop.example.com/cap',
+  ].join('\n');
+  const { items } = intake.parseRosterIntake(csv);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].sku, 'DD1391-100');
+  assert.equal(items[0].price, '110 EUR');
+  assert.equal(items[0].urls[0], 'https://shop.example.com/dunk');
+  assert.equal(items[0].object_type, 'sneakers');
+  assert.equal(items[1].sku, 'KHMA050113-001');
+  assert.equal(items[1].object_type, 'cap');
+});
