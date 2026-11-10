@@ -452,15 +452,59 @@ test('configured multi-product roster can be canonicalized without code-specific
 
 // Root cause of the 2026-10-07 Handbagholic pilot: 8 of 10 roster SKUs had no
 // reference image, so the verifier skipped them and compared each crop against
-// only the one or two imaged (usually wrong) bags. Every roster SKU must carry
-// pixels to compare against.
-test('every Handbagholic roster SKU has a reference image the verifier can compare', () => {
+// only the one or two imaged (usually wrong) bags. Every roster SKU must either
+// carry pixels or be explicitly marked pending so the gap is visible.
+test('every Handbagholic roster SKU has a loadable image or is explicitly pending', () => {
   const rows = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo');
   assert.equal(rows.length, 10);
+  const pending = rows.filter(({ mapping }) => mapping.reference_image_status === 'pending_partner_image');
+  assert.deepEqual(new Set(pending.map(({ mapping }) => mapping.product_id)), new Set(['M28392', 'M2A078']));
   for (const { mapping, identity } of rows) {
+    if (mapping.reference_image_status === 'pending_partner_image') {
+      assert.equal(mapping.image_reference ?? null, null, `${mapping.product_id} pending row must not carry an unverified image`);
+      assert.equal((identity.visual_references ?? []).length, 0, `${mapping.product_id} pending row must not expose visual references`);
+      continue;
+    }
     assert.match(mapping.image_reference ?? '', /^https:\/\//, `${mapping.product_id} lacks image_reference`);
     assert.ok((identity.visual_references ?? []).length >= 1, `${mapping.product_id} lacks visual reference`);
   }
+});
+
+test('pending-image roster candidates never resolve as Exact from text evidence', () => {
+  const hit = mappingMod.lookupVerifiedProductMapping({
+    mappings: seedMod.ALPHA_VERIFIED_PRODUCT_SEEDS,
+    allowTestFixtures: false,
+    platform: 'youtube',
+    contentRef: 'n9u8ynhBdSo',
+    timestampMs: 180000,
+    description: {
+      category: 'accessories',
+      subcategory: 'bag',
+      brand_candidate: 'Louis Vuitton',
+      model_candidate: 'Vagabond Hobo M28392',
+      color: 'black',
+      material: 'leather',
+      style_attributes: ['leather'],
+      visible_text: [],
+      logos_markings: ['Louis Vuitton'],
+      distinctive_features: ['Vagabond Hobo'],
+      hardware_details: [],
+      shape_silhouette: ['hobo bag'],
+      search_terms: ['Louis Vuitton Vagabond Hobo M28392'],
+      confidence: 0.99,
+      identity_confidence: 0.98,
+    },
+  });
+  assert.equal(hit, null);
+});
+
+test('persisted mappings preserve pending partner image status', () => {
+  const [mapping] = mappingMod.parseVerifiedProductMappings(JSON.stringify([{
+    platform: 'youtube', content_ref: 'abc', scope: 'entire_video', object_type: 'bag', brand: 'B',
+    product_id: 'P1', title: 'B Bag', destination: 'https://merchant.example.com/p1', provenance: 'creator_verified',
+    reference_image_status: 'pending_partner_image',
+  }]));
+  assert.equal(mapping.reference_image_status, 'pending_partner_image');
 });
 
 test('Handbagholic roster offers point at current catalog pages, not one-off resale listings', () => {
@@ -482,10 +526,13 @@ test('Handbagholic LV destinations end on the canonical product SKU', () => {
     const destinationSku = new URL(mapping.destination).pathname.split('/').filter(Boolean).at(-1);
     assert.equal(destinationSku, mapping.product_id,
       `${mapping.product_id} destination points at ${destinationSku}`);
+    if (mapping.reference_image_status === 'pending_partner_image') continue;
     assert.ok(mapping.image_reference?.includes(`--${mapping.product_id}_`),
       `${mapping.product_id} image reference points at a different SKU`);
   }
-  const imageUrls = lvRows.map(({ mapping }) => mapping.image_reference);
+  const imageUrls = lvRows
+    .filter(({ mapping }) => mapping.reference_image_status !== 'pending_partner_image')
+    .map(({ mapping }) => mapping.image_reference);
   assert.equal(new Set(imageUrls).size, imageUrls.length, 'LV roster image references must be unique');
 });
 

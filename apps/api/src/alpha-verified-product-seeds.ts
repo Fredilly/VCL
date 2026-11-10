@@ -56,7 +56,10 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     candidate_window_end_ms: 228000,
     title: 'Louis Vuitton Vagabond Hobo Bag',
     destination: 'https://uk.louisvuitton.com/eng-gb/products/vagabond-hobo-bag-h39-nvprod7260131v/M28392',
-    image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-vagabond-hobo--M28392_PM2_Front%20view.jpg?wid=400',
+    // LV refuses datacenter image fetches (403 AkamaiGHost) and no permitted host
+    // carries this exact variant yet. Keep the creator candidate, but mark it
+    // pending so it is never compared or promoted without pixels.
+    reference_image_status: 'pending_partner_image',
     provider: 'louisvuitton.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',
@@ -170,7 +173,10 @@ export const ALPHA_VERIFIED_PRODUCT_SEEDS: VerifiedProductMapping[] = [
     candidate_window_end_ms: 607000,
     title: 'Louis Vuitton Multipass',
     destination: 'https://us.louisvuitton.com/eng-us/products/Multipass-G81-nvprod7770009v/M2A078',
-    image_reference: 'https://us.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-multipass--M2A078_PM2_Front%20view.jpg?wid=400',
+    // LV refuses datacenter image fetches (403 AkamaiGHost) and no permitted host
+    // carries this exact variant yet. Keep the creator candidate, but mark it
+    // pending so it is never compared or promoted without pixels.
+    reference_image_status: 'pending_partner_image',
     provider: 'louisvuitton.com',
     trusted_observations: [{
       observed_at: '2026-10-07T00:00:00Z',

@@ -43,6 +43,14 @@ export type VerifiedProductMapping = {
    * blocks or times out.
    */
   reference_images?: string[] | null;
+  /**
+   * Set when a roster candidate is creator-verified but no loadable same-variant
+   * reference image exists yet. The row stays visible as a candidate, but it
+   * carries no pixels, so the verifier cannot compare it and it must never be
+   * returned as Exact from text evidence alone. The roster image check reports
+   * these rows explicitly instead of silently skipping them.
+   */
+  reference_image_status?: 'pending_partner_image' | null;
   price?: string | null;
   currency?: string | null;
   provider?: string | null;
@@ -142,6 +150,9 @@ export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProd
           .map(url => url.trim().slice(0, 1200))
           .slice(0, 6) }
         : {}),
+      ...(record.reference_image_status === 'pending_partner_image'
+        ? { reference_image_status: 'pending_partner_image' as const }
+        : {}),
       price: typeof record.price === 'string' && record.price.trim() ? record.price.trim() : null,
       currency: typeof record.currency === 'string' && record.currency.trim() ? record.currency.trim().toUpperCase().slice(0, 8) : null,
       provider: typeof record.provider === 'string' && record.provider.trim() ? record.provider.trim() : null,
@@ -230,6 +241,9 @@ export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProduc
   const mappings = [...parseVerifiedProductMappings(input.rawRegistry), ...(input.mappings ?? [])];
   const matches = mappings.filter((mapping) => {
     if (mapping.provenance === 'test_fixture' && !input.allowTestFixtures) return false;
+    // A roster candidate without loadable same-variant pixels cannot be visually
+    // verified. Never let text evidence promote it to Exact.
+    if (mapping.reference_image_status === 'pending_partner_image') return false;
     const timestampMatches = mapping.scope === 'entire_video'
       || (typeof input.timestampMs === 'number'
         && typeof mapping.timestamp_start_ms === 'number'
@@ -276,6 +290,7 @@ export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProduc
       provider: merged.provider ?? mapping.provider ?? null,
       canonical_key: merged.canonical_key ?? mapping.canonical_key ?? null,
       track_id: merged.track_id ?? mapping.track_id ?? null,
+      reference_image_status: merged.reference_image_status ?? mapping.reference_image_status ?? null,
       trusted_observations: merged.trusted_observations?.length
         ? merged.trusted_observations
         : mapping.trusted_observations,

@@ -41,9 +41,23 @@ export async function checkRosterImages(platform, contentRef, fetchCatalogImage,
       attempts.push({ url, ok: Boolean(image), mime: image?.mimeType ?? null, bytes: image ? Math.round(image.data.length * 3 / 4) : 0,
         ...(image || !diagnose ? {} : { why: await diagnose(url) }) });
     }
-    results.push({ product_id: mapping.product_id, title: mapping.title, loadable: attempts.filter(a => a.ok).length, attempts });
+    const loadable = attempts.filter(a => a.ok).length;
+    results.push({
+      product_id: mapping.product_id,
+      title: mapping.title,
+      pending: mapping.reference_image_status === 'pending_partner_image' && loadable === 0,
+      loadable,
+      attempts,
+    });
   }
-  return { platform, content_ref: contentRef, skus: results.length, loadable_skus: results.filter(r => r.loadable > 0).length, results };
+  return {
+    platform,
+    content_ref: contentRef,
+    skus: results.length,
+    loadable_skus: results.filter(r => r.loadable > 0).length,
+    pending_skus: results.filter(r => r.pending).length,
+    results,
+  };
 }
 
 async function main() {
@@ -54,12 +68,15 @@ async function main() {
   let failed = false;
   for (const ref of contentRefs) {
     const report = await checkRosterImages(platform, ref, images.fetchCatalogImage, seeds.alphaVerifiedCanonicalRowsForContent);
-    console.log(`\n${platform}:${ref} — ${report.loadable_skus}/${report.skus} SKUs have a loadable reference image`);
+    const pendingNote = report.pending_skus ? `; ${report.pending_skus} pending partner image` : '';
+    console.log(`\n${platform}:${ref} — ${report.loadable_skus}/${report.skus} SKUs have a loadable reference image${pendingNote}`);
     for (const row of report.results) {
-      console.log(`${row.loadable ? 'OK  ' : 'FAIL'} ${row.product_id.padEnd(12)} ${row.title}`);
+      const status = row.loadable ? 'OK  ' : row.pending ? 'PEND' : 'FAIL';
+      const suffix = row.pending ? ' (pending partner image; verifier will not compare)' : '';
+      console.log(`${status} ${row.product_id.padEnd(12)} ${row.title}${suffix}`);
       for (const a of row.attempts) console.log(`       ${a.ok ? 'loaded' : 'failed'} ${a.ok ? `${a.mime} ${a.bytes}B ` : `[${a.why ?? 'unknown'}] `}${a.url}`);
     }
-    if (!report.skus || report.loadable_skus < report.skus) failed = true;
+    if (report.results.some(row => row.loadable === 0 && !row.pending)) failed = true;
   }
   if (failed) process.exitCode = 1;
 }
