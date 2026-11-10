@@ -4,6 +4,8 @@ The partner roster is a set of explicit variants, not a list of representative f
 
 ## Import
 
+To build this payload from a messy partner list (pasted description, CSV, notes, links), use the roster intake harness: `docs/learning/roster-intake.md`.
+
 Admin-authenticated `POST /partner-roster`, header `x-scoop-admin-session`:
 
 ```json

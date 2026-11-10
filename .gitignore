@@ -13,3 +13,6 @@ coverage/
 .wrangler/
 .firecrawl/
 tests/benchmark/spike-4f/local/
+
+# Partner product lists and intake reports stay local
+roster-intake/

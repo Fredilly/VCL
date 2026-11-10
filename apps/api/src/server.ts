@@ -38,6 +38,9 @@ import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemA
 import { fetchProductPageMetadata } from './product-page-enrichment.js';
 import { recoverVerifiedProductImage } from './verified-image-recovery.js';
 import { ALPHA_VERIFIED_PRODUCT_SEEDS, alphaVerifiedCanonicalRowsForContent, alphaVerifiedCanonicalIdentitiesExcludingContent } from './alpha-verified-product-seeds.js';
+import { buildRosterManifest, parseRosterIntake, parseVideoRef, renderIntakeReview, resolveRosterIntake, summarizeIntake, type IntakeDefaults, type IntakeDependencies, type IntakeItem, type IntakeSearchHit, type ResolvedIntakeItem } from './roster-intake.js';
+import { fetchPartnerCatalogMetadata } from './partner-catalog.js';
+import { fetchCatalogImage } from './candidate-images.js';
 import { preparePartnerRoster, ingestPartnerRoster, buildCorrectionBundle, cacheLearningImage, learningImage, persistCorrectionBundle, assetDigest, type RosterOfferInput, type CorrectionBundle } from './partner-learning.js';
 import { verifiedLedgerRequest } from './verified-product-ledger.js';
 import { rosterFallbackDescription, rosterFallbackRetrievalDescription } from './roster-fallback.js';
@@ -210,6 +213,24 @@ function commerceProviders(env: Env): NamedCommerceProvider[] {
   if (env.COMMERCE_PROVIDER === 'etsy') return etsy ? [etsy] : [];
   if (env.COMMERCE_PROVIDER === 'brave') return brave ? [brave] : [];
   return [ebay, etsy, serpapi, brave].filter((entry): entry is NamedCommerceProvider => Boolean(entry));
+}
+
+/**
+ * Roster intake looks up seller pages, marketplace listings and reference images.
+ * Etsy is excluded: its API images/data must not become permanent catalog assets.
+ */
+function rosterIntakeDependencies(env: Env): IntakeDependencies {
+  const providers = commerceProviders(env).filter(({ name }) => name !== 'etsy');
+  return {
+    metadata: (url) => fetchPartnerCatalogMetadata(url).catch(() => null),
+    imageLoads: async (url) => Boolean(await fetchCatalogImage(url).catch(() => null)),
+    search: async (query) => {
+      const settled = await Promise.allSettled(providers.map(async ({ name, provider }) => {
+        return (await provider.search(query)).map((hit): IntakeSearchHit => ({ ...hit, provider: hit.provider || name }));
+      }));
+      return settled.flatMap(result => result.status === 'fulfilled' ? result.value : []).slice(0, 40);
+    },
+  };
 }
 
 const ETSY_ELIGIBLE_CATEGORIES = new Set(['apparel', 'fashion', 'shoes', 'watches', 'bags', 'jewelry', 'accessories', 'vintage', 'handmade']);
@@ -1994,6 +2015,44 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       } catch (error) {
         logSafeError(error);
         return jsonResponse({ error: 'Feedback report unavailable' }, 500);
+      }
+    }
+    if (path === '/roster-intake') {
+      // Partner list -> reviewed roster rows. Admin only: it spends merchant
+      // search quota and its READY output feeds /partner-roster.
+      const authorized = await authorizeAdminSession(env, request.headers.get('x-scoop-admin-session') ?? '');
+      if (!authorized.admin || !authorized.admin_id) return jsonResponse({ error: 'Unauthorized' }, 401);
+      try {
+        const body = await request.json().catch(() => ({})) as {
+          action?: unknown; video?: unknown; list?: unknown; items?: unknown; defaults?: IntakeDefaults; warnings?: unknown;
+        };
+        const defaults: IntakeDefaults = body.defaults && typeof body.defaults === 'object' ? body.defaults : {};
+        const video = parseVideoRef(typeof body.video === 'string' ? body.video : '', defaults);
+        if (body.action === 'parse') {
+          if (typeof body.list !== 'string' && (typeof body.list !== 'object' || body.list === null)) return jsonResponse({ error: 'list is required' }, 400);
+          return jsonResponse({ video, ...parseRosterIntake(body.list, defaults) });
+        }
+        if (body.action === 'resolve') {
+          const items = Array.isArray(body.items) ? body.items as IntakeItem[] : [];
+          if (!items.length) return jsonResponse({ error: 'items are required' }, 400);
+          const resolved = await resolveRosterIntake(items, rosterIntakeDependencies(env));
+          await auditAdminAction(env, authorized.admin_id, 'roster_intake_resolved', { content_ref: video.content_ref, products: resolved.length });
+          return jsonResponse({ video, items: resolved });
+        }
+        if (body.action === 'manifest') {
+          const items = Array.isArray(body.items) ? body.items as ResolvedIntakeItem[] : [];
+          const warnings = Array.isArray(body.warnings) ? body.warnings.filter((w): w is string => typeof w === 'string').slice(0, 50) : [];
+          return jsonResponse({
+            video,
+            summary: summarizeIntake(items),
+            manifest: buildRosterManifest(video, items),
+            review_markdown: renderIntakeReview(video, items, warnings),
+          });
+        }
+        return jsonResponse({ error: 'action must be parse, resolve or manifest' }, 400);
+      } catch (error) {
+        logSafeError(error);
+        return jsonResponse({ error: error instanceof Error ? error.message : 'Roster intake failed' }, 422);
       }
     }
     if (path === '/partner-roster' || path === '/learning-export') {
