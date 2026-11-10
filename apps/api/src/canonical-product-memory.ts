@@ -8,8 +8,6 @@ export type CanonicalMerchantRef = {
   item_id: string | null;
   destination: string;
   image_reference: string | null;
-  /** A retired offer stays as history but must never be rendered or reused as a live Exact offer. */
-  offer_status?: 'active' | 'superseded';
 };
 
 export type CanonicalVisualReference = {
@@ -43,8 +41,6 @@ export type CanonicalProductIdentity = {
   provenance: VerifiedProductProvenance;
   verified_at: string;
   merchant_refs: CanonicalMerchantRef[];
-  /** Destinations retired by a newer roster row; see VerifiedProductMapping.retired_destinations. */
-  retired_destinations?: string[];
   visual_references?: CanonicalVisualReference[];
 };
 
@@ -73,20 +69,6 @@ export function normalizeVariantId(value: string | null | undefined): string {
 
 export function normalizeIdentityText(value: string | null | undefined): string {
   return (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-/** Compare destinations without query noise or a trailing slash. */
-export function normalizeDestination(value: string | null | undefined): string {
-  const raw = (value ?? '').trim();
-  if (!raw) return '';
-  try {
-    const url = new URL(raw);
-    url.hash = '';
-    url.searchParams.sort();
-    return url.toString().replace(/\/$/, '').toLowerCase();
-  } catch {
-    return raw.replace(/\/$/, '').toLowerCase();
-  }
 }
 
 function uniqueText(values: string[] | undefined, maxItems = 12): string[] {
@@ -326,9 +308,6 @@ export function canonicalProductIdentity(input: CanonicalIdentityInput): Canonic
     : [normalizeIdentityText(brand), normalizeIdentityText(title), normalizeIdentityText(objectType), visibleText.map(normalizeIdentityText).join(' ')].join('|');
   const source = sourceFromMapping(mapping);
   const merchantItemId = bounded(input.merchantItemId, 180) || null;
-  const retiredDestinations = [...new Set((mapping.retired_destinations ?? [])
-    .map((destination) => bounded(destination, 1200))
-    .filter(Boolean))].slice(0, 16);
 
   return {
     canonical_key: `product:v1:${stableHash(identityBasis)}`,
@@ -356,7 +335,6 @@ export function canonicalProductIdentity(input: CanonicalIdentityInput): Canonic
       destination: mapping.destination,
       image_reference: mapping.image_reference ?? null,
     }],
-    ...(retiredDestinations.length ? { retired_destinations: retiredDestinations } : {}),
     visual_references: normalizeVisualReferences([
       ...visualReferences,
       ...(mapping.image_reference ? [{
@@ -416,19 +394,6 @@ export function mergeCanonicalProductIdentity(
     ...(incoming.visual_references ?? []),
   ]);
 
-  // Retired destinations are permanent. An old one-off resale listing must not
-  // come back as a live Exact offer just because Product Memory still holds it.
-  const retiredDestinations = [...new Set([
-    ...(existing.retired_destinations ?? []),
-    ...(incoming.retired_destinations ?? []),
-  ].map((destination) => destination.trim()).filter(Boolean))].slice(0, 16);
-  const retired = new Set(retiredDestinations.map(normalizeDestination));
-  const markedMerchantRefs = retired.size
-    ? merchantRefs.map((ref) => retired.has(normalizeDestination(ref.destination))
-      ? { ...ref, offer_status: 'superseded' as const }
-      : ref)
-    : merchantRefs;
-
   return {
     ...existing,
     title: existing.title || incoming.title,
@@ -447,8 +412,7 @@ export function mergeCanonicalProductIdentity(
     normalized_fingerprint: incoming.normalized_fingerprint || existing.normalized_fingerprint,
     provenance: existing.provenance,
     verified_at: incoming.verified_at,
-    merchant_refs: markedMerchantRefs,
-    ...(retiredDestinations.length ? { retired_destinations: retiredDestinations } : {}),
+    merchant_refs: merchantRefs,
     visual_references: visualReferences,
   };
 }

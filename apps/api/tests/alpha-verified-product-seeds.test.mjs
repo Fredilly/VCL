@@ -289,16 +289,16 @@ test('Handbagholic partner roster exposes ten creator-verified LV candidates for
   const rows = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo');
   const ids = new Set(rows.map(({ mapping }) => mapping.product_id));
   assert.deepEqual(ids, new Set([
-    'M2A578',
+    'FP-1977706',
     'M28392',
     'FP-1925620',
-    'M46197',
-    'M44020',
+    'FP-1981368',
+    'FP-1983129',
     'M2A078',
     'M14526',
-    'M47125',
+    'POSH-6a3f49685919e011180b400c',
     'M46784',
-    'M46977',
+    'FP-1985008',
   ]));
   assert.ok(rows.every(({ mapping }) => mapping.scope === 'entire_video'));
   assert.ok(rows.every(({ mapping }) => mapping.provenance === 'creator_verified'));
@@ -507,68 +507,89 @@ test('persisted mappings preserve pending partner image status', () => {
   assert.equal(mapping.reference_image_status, 'pending_partner_image');
 });
 
-test('Handbagholic roster offers point at current catalog pages, not one-off resale listings', () => {
+// Commercial destinations are frozen at the values the alpha shipped with. A
+// reference-image fix must never quietly re-anchor a live offer: each replacement
+// catalog page has to be verified and signed off per SKU before it goes live.
+const HANDBAGHOLIC_FROZEN_OFFERS = {
+  'FP-1977706': {
+    destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-side-trunk-pm-1977706',
+    provider: 'fashionphile.com',
+  },
+  'M28392': {
+    destination: 'https://uk.louisvuitton.com/eng-gb/products/vagabond-hobo-bag-h39-nvprod7260131v/M28392',
+    provider: 'louisvuitton.com',
+  },
+  'FP-1925620': {
+    destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-roses-neverfull-mm-1925620',
+    provider: 'fashionphile.com',
+  },
+  'FP-1981368': {
+    destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-carryall-mm-1981368',
+    provider: 'fashionphile.com',
+  },
+  'FP-1983129': {
+    destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-neonoe-mm-black-1983129',
+    provider: 'fashionphile.com',
+  },
+  'M2A078': {
+    destination: 'https://us.louisvuitton.com/eng-us/products/Multipass-G81-nvprod7770009v/M2A078',
+    provider: 'louisvuitton.com',
+  },
+  'M14526': {
+    destination: 'https://uk.louisvuitton.com/eng-gb/products/trunkie-bag-monogram-nvprod6090072v/M14526',
+    provider: 'louisvuitton.com',
+  },
+  'POSH-6a3f49685919e011180b400c': {
+    destination: 'https://poshmark.com/listing/Louis-Vuitton-Monogram-Vanity-Chain-Pouch-Brown-6a3f49685919e011180b400c',
+    provider: 'poshmark',
+  },
+  'M46784': {
+    destination: 'https://poshmark.com/listing/Louis-Vuitton-High-Rise-Monogram-Bumbag-M46784-Full-Set-Receipt-6abd335f046d1f7c1de21801',
+    provider: 'poshmark',
+  },
+  'FP-1985008': {
+    destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-speedy-bandouliere-25-1985008',
+    provider: 'fashionphile.com',
+  },
+};
+
+test('Handbagholic commercial destinations stay frozen until each replacement is verified', () => {
   const rows = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo');
-  // The Roses Neverfull is a 2009 limited edition with no current catalog page.
-  const catalog = rows.filter(({ mapping }) => mapping.product_id !== 'FP-1925620');
-  assert.ok(catalog.every(({ mapping }) => /^M[0-9A-Z]{4,5}$/.test(mapping.product_id)));
-  assert.ok(catalog.every(({ mapping }) => new URL(mapping.destination).hostname.endsWith('louisvuitton.com')));
+  assert.equal(rows.length, 10);
+  for (const { mapping } of rows) {
+    const frozen = HANDBAGHOLIC_FROZEN_OFFERS[mapping.product_id];
+    assert.ok(frozen, `unexpected roster SKU ${mapping.product_id}`);
+    assert.equal(mapping.destination, frozen.destination, `${mapping.product_id} destination drifted`);
+    assert.equal(mapping.provider, frozen.provider, `${mapping.product_id} provider drifted`);
+  }
 });
 
-test('Handbagholic LV destinations end on the canonical product SKU', () => {
+test('reference-image improvements do not change roster offer identity', () => {
   const rows = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo');
-  const lvRows = rows.filter(({ mapping }) => {
-    const host = new URL(mapping.destination).hostname;
-    return host === 'louisvuitton.com' || host.endsWith('.louisvuitton.com');
-  });
-  assert.ok(lvRows.length > 0);
-  for (const { mapping } of lvRows) {
-    const destinationSku = new URL(mapping.destination).pathname.split('/').filter(Boolean).at(-1);
-    assert.equal(destinationSku, mapping.product_id,
-      `${mapping.product_id} destination points at ${destinationSku}`);
-    if (mapping.reference_image_status === 'pending_partner_image') continue;
-    assert.ok(mapping.image_reference?.includes(`--${mapping.product_id}_`),
-      `${mapping.product_id} image reference points at a different SKU`);
+  for (const { mapping, identity } of rows) {
+    assert.equal(identity.merchant_refs.length, 1, `${mapping.product_id} must expose exactly one live offer`);
+    assert.equal(identity.merchant_refs[0].destination, mapping.destination);
+    assert.equal(identity.merchant_refs[0].image_reference, mapping.image_reference ?? null);
   }
-  const imageUrls = lvRows
+  const imageUrls = rows
     .filter(({ mapping }) => mapping.reference_image_status !== 'pending_partner_image')
     .map(({ mapping }) => mapping.image_reference);
-  assert.equal(new Set(imageUrls).size, imageUrls.length, 'LV roster image references must be unique');
+  assert.equal(new Set(imageUrls).size, imageUrls.length, 'roster image references must be unique');
 });
 
 test('fallback reference images are visual evidence only and never become offers', () => {
   const [carryall] = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo', 350000)
-    .filter(({ mapping }) => mapping.product_id === 'M46197');
+    .filter(({ mapping }) => mapping.product_id === 'FP-1981368');
   assert.ok(carryall);
   const refs = carryall.identity.visual_references ?? [];
-  const fallback = refs.find(ref => ref.image_url.includes('fashionphile.com'));
+  const fallback = refs.find(ref => ref.image_url.includes('fashionphile.com/cdn/shop/files/effab10a'));
   assert.equal(fallback?.provenance, 'web_verified');
+  // The official catalog image stays the primary visual reference; the curated
+  // fallback is only reached when the official CDN refuses the fetch.
   assert.equal(refs[0].provenance, 'merchant_verified');
-  assert.ok(carryall.identity.merchant_refs.every(ref => !ref.destination.includes('fashionphile.com')));
-  assert.ok(carryall.identity.merchant_refs.every(ref => !ref.image_reference?.includes('fashionphile.com')));
-});
-
-test('re-anchored roster SKUs retire the dead resale listing instead of resurrecting it', () => {
-  const rows = seedMod.alphaVerifiedCanonicalRowsForContent('youtube', 'n9u8ynhBdSo');
-  const reAnchored = rows.filter(({ mapping }) => (mapping.retired_destinations ?? []).length > 0);
-  assert.equal(reAnchored.length, 6, 'six Handbagholic SKUs moved off one-off resale listings');
-  for (const { mapping, identity } of reAnchored) {
-    for (const destination of mapping.retired_destinations) {
-      assert.notEqual(destination, mapping.destination, `${mapping.product_id} still points at its retired listing`);
-      assert.equal(identity.merchant_refs.some((ref) => ref.destination === destination), false,
-        `${mapping.product_id} exposes a retired destination as a live offer`);
-    }
-    assert.equal(JSON.stringify(identity.retired_destinations), JSON.stringify(mapping.retired_destinations));
-  }
-});
-
-test('persisted mappings keep retired destinations so Product Memory can retire old offers', () => {
-  const [mapping] = mappingMod.parseVerifiedProductMappings(JSON.stringify([{
-    platform: 'youtube', content_ref: 'abc', scope: 'entire_video', object_type: 'bag', brand: 'B',
-    product_id: 'P1', title: 'B Bag', destination: 'https://merchant.example.com/p1', provenance: 'admin_verified',
-    retired_destinations: ['https://resale.example.com/old-1', 'ftp://resale.example.com/old-2', 42],
-  }]));
-  assert.equal(JSON.stringify(mapping.retired_destinations), JSON.stringify(['https://resale.example.com/old-1']));
+  assert.ok(refs[0].image_url.includes('M46197'));
+  assert.equal(carryall.identity.merchant_refs.length, 1);
+  assert.equal(carryall.identity.merchant_refs[0].image_reference, carryall.mapping.image_reference);
 });
 
 test('persisted mappings keep only https fallback reference images', () => {

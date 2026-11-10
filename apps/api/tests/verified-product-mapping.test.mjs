@@ -325,7 +325,7 @@ test('a pending SKU cannot be resolved through a stale durable mapping for the s
   assert.equal(hit, null);
 });
 
-test('equivalent durable and seed mappings merge fallback images and retired destinations', () => {
+test('equivalent durable and seed mappings merge fallback reference images', () => {
   const base = {
     platform: 'youtube', content_ref: 'n9u8ynhBdSo', scope: 'entire_video', object_type: 'bag',
     brand: 'Louis Vuitton', product_id: 'M46977', title: 'Louis Vuitton Monogram Speedy Bandouliere 25',
@@ -339,7 +339,6 @@ test('equivalent durable and seed mappings merge fallback images and retired des
         ...base,
         image_reference: 'https://eu.louisvuitton.com/x.jpg',
         reference_images: ['https://www.fashionphile.com/cdn/shop/files/x.jpg'],
-        retired_destinations: ['https://www.fashionphile.com/products/old-1985008'],
       },
     ],
     allowTestFixtures: false,
@@ -348,7 +347,7 @@ test('equivalent durable and seed mappings merge fallback images and retired des
     description: { ...shirt, category: 'accessories', subcategory: 'bag', search_terms: ['Louis Vuitton Speedy Bandouliere 25'] },
   });
   assert.equal(JSON.stringify(hit?.reference_images), JSON.stringify(['https://www.fashionphile.com/cdn/shop/files/x.jpg']));
-  assert.equal(JSON.stringify(hit?.retired_destinations), JSON.stringify(['https://www.fashionphile.com/products/old-1985008']));
+  assert.equal(hit?.destination, base.destination);
 });
 
 test('contextual SKU text selects the correct product among multiple verified products in one video', () => {

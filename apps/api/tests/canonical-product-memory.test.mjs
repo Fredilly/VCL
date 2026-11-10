@@ -397,45 +397,6 @@ test('canonical merge preserves distinct visual references and dedupes repeated 
   );
 });
 
-test('retired resale destinations stay as history but never remain live offers', () => {
-  const identityMapping = { ...mapping, brand: 'Louis Vuitton', object_type: 'bag', title: 'Louis Vuitton Monogram Speedy Bandouliere 25' };
-  const legacyDestination = 'https://www.fashionphile.com/products/louis-vuitton-monogram-speedy-bandouliere-25-1985008';
-  const legacy = memory.canonicalProductIdentity({
-    mapping: {
-      ...identityMapping,
-      product_id: 'FP-1985008',
-      destination: legacyDestination,
-      image_reference: null,
-      provider: 'fashionphile.com',
-    },
-    merchantItemId: 'FP-1985008',
-  });
-  const current = memory.canonicalProductIdentity({
-    mapping: {
-      ...identityMapping,
-      product_id: 'M46977',
-      destination: 'https://eu.louisvuitton.com/eng-e1/products/speedy-bandouliere-25-monogram-nvprod5320019v/M46977',
-      image_reference: 'https://eu.louisvuitton.com/images/is/image/lv/1/PP_VP_L/louis-vuitton-speedy-bandouliere-25--M46977_PM2_Front%20view.jpg',
-      provider: 'louisvuitton.com',
-      retired_destinations: [legacyDestination],
-    },
-    merchantItemId: 'M46977',
-  });
-
-  assert.equal(current.canonical_key, legacy.canonical_key);
-  assert.equal(JSON.stringify(current.retired_destinations), JSON.stringify([legacyDestination]));
-
-  const merged = memory.mergeCanonicalProductIdentity(legacy, current);
-  assert.equal(JSON.stringify(merged.retired_destinations), JSON.stringify([legacyDestination]));
-  const retiredRef = merged.merchant_refs.find((ref) => ref.destination === legacyDestination);
-  assert.equal(retiredRef?.offer_status, 'superseded');
-  const liveRef = merged.merchant_refs.find((ref) => ref.destination.includes('louisvuitton.com'));
-  assert.notEqual(liveRef?.offer_status, 'superseded');
-  // Retirement is sticky even when a later merge carries no retired list.
-  const reMerged = memory.mergeCanonicalProductIdentity(merged, { ...current, retired_destinations: undefined });
-  assert.equal(reMerged.merchant_refs.find((ref) => ref.destination === legacyDestination)?.offer_status, 'superseded');
-});
-
 test('portable SKU reference takes precedence over merchant offer image across videos', () => {
   const sku=memory.canonicalProductIdentity({mapping,model:null});
   const carryable={...sku,visual_references:[
