@@ -7,12 +7,15 @@ import { fileURLToPath } from 'node:url';
  *
  *   node tools/roster-intake.mjs <video-url-or-id> <list-file> [options]
  *
+ * Works for any brand, category and video host; nothing is handbag- or
+ * YouTube-specific.
+ *
  * <list-file> can be anything the partner sent: a pasted YouTube description,
  * notes, CSV/TSV export, JSON, or a list of seller links. Use "-" for stdin.
  *
  * Options:
- *   --brand "Louis Vuitton"   default brand for rows that don't name one
- *   --object-type bag         default product type for rows that don't imply one
+ *   --brand "Louis Vuitton"   optional default brand for rows that don't name one
+ *   --object-type bag         optional default type for rows that don't imply one
  *   --out <dir>               output folder (default: roster-intake/<video>)
  *   --import                  import READY rows into the video's roster afterwards
  *
@@ -35,7 +38,7 @@ export function parseArgs(argv) {
     else options.positional.push(arg);
   }
   const [video, listFile] = options.positional;
-  if (!video || !listFile) throw new Error('Usage: node tools/roster-intake.mjs <video-url-or-id> <list-file|-> [--brand X] [--object-type bag] [--out dir] [--import]');
+  if (!video || !listFile) throw new Error('Usage: node tools/roster-intake.mjs <video-url-or-id> <list-file|-> [--brand X] [--object-type TYPE] [--out dir] [--import]');
   return { ...options, video, listFile };
 }
 

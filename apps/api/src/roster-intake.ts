@@ -89,11 +89,62 @@ const SOCIAL_HOSTS = /(^|\.)(youtube\.com|youtu\.be|instagram\.com|tiktok\.com|t
 const IMAGE_PATH = /\.(?:jpe?g|png|webp|gif)$/i;
 const URL_RE = /https?:\/\/[^\s<>"'`\])}]+/gi;
 const TIME_RE = /(?:^|[\s[(])((?:\d{1,2}:)?\d{1,2}:\d{2})(?=$|[\s\])\-–—|,:])/;
-const PRICE_RE = /(?:[$£€¥]\s?\d[\d,]*(?:\.\d{1,2})?|\b\d[\d,]*(?:\.\d{1,2})?\s?(?:USD|GBP|EUR|CAD|AUD)\b)/i;
+// Currency symbols and ISO codes are deliberately broad: partners send lists
+// from every market, and a price must never end up inside the product title.
+const CURRENCY_CODE = 'USD|GBP|EUR|CAD|AUD|NZD|JPY|CNY|RMB|INR|KRW|BRL|MXN|SEK|NOK|DKK|CHF|PLN|TRY|AED|SAR|SGD|HKD|TWD|THB|IDR|MYR|PHP|VND|ZAR';
+const CURRENCY_SYMBOL = '[$£€¥₹₩₽₺₫₴₦₱]';
+// A long digit run before a currency ("98765432 ₹") is an article number, not
+// a price. Suffix currencies only count with decimals or a short amount.
+const PRICE_RE = new RegExp(
+  `(?:${CURRENCY_SYMBOL}\\s?\\d[\\d.,]*`
+  + `|\\b(?:${CURRENCY_CODE})\\s?\\d[\\d.,]*`
+  + `|\\b\\d[\\d.,]*[.,]\\d{1,2}\\s?(?:${CURRENCY_CODE})\\b`
+  + `|\\b\\d{1,6}\\s?(?:${CURRENCY_CODE})\\b`
+  + `|\\b\\d[\\d.,]*[.,]\\d{1,2}\\s?${CURRENCY_SYMBOL}`
+  + `|\\b\\d{1,6}\\s?${CURRENCY_SYMBOL})`,
+  'i',
+);
 const LABELED_SKU_RE = /\b(?:sku|style(?:\s*(?:no\.?|number|code|#))?|item\s*(?:no\.?|number|#)|ref(?:erence)?(?:\s*(?:no\.?|#))?|model\s*(?:no\.?|number|#)|mpn|product\s*(?:code|id))\s*[:#.]?\s*([A-Za-z0-9][A-Za-z0-9\-/.]{2,30})/i;
 const GTIN_RE = /\b(?:gtin|upc|ean|barcode)\s*[:#]?\s*(\d{8,14})\b/i;
 const BARE_GTIN_RE = /\b(\d{12,14})\b/;
+// Plenty of brands use an all-digit article number instead of a letter+digit
+// style code. 7-11 digits sits between "year/size" noise and a 12-14 digit GTIN.
+const BARE_NUMERIC_SKU_RE = /\b(\d{7,11})\b/;
 const BAG_WORDS = /\b(tote|pouch|clutch|hobo|bumbag|belt bag|crossbody|purse|satchel|duffle|duffel|keepall|speedy|neverfull|wallet on chain|shoulder bag|bucket bag|trunk)\b/i;
+
+/**
+ * Product types the shared evidence taxonomy does not model yet. Intake-local
+ * only: this never changes how the visual verifier classifies evidence.
+ * Checked after productType() so a "shirt" or "shoe" still wins on shared terms.
+ */
+const EXTRA_TYPE_WORDS: Array<[string, RegExp]> = [
+  ['cap', /\b(cap|caps|hat|hats|beanie|beanies)\b/i],
+  ['belt', /\b(belt|belts)\b/i],
+  ['scarf', /\b(scarf|scarves|shawl|shawls)\b/i],
+  ['tie', /\b(necktie|neckties|tie|ties)\b/i],
+  ['gloves', /\b(glove|gloves|mitten|mittens)\b/i],
+  ['socks', /\b(sock|socks)\b/i],
+  ['wallet', /\b(wallet|wallets|cardholder|card holder|card case)\b/i],
+  ['jewelry', /\b(jewelry|jewellery|necklace|necklaces|bracelet|bracelets|earring|earrings|pendant|pendants)\b/i],
+  ['luggage', /\b(luggage|suitcase|suitcases|carry on|carry-on)\b/i],
+  ['umbrella', /\b(umbrella|umbrellas)\b/i],
+  ['phone case', /\b(phone case|phone cover|case for iphone)\b/i],
+  ['chair', /\b(chair|chairs|armchair|armchairs|stool|stools)\b/i],
+  ['table', /\b(table|tables|desk|desks)\b/i],
+  ['sofa', /\b(sofa|sofas|couch|couches)\b/i],
+  ['rug', /\b(rug|rugs|carpet|carpets)\b/i],
+  ['poster', /\b(poster|posters|art print|art prints)\b/i],
+  ['book', /\b(book|books|novel|novels)\b/i],
+  ['toy', /\b(toy|toys|figure|figures)\b/i],
+  ['headphones', /\b(headphone|headphones|earbuds|earphones|headset|headsets)\b/i],
+  ['sneakers', /\b(sneaker|trainer|sandal|loafer|heel)\b/i],
+  ['boots', /\b(boot)\b/i],
+];
+
+const ACCESSORY_TYPES = new Set([
+  'bag', 'cap', 'belt', 'scarf', 'tie', 'gloves', 'socks', 'wallet', 'sunglasses',
+  'watch', 'jewelry', 'luggage', 'umbrella', 'phone case', 'accessories',
+]);
 
 const HEADER_SYNONYMS: Record<string, string[]> = {
   title: ['title', 'name', 'product', 'product name', 'item', 'item name', 'description', 'product title'],
@@ -183,9 +234,13 @@ export function parseVideoRef(value: string, defaults: IntakeDefaults = {}): Vid
 
 function inferObjectType(text: string | null, fallback: string | null | undefined): string | null {
   if (text) {
-    if (BAG_WORDS.test(text)) return 'bag';
+    // Shared taxonomy first (shirt, shoes, dress...), then intake-local types
+    // for categories it does not model (cap, scarf, furniture...), then the
+    // handbag vocabulary as a last resort. No brand is assumed anywhere.
     const found = productType(text.toLowerCase());
     if (found) return found;
+    for (const [type, words] of EXTRA_TYPE_WORDS) if (words.test(text)) return type;
+    if (BAG_WORDS.test(text)) return 'bag';
   }
   return bounded(fallback, 100);
 }
@@ -242,6 +297,10 @@ export function parseLine(line: string, index: number): { item: IntakeItem | nul
   if (!item.sku) {
     const [code] = codeTokens(rest);
     if (code) { item.sku = code; rest = rest.replace(code, ' '); }
+  }
+  if (!item.sku && !item.gtin) {
+    const numeric = BARE_NUMERIC_SKU_RE.exec(rest);
+    if (numeric) { item.sku = numeric[1]; rest = rest.replace(numeric[0], ' '); }
   }
 
   rest = rest
@@ -337,11 +396,26 @@ function parseDelimited(lines: string[], delimiter: string): IntakeItem[] {
   return items;
 }
 
+const JSON_LIST_KEYS = ['products', 'items', 'offers', 'roster', 'skus', 'catalog', 'data', 'results'];
+
+function jsonRows(container: Record<string, unknown>): unknown[] | null {
+  for (const key of JSON_LIST_KEYS) {
+    if (Array.isArray(container[key])) return container[key] as unknown[];
+  }
+  // Exports often wrap the list one level deeper: { data: { products: [...] } }.
+  for (const key of JSON_LIST_KEYS) {
+    const nested = container[key];
+    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+      const rows = jsonRows(nested as Record<string, unknown>);
+      if (rows) return rows;
+    }
+  }
+  return null;
+}
+
 function parseJson(value: unknown): IntakeItem[] | null {
   const container = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
-  const rows = Array.isArray(value) ? value
-    : container ? (['products', 'items', 'offers', 'roster', 'skus', 'catalog'].map(key => container[key]).find(Array.isArray) as unknown[] | undefined) ?? null
-    : null;
+  const rows = Array.isArray(value) ? value : container ? jsonRows(container) : null;
   if (!rows) return null;
   const items: IntakeItem[] = [];
   for (const row of rows) {
@@ -376,26 +450,112 @@ function looksDelimited(firstLine: string): string | null {
   return null;
 }
 
+/**
+ * A partner export with headers we don't recognise ("Produkt;Preis;Link") is
+ * still readable as free text per row: links, codes and prices survive, only
+ * the column semantics are lost. Detect that shape rather than dropping rows.
+ */
+function unknownDelimitedPlan(lines: string[]): { delimiter: string; skipHeader: boolean } | null {
+  const first = lines.find(line => line.trim()) ?? '';
+  const dataLines = lines.slice(lines.indexOf(first) + 1).filter(line => line.trim());
+  if (!dataLines.length) return null;
+  for (const delimiter of ['\t', ',', ';', '|']) {
+    if (!first.includes(delimiter)) continue;
+    const width = splitDelimited(first, delimiter).length;
+    if (width < 2) continue;
+    if (!dataLines.every(line => splitDelimited(line, delimiter).length === width)) continue;
+    const headerish = splitDelimited(first, delimiter).every(cell =>
+      cell.split(/\s+/).filter(Boolean).length <= 6
+      && !/\d|https?:\/\/|[$£€¥₹₩₽₺₫₴₦₱]/i.test(cell));
+    return { delimiter, skipHeader: headerish };
+  }
+  return null;
+}
+
+function parseTextLines(lines: string[], warnings: string[], delimiter?: string): IntakeItem[] {
+  const items: IntakeItem[] = [];
+  for (const line of lines) {
+    // Delimited fallback: keep every cell as text so URLs/codes/prices are still
+    // extracted even when the headers are unknown.
+    const parsed = parseLine(delimiter ? splitDelimited(line, delimiter).join(' ') : line, items.length + 1);
+    if (parsed.ignored === 'social_or_non_product_link') warnings.push(`Ignored non-product link line: ${line.trim().slice(0, 120)}`);
+    if (!parsed.item) continue;
+    const previous = items[items.length - 1];
+    // A bare link/code line belongs to the named product above it; in a plain
+    // dump of links every link is its own product.
+    if (parsed.continuation && previous?.title) mergeContinuation(previous, parsed.item);
+    else items.push(parsed.item);
+  }
+  return items;
+}
+
 const hasData = (item: IntakeItem) => Boolean(item.urls.length || item.sku || item.gtin || item.image_reference || typeof item.timestamp_ms === 'number');
+
+function looksLikeListItem(line: string): boolean {
+  return /^\s*(?:[-*•·>]+|\(?\d{1,3}[.)\]]|#\d+[.):]?)\s+\S/.test(line);
+}
+
+/** Chapter/intro rows ("0:00 Intro", "Giveaway") are not products. */
+function isIntroTitle(item: IntakeItem): boolean {
+  if (item.urls.length || item.sku || item.gtin || item.image_reference) return false;
+  return /^(intro|outro|welcome|hey|hi|hello|what'?s up|subscribe|giveaway|music|disclaimer|about|chapters?|timestamps?)\b/i.test(item.title ?? '');
+}
 
 /**
  * Pasted descriptions open with a video title or intro ("TOP 10 BAGS!!").
  * When the list has structured product lines, name-only lines before the first
- * of them are preamble. A pure list of names (no data anywhere) is kept whole.
+ * of them are preamble. A pure list of names (no data anywhere) is kept whole,
+ * except for an intro line that sits directly above a numbered/bulleted list.
  */
 function dropPreamble(items: IntakeItem[], warnings: string[]): IntakeItem[] {
-  const first = items.findIndex(hasData);
-  if (first <= 0) return items;
-  for (const item of items.slice(0, first)) warnings.push(`Treated as intro text, not a product: ${(item.title ?? '').slice(0, 120)}`);
-  return items.slice(first);
+  const warn = (item: IntakeItem) => warnings.push(`Treated as intro text, not a product: ${(item.title ?? '').slice(0, 120)}`);
+  let rows = items;
+  const dropLeadingIntroRows = () => {
+    // Leading chapter rows ("0:00 Intro") carry a timestamp but no product data.
+    while (rows.length > 1 && isIntroTitle(rows[0])) {
+      warn(rows[0]);
+      rows = rows.slice(1);
+    }
+  };
+  dropLeadingIntroRows();
+  const first = rows.findIndex(hasData);
+  if (first > 0) {
+    for (const item of rows.slice(0, first)) warn(item);
+    rows = rows.slice(first);
+    dropLeadingIntroRows();
+    return rows;
+  }
+  // Name-only intro line directly above a numbered/bulleted list.
+  let offset = 0;
+  while (rows.length - offset > 1
+    && !hasData(rows[offset])
+    && !looksLikeListItem(rows[offset].source_line)
+    && looksLikeListItem(rows[offset + 1].source_line)) {
+    warn(rows[offset]);
+    offset++;
+  }
+  return offset ? rows.slice(offset) : rows;
 }
 
-/** Order-preserving dedupe: the same SKU or the same first link is one product. */
+function linkKey(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = '';
+    return `${parsed.hostname.toLowerCase().replace(/^www\./, '')}${parsed.pathname.replace(/\/$/, '')}${parsed.search}`;
+  } catch {
+    return url.trim().replace(/\/$/, '');
+  }
+}
+
+/** Order-preserving dedupe: the same SKU/GTIN, or the same first link, is one product. */
 function dedupe(items: IntakeItem[]): IntakeItem[] {
   const seen = new Map<string, IntakeItem>();
   const out: IntakeItem[] = [];
   for (const item of items) {
-    const key = item.sku ? `sku:${normalizeCode(item.sku)}` : item.gtin ? `gtin:${item.gtin}` : null;
+    const key = item.sku ? `sku:${normalizeCode(item.sku)}`
+      : item.gtin ? `gtin:${item.gtin}`
+      : item.urls[0] ? `link:${linkKey(item.urls[0])}`
+      : null;
     const existing = key ? seen.get(key) : undefined;
     if (existing) {
       mergeContinuation(existing, item);
@@ -443,17 +603,9 @@ export function parseRosterIntake(input: unknown, defaults: IntakeDefaults = {})
       const delimiter = looksDelimited(firstLine);
       if (delimiter) items = parseDelimited(lines.slice(lines.indexOf(firstLine)), delimiter);
       else {
-        items = [];
-        for (const line of lines) {
-          const parsed = parseLine(line, items.length + 1);
-          if (parsed.ignored === 'social_or_non_product_link') warnings.push(`Ignored non-product link line: ${line.trim().slice(0, 120)}`);
-          if (!parsed.item) continue;
-          const previous = items[items.length - 1];
-          // A bare link/code line belongs to the named product above it; in a plain
-          // dump of links every link is its own product.
-          if (parsed.continuation && previous?.title) mergeContinuation(previous, parsed.item);
-          else items.push(parsed.item);
-        }
+        const plan = unknownDelimitedPlan(lines);
+        const body = plan?.skipHeader ? lines.slice(lines.indexOf(firstLine) + 1) : lines;
+        items = parseTextLines(body, warnings, plan?.delimiter);
       }
     }
   }
@@ -501,7 +653,7 @@ function buildIntakeQuery(item: IntakeItem): ProductQuery | null {
   if (!query) return null;
   return {
     query,
-    category: item.object_type === 'bag' ? 'accessories' : item.object_type ?? 'product',
+    category: item.object_type && ACCESSORY_TYPES.has(item.object_type) ? 'accessories' : item.object_type ?? 'product',
     subcategory: item.object_type ?? 'product',
     brand: item.brand,
     model: item.sku ?? null,
