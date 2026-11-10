@@ -29,6 +29,16 @@ on:
         description: 'Type LOCAL_REPLAY to confirm a paid local replay'
         required: true
         default: ''
+      intake_list:
+        description: 'Optional: repo path of a partner list. Runs live roster intake on it and replays against that roster (seeds it replaces are superseded in the local worker only)'
+        required: false
+        default: ''
+      baseline:
+        description: 'With intake_list: also replay the same cases against the current seeds first (doubles resolver calls)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false','true']
 
 permissions:
   contents: read
@@ -128,6 +138,13 @@ jobs:
               raise SystemExit('Private R2 bucket has over 1000 objects; narrow lookup required')
           entries=listing.get('Contents',[])
           print('Private R2 bucket preflight: objects visible =',len(entries))
+          # Kinds only, never names: shows whether anything besides HARs (for
+          # example reviewed labels) is stored here.
+          kinds={}
+          for o in entries:
+              ext=o.get('Key','').rsplit('.',1)[-1].lower() if '.' in o.get('Key','') else 'none'
+              kinds[ext]=kinds.get(ext,0)+1
+          print('Private R2 bucket object kinds:',dict(sorted(kinds.items())))
           candidates=[o for o in entries if o.get('Key')==key or
             (o.get('Key','').endswith('.har') and 0<o.get('Size',0)<=limit)]
           candidates.sort(key=lambda o: (o.get('Key')!=key,o.get('Key','')))
@@ -188,6 +205,7 @@ jobs:
           done
 
       - name: Start local worker
+        if: inputs.intake_list == ''
         shell: bash
         run: |
           set -euo pipefail
@@ -206,6 +224,7 @@ jobs:
           exit 1
 
       - name: Replay selected Handbagholic resolver calls locally
+        if: inputs.intake_list == ''
         shell: bash
         run: |
           set -euo pipefail
@@ -214,6 +233,78 @@ jobs:
             "$RUNNER_TEMP/pr-replay-report.json" \
             "$SCOOP_REPLAY_HAR_ENDPOINT"
 
+      # ---- Roster intake evaluation (only when intake_list is given) ----
+      # Live intake reads the partner's seller pages and images from this runner.
+      # It uses no provider key and writes nothing outside the runner.
+      - name: Live roster intake on the partner list
+        if: inputs.intake_list != ''
+        shell: bash
+        env:
+          INTAKE_LIST: ${{ inputs.intake_list }}
+        run: |
+          set -euo pipefail
+          case "$INTAKE_LIST" in
+            tests/fixtures/partner-regressions/*) ;;
+            *) echo 'intake_list must be a file under tests/fixtures/partner-regressions/'; exit 1 ;;
+          esac
+          [ -f "$INTAKE_LIST" ] || { echo 'intake_list not found in this ref'; exit 1; }
+          pnpm --filter @vcl/api build
+          node tools/roster-intake.mjs "$INTAKE_LIST" --local --evaluation-roster --out "$RUNNER_TEMP/intake"
+          node - "$RUNNER_TEMP/intake/report.json" <<'JS'
+          const report = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
+          console.log('row | status | identity | offers (host:page:availability) | image | reasons');
+          for (const item of report.items) {
+            const offers = (item.offers ?? []).map(o => `${o.provider}:${o.page}:${o.availability}`).join(' ');
+            console.log([item.index, item.status, item.sku_source, offers || '-', item.verified_image ? 'image' : 'no-image',
+              [...item.reasons, ...(item.rejected_links ?? []).map(l => `rejected:${l.reason}`)].map(r => r.split(':').slice(0, 2).join(':')).join(',') || '-'].join(' | '));
+          }
+          JS
+
+      - name: Replay against seeds, then against the intake roster
+        if: inputs.intake_list != ''
+        shell: bash
+        env:
+          RUN_BASELINE: ${{ inputs.baseline }}
+        run: |
+          set -uo pipefail
+          start_worker() {
+            pnpm --filter @vcl/api exec wrangler dev --port 8787 --local --ip 127.0.0.1 > "$RUNNER_TEMP/wrangler-dev-$1.log" 2>&1 &
+            echo $! > "$RUNNER_TEMP/wrangler.pid"
+            for i in $(seq 1 60); do
+              if curl -fsS http://localhost:8787/health > /dev/null 2>&1; then echo "Local worker ($1) is healthy"; return 0; fi
+              sleep 2
+            done
+            echo "Local worker ($1) did not become healthy"; tail -40 "$RUNNER_TEMP/wrangler-dev-$1.log" || true; return 1
+          }
+          stop_worker() {
+            if [ -f "$RUNNER_TEMP/wrangler.pid" ]; then kill "$(cat "$RUNNER_TEMP/wrangler.pid")" 2>/dev/null || true; fi
+            pkill -f workerd 2>/dev/null || true
+            for i in $(seq 1 30); do curl -fsS http://localhost:8787/health > /dev/null 2>&1 || return 0; sleep 1; done
+            echo 'Local worker did not stop'; return 1
+          }
+          status=0
+          if [ "$RUN_BASELINE" = 'true' ]; then
+            echo '== Replay with the current seeds only =='
+            start_worker seeds || exit 1
+            node tools/replay-scoop-har-resolver.mjs "$RUNNER_TEMP/private-scoop.har" "$RUNNER_TEMP/pr-replay-baseline.json" "$SCOOP_REPLAY_HAR_ENDPOINT" || status=1
+            stop_worker || exit 1
+          fi
+          echo '== Replay with the intake roster (superseded seeds inactive, local worker only) =='
+          # The roster reaches the worker as configured mappings. dotenv keeps a
+          # single-quoted value literal, so the JSON must not contain a quote mark.
+          node - "$RUNNER_TEMP/intake/evaluation-roster.json" <<'JS'
+          const fs = require('fs');
+          const rows = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const json = JSON.stringify(rows).replace(/'/g, '\\u0027');
+          fs.appendFileSync('apps/api/.dev.vars', `VERIFIED_PRODUCT_MAPPINGS_JSON='${json}'\n`);
+          console.log('Configured roster rows:', rows.length);
+          JS
+          start_worker roster || exit 1
+          node tools/replay-scoop-har-resolver.mjs "$RUNNER_TEMP/private-scoop.har" "$RUNNER_TEMP/pr-replay-report.json" "$SCOOP_REPLAY_HAR_ENDPOINT" || status=1
+          echo '== Roster intake evaluation (counts and identity handles only) =='
+          node tools/compare-roster-replay.mjs "$RUNNER_TEMP/intake" "$RUNNER_TEMP/pr-replay-report.json" "$RUNNER_TEMP/pr-replay-baseline.json"
+          exit $status
+
       - name: Upload metadata-only replay report
         if: always()
         uses: actions/upload-artifact@v4
@@ -221,7 +312,11 @@ jobs:
           name: pr-local-replay-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/pr-replay-report.json
-            ${{ runner.temp }}/wrangler-dev.log
+            ${{ runner.temp }}/pr-replay-baseline.json
+            ${{ runner.temp }}/intake/report.json
+            ${{ runner.temp }}/intake/review.md
+            ${{ runner.temp }}/intake/seed-replacement-plan.json
+            ${{ runner.temp }}/wrangler-dev*.log
           if-no-files-found: warn
           retention-days: 3
 
@@ -230,4 +325,5 @@ jobs:
         shell: bash
         run: |
           if [ -f "$RUNNER_TEMP/wrangler.pid" ]; then kill "$(cat "$RUNNER_TEMP/wrangler.pid")" 2>/dev/null || true; fi
+          pkill -f workerd 2>/dev/null || true
           rm -f apps/api/.dev.vars "$RUNNER_TEMP/private-scoop.har"

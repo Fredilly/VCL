@@ -44,7 +44,10 @@ https://www.fashionphile.com/products/louis-vuitton-lambskin-carryall-vibe-mm-bl
 Red Variant
 https://www.fashionphile.com/products/louis-vuitton-calfskin-monogram-speedy-p9-bandouliere-20-red-1000005
 https://www.fashionphile.com/products/louis-vuitton-calfskin-monogram-speedy-p9-bandouliere-40-red-1000006
+https://www.ebay.com/itm/900000000009
 ​​[https://poshmark.com/listing/East-West-Pochette-Metis-Monogram-Canvas-6a74a5771fa204c08712c202](https://poshmark.com/listing/East-West-Pochette-Metis-Monogram-Canvas-6a74a5771fa204c08712c202)
+Black multicolor variant
+https://poshmark.com/listing/LOUIS-VUITTON-Speedy-Handbag-Multicolor-White-6ab339e0345e38b3eeb9d9cf
 `;
 
 const parsed = () => intake.parseRosterIntake(OUTLINE);
@@ -55,35 +58,64 @@ test('an outline becomes one roster row per variant the partner named, not one p
   assert.equal(result.layout, 'outline');
   assert.equal(result.video_url, 'https://www.youtube.com/watch?v=n9u8ynhBdSo');
   same(result.items.map(item => item.title), [
-    'Side Trunk', 'Side Trunk - Burgundy', 'Side Trunk - Black with gold buckles', 'Side Trunk - Monogram Dunne',
+    'Side Trunk - PM', 'Side Trunk - MM', 'Side Trunk - (size unstated)', 'Side Trunk - Burgundy', 'Side Trunk - Black with gold buckles', 'Side Trunk - Monogram Dunne',
     'Vagabond Hobo Bag - Brown', 'Neverfull Tote - Black badge', 'Neverfull Tote - Shearling',
-    'Carryall bag', 'Carryall bag - Black', 'Speedy Bag Bandouliere - Red',
+    'Carryall bag', 'Carryall bag - Black',
+    'Speedy Bag Bandouliere - Red 20', 'Speedy Bag Bandouliere - Red 40', 'Speedy Bag Bandouliere - Red (size unstated)', 'Speedy Bag Bandouliere - Black multicolor',
   ]);
   // Brand comes from the headings; the header line and side comments are not products.
   assert.ok(result.items.every(item => item.brand === 'Louis Vuitton' && item.object_type === 'bag'));
   assert.ok(result.warnings.some(warning => /Brand read from the headings/.test(warning)));
   assert.ok(!result.items.some(item => /search from the shopping|not sure|couldn|SKU FOR/i.test(item.title)));
-  same(result.items.map(item => item.section), [1, 1, 1, 1, 2, 3, 3, 4, 4, 5]);
+  same(result.items.map(item => item.section), [1, 1, 1, 1, 1, 1, 2, 3, 3, 4, 4, 5, 5, 5, 5]);
 });
 
 test('every link under a note is an offer of that variant; search pages and tracking never are', () => {
   const rows = byTitle();
-  same(rows['Side Trunk'].urls, [
-    'https://www.fashionphile.com/products/louis-vuitton-monogram-side-trunk-pm-1000001',
-    'https://www.ebay.com/itm/900000000001',
-    'https://poshmark.com/listing/Louis-Vuitton-Monogram-MM-SoftSide-Trunk-6ac9b3b1ebb1a50f2b94b217',
-  ]);
-  assert.ok(rows['Side Trunk'].hints.includes('search_page_ignored:1'));
-  same(rows['Side Trunk'].remarks, ['This link is a search from the shopping platform.']);
+  // The heading's own links mix PM and MM, so they are separate variants; the
+  // eBay link does not say which, so it waits in an unstated row.
+  same(rows['Side Trunk - PM'].urls, ['https://www.fashionphile.com/products/louis-vuitton-monogram-side-trunk-pm-1000001']);
+  same(rows['Side Trunk - MM'].urls, ['https://poshmark.com/listing/Louis-Vuitton-Monogram-MM-SoftSide-Trunk-6ac9b3b1ebb1a50f2b94b217']);
+  same(rows['Side Trunk - (size unstated)'].urls, ['https://www.ebay.com/itm/900000000001']);
+  assert.ok(rows['Side Trunk - (size unstated)'].hints.includes('search_page_ignored:1'));
+  same(rows['Side Trunk - (size unstated)'].remarks, ['This link is a search from the shopping platform.']);
   // A variant selector survives; tracking does not.
   same(rows['Carryall bag - Black'].urls, ['https://www.fashionphile.com/products/louis-vuitton-lambskin-carryall-vibe-mm-black-1000004?variant=58270709055791']);
   same(rows['Side Trunk - Burgundy'].urls, ['https://item.rakuten.co.jp/selecthouse/lv-m25669/']);
-  // Markdown-wrapped links with zero-width characters in front are still links.
-  assert.equal(rows['Speedy Bag Bandouliere - Red'].urls.length, 3);
   // Merchant listing ids are read for each link.
-  assert.equal(rows['Side Trunk'].listing_ids['https://www.ebay.com/itm/900000000001'], 'EBAY-900000000001');
-  assert.equal(rows['Side Trunk'].listing_ids[rows['Side Trunk'].urls[0]], 'FP-1000001');
-  assert.equal(rows['Side Trunk'].listing_ids[rows['Side Trunk'].urls[2]], 'POSH-6ac9b3b1ebb1a50f2b94b217');
+  assert.equal(rows['Side Trunk - (size unstated)'].listing_ids['https://www.ebay.com/itm/900000000001'], 'EBAY-900000000001');
+  assert.equal(rows['Side Trunk - PM'].listing_ids[rows['Side Trunk - PM'].urls[0]], 'FP-1000001');
+  assert.equal(rows['Side Trunk - MM'].listing_ids[rows['Side Trunk - MM'].urls[0]], 'POSH-6ac9b3b1ebb1a50f2b94b217');
+});
+
+test('one note whose links mix sizes becomes one variant per size; unstated listings are held, not guessed', () => {
+  const rows = byTitle();
+  same(rows['Speedy Bag Bandouliere - Red 20'].urls, ['https://www.fashionphile.com/products/louis-vuitton-calfskin-monogram-speedy-p9-bandouliere-20-red-1000005']);
+  same(rows['Speedy Bag Bandouliere - Red 40'].urls, ['https://www.fashionphile.com/products/louis-vuitton-calfskin-monogram-speedy-p9-bandouliere-40-red-1000006']);
+  same([rows['Speedy Bag Bandouliere - Red 20'].match.size, rows['Speedy Bag Bandouliere - Red 40'].match.size], ['20', '40']);
+  assert.notEqual(rows['Speedy Bag Bandouliere - Red 20'].sku, rows['Speedy Bag Bandouliere - Red 40'].sku);
+  const unstated = rows['Speedy Bag Bandouliere - Red (size unstated)'];
+  same(unstated.urls, ['https://www.ebay.com/itm/900000000009']);
+  same(unstated.flags, ['variant_unstated']);
+  // A note with a single stated size is left alone.
+  assert.ok(!Object.keys(rows).some(title => /^Carryall bag - Black /.test(title)));
+});
+
+test('links that contradict the family or the variant are set aside with the reason, never offered', () => {
+  const rows = byTitle();
+  // A Pochette Metis filed under Speedy: its own name never mentions the product.
+  const held = parsed().items.filter(item => item.section === 5).flatMap(item => item.rejected_links ?? []);
+  same(held.map(link => [link.reason, link.merchant]), [['other_product', 'poshmark.com'], ['colour_contradiction', 'poshmark.com']]);
+  assert.ok(!parsed().items.some(item => item.urls.some(url => /Pochette-Metis/.test(url))));
+  // The note says black, the listing says white.
+  const black = rows['Speedy Bag Bandouliere - Black multicolor'];
+  same(black.urls, []);
+  same(black.rejected_links.map(link => link.reason), ['colour_contradiction']);
+  // A second colour in the note (hardware) is not a contradiction.
+  assert.equal(rows['Side Trunk - Black with gold buckles'].urls.length, 1);
+  assert.equal(outline.colourOf('bluish'), 'blue');
+  assert.equal(outline.colourOf('gray'), 'grey');
+  same(outline.familyAnchors('Louis Vuitton Vagabond Hobo Bag leather version for men', 'Louis Vuitton'), ['vagabond']);
 });
 
 test('identity: a code is adopted only when every link of the variant states it; otherwise the id is video-local', () => {
@@ -95,14 +127,17 @@ test('identity: a code is adopted only when every link of the variant states it;
   assert.equal(rows['Carryall bag'].sku_basis, 'partner_group');
   assert.equal(rows['Carryall bag'].sku, 'VR-n9u8ynhBdSo-4-main');
   same(rows['Carryall bag'].link_codes.map(entry => entry.code), ['M46197']);
-  assert.equal(rows['Vagabond Hobo Bag - Brown'].sku_basis, 'partner_group');
-  same(rows['Vagabond Hobo Bag - Brown'].link_codes.map(entry => entry.code), ['M28392']);
+  // Once the contradicting listing is set aside, the brand's own link is the only one left and states the code.
+  same([rows['Vagabond Hobo Bag - Brown'].sku, rows['Vagabond Hobo Bag - Brown'].sku_basis], ['M28392', 'link']);
   // No codes anywhere: stable, readable, scoped to this video.
   assert.equal(rows['Side Trunk - Black with gold buckles'].sku, 'VR-n9u8ynhBdSo-1-black-with-gold-buckles');
-  assert.ok(outline.isGroupVariantId(rows['Speedy Bag Bandouliere - Red'].sku));
+  assert.ok(outline.isGroupVariantId(rows['Speedy Bag Bandouliere - Red 20'].sku));
   // The same list for another video can never produce the same id.
   const other = intake.parseRosterIntake(OUTLINE, {}, { platform: 'youtube', content_ref: 'AAAAAAAAAAA' });
-  assert.equal(other.items[2].sku, 'VR-AAAAAAAAAAA-1-black-with-gold-buckles');
+  assert.equal(other.items[4].sku, 'VR-AAAAAAAAAAA-1-black-with-gold-buckles');
+  assert.equal(outline.videoLocalIdBelongsTo(other.items[4].sku, 'AAAAAAAAAAA'), true);
+  assert.equal(outline.videoLocalIdBelongsTo(other.items[4].sku, 'n9u8ynhBdSo'), false);
+  assert.equal(outline.videoLocalIdBelongsTo('M46197', 'n9u8ynhBdSo'), false);
   // Prose is never a SKU ("S-lock style fasteners", "SKU FOR <video>").
   assert.ok(!parsed().items.some(item => /^(fasteners|for)$/i.test(item.sku ?? '')));
 });
@@ -112,9 +147,6 @@ test('partner remarks are kept as review flags instead of becoming products', ()
   same(rows['Vagabond Hobo Bag - Brown'].flags, ['partner_unsure']);
   same(rows['Neverfull Tote - Shearling'].flags, ['partner_could_not_find']);
   assert.equal(rows['Neverfull Tote - Shearling'].urls.length, 0);
-  assert.ok(rows['Speedy Bag Bandouliere - Red'].hints.includes('sizes_mixed:20, 40'));
-  // A listing whose own name does not mention the product is pointed out.
-  assert.ok(rows['Speedy Bag Bandouliere - Red'].hints.includes('link_names_other_product:poshmark.com'));
   assert.match(rows['Side Trunk - Monogram Dunne'].remarks[0], /Colorful motifs/);
 });
 
@@ -151,78 +183,105 @@ function deps({ pages = {}, hits = [], loads = () => true } = {}) {
   return { calls, metadata: async url => pages[url] ?? page({ resolution: 'unavailable' }), imageLoads: async url => loads(url), search: async () => { calls.search++; return hits; } };
 }
 
-test('a grouped variant is READY from the partner’s own links: each listing is an offer, each photo a reference', async () => {
-  const red = byTitle()['Speedy Bag Bandouliere - Red'];
-  const [a, b, c] = red.urls;
-  const out = await intake.resolveIntakeItem(red, deps({ pages: {
-    [a]: page({ sku: '1000005', title: 'Louis Vuitton Speedy P9 Bandouliere 20 Red', image_reference: 'https://cdn.shop/a.jpg', price: '9000', currency: 'USD', availability: 'InStock' }),
-    [b]: page({ sku: '1000006', title: 'Louis Vuitton Speedy P9 Bandouliere 40 Red', image_reference: 'https://cdn.shop/b.jpg', availability: 'InStock' }),
-    [c]: page({ resolution: 'unavailable', http_status: 403 }),
+const video = { platform: 'youtube', content_ref: 'n9u8ynhBdSo' };
+const carry = () => byTitle()['Carryall bag'];
+const inStock = extra => page({ availability: 'InStock', ...extra });
+
+test('a variant is READY only from listings whose seller says they can be bought now', async () => {
+  const row = carry();
+  const [a, b] = row.urls;
+  const out = await intake.resolveIntakeItem(row, deps({ pages: {
+    [a]: inStock({ sku: '1000003', title: 'Louis Vuitton Monogram CarryAll MM', image_reference: 'https://cdn.shop/a.jpg', price: '2500', currency: 'USD' }),
+    [b]: page({ resolution: 'unavailable', http_status: 403 }),
   } }));
   assert.equal(out.status, 'READY', JSON.stringify(out.reasons));
   assert.equal(out.sku_source, 'partner_group');
-  // Seller stock numbers differ per listing; that never rejects a partner-grouped link.
-  same(out.offers.map(offer => [offer.provider, offer.page, offer.seller_sku, offer.merchant_item_id]), [
-    ['fashionphile.com', 'resolved', '1000005', '1000005'], ['fashionphile.com', 'resolved', '1000006', '1000006'], ['poshmark.com', 'blocked', null, '6a74a5771fa204c08712c202'],
-  ]);
-  const manifest = intake.buildRosterManifest({ platform: 'youtube', content_ref: 'n9u8ynhBdSo' }, [out]);
-  assert.equal(manifest.offers.length, 3);
-  assert.ok(manifest.offers.every(offer => offer.sku === 'VR-n9u8ynhBdSo-5-red' && offer.family === 'Speedy Bag Bandouliere' && offer.title === 'Speedy Bag Bandouliere - Red'));
-  same(manifest.offers.map(offer => offer.image_reference), ['https://cdn.shop/a.jpg', 'https://cdn.shop/b.jpg', 'https://cdn.shop/a.jpg']);
-  assert.match(intake.renderIntakeReview({ platform: 'youtube', content_ref: 'n9u8ynhBdSo' }, [out]), /video-local/);
+  same(out.offers.map(offer => [offer.provider, offer.page, offer.availability]), [['fashionphile.com', 'resolved', 'in_stock'], ['poshmark.com', 'blocked', 'unconfirmed']]);
+  // Only the confirmed listing is importable; the blocked one is not an offer.
+  const manifest = intake.buildRosterManifest(video, [out]);
+  same(manifest.offers.map(offer => offer.destination), [a]);
+  assert.equal(intake.summarizeIntake([out]).offers, 1);
+
+  // A page that resolves but states no availability confirms nothing.
+  const silent = await intake.resolveIntakeItem(row, deps({ pages: { [a]: page({ image_reference: 'https://cdn.shop/a.jpg' }), [b]: page({ image_reference: 'https://cdn.shop/b.jpg' }) } }));
+  assert.equal(silent.status, 'NEEDS_REVIEW');
+  same(silent.reasons, ['no_confirmed_offer']);
+  assert.equal(intake.buildRosterManifest(video, [silent]).offers.length, 0);
+});
+
+test('a video-local id is sent as a scoped variant handle, never in the SKU field', async () => {
+  const row = carry();
+  const out = await intake.resolveIntakeItem(row, deps({ pages: { [row.urls[0]]: inStock({ image_reference: 'https://cdn.shop/a.jpg' }) } }));
+  const [offer] = intake.buildRosterManifest(video, [out]).offers;
+  assert.equal(offer.sku, undefined);
+  same([offer.variant_id, offer.identity_scope, offer.family], ['VR-n9u8ynhBdSo-4-main', 'video_local', 'Carryall bag']);
+  assert.match(intake.renderIntakeReview(video, [out]), /video-local/);
+  // A manufacturer code keeps travelling as a SKU.
+  const burgundy = byTitle()['Side Trunk - Burgundy'];
+  const coded = await intake.resolveIntakeItem(burgundy, deps({ pages: { [burgundy.urls[0]]: inStock({ image_reference: 'https://cdn.shop/r.jpg' }) } }));
+  const [codedOffer] = intake.buildRosterManifest(video, [coded]).offers;
+  same([codedOffer.sku, codedOffer.identity_scope, codedOffer.variant_id], ['M25669', undefined, undefined]);
+});
+
+test('a seller page that contradicts the row is rejected, and its photo is never a reference', async () => {
+  const red20 = byTitle()['Speedy Bag Bandouliere - Red 20'];
+  const [url] = red20.urls;
+  const check = async meta => intake.resolveIntakeItem(red20, deps({ pages: { [url]: inStock({ image_reference: 'https://cdn.shop/wrong.jpg', ...meta }) } }));
+  for (const [meta, reason] of [
+    [{ title: 'Louis Vuitton Speedy P9 Bandouliere 40 Red' }, 'size_contradiction'],
+    [{ title: 'Louis Vuitton Speedy P9 Bandouliere 20 Yellow' }, 'colour_contradiction'],
+    [{ title: 'Louis Vuitton Alma BB Epi Leather Red 20' }, 'other_product'],
+    [{ title: 'Speedy Bandouliere 20 Red', brand: 'Gucci' }, 'brand_contradiction'],
+  ]) {
+    const out = await check(meta);
+    same(out.rejected_links.map(link => link.reason), [reason]);
+    assert.equal(out.offers.length, 0);
+    assert.equal(out.verified_image, null, reason);
+    assert.equal(out.status, 'NEEDS_REVIEW');
+    assert.ok(out.reasons.includes('links_rejected'));
+  }
+  const good = await check({ title: 'Louis Vuitton Calfskin Monogram Speedy P9 Bandouliere 20 Red' });
+  assert.equal(good.status, 'READY', JSON.stringify(good.reasons));
+  assert.equal(good.verified_image, 'https://cdn.shop/wrong.jpg');
 });
 
 test('removed and sold-out listings never become offers; a variant with nothing live is not READY', async () => {
-  const red = byTitle()['Speedy Bag Bandouliere - Red'];
-  const [a, b, c] = red.urls;
-  const pages = {
+  const row = carry();
+  const [a, b] = row.urls;
+  const sold = await intake.resolveIntakeItem(row, deps({ pages: {
     [a]: page({ resolution: 'unavailable', http_status: 404 }),
-    [b]: page({ sku: '1000006', image_reference: 'https://cdn.shop/b.jpg', availability: 'SoldOut' }),
-    [c]: page({ image_reference: 'https://cdn.shop/c.jpg', availability: 'InStock' }),
-  };
-  const out = await intake.resolveIntakeItem(red, deps({ pages }));
-  assert.equal(out.status, 'READY');
-  same(out.offers.map(offer => Boolean(offer.sold_out)), [true, false]);
-  assert.ok(out.notes.includes('link_removed:fashionphile.com') && out.notes.includes('offer_sold_out:fashionphile.com'));
-  const manifest = intake.buildRosterManifest({ platform: 'youtube', content_ref: 'v' }, [out]);
-  same(manifest.offers.map(offer => offer.destination), [c]);
+    [b]: page({ image_reference: 'https://cdn.shop/b.jpg', availability: 'https://schema.org/SoldOut' }),
+  } }));
+  assert.equal(sold.status, 'NEEDS_REVIEW');
+  same(sold.reasons, ['offers_sold_out']);
+  same(sold.offers.map(offer => offer.availability), ['sold_out']);
+  assert.ok(sold.notes.includes('link_removed:fashionphile.com') && sold.notes.includes('offer_sold_out:poshmark.com'));
   // The sold listing's photo is still a real photo of this variant.
-  assert.equal(out.verified_image, 'https://cdn.shop/b.jpg');
-
-  const gone = await intake.resolveIntakeItem(red, deps({ pages: { ...pages, [c]: page({ image_reference: 'https://cdn.shop/c.jpg', availability: 'https://schema.org/OutOfStock' }) } }));
-  assert.equal(gone.status, 'NEEDS_REVIEW');
-  assert.ok(gone.reasons.includes('offers_sold_out'));
-  assert.equal(intake.buildRosterManifest({ platform: 'youtube', content_ref: 'v' }, [gone]).offers.length, 0);
+  assert.equal(sold.verified_image, 'https://cdn.shop/b.jpg');
+  assert.equal(intake.buildRosterManifest(video, [sold]).offers.length, 0);
 });
 
-test('seller sites that cannot be reached at all are reported as that, not as a missing image', async () => {
-  const red = byTitle()['Speedy Bag Bandouliere - Red'];
-  const out = await intake.resolveIntakeItem(red, deps({ pages: Object.fromEntries(red.urls.map(url => [url, page({ resolution: 'unavailable', http_status: 0 })])) }));
-  assert.equal(out.status, 'NEEDS_REVIEW');
-  same(out.reasons, ['sellers_unreachable']);
-  assert.ok(out.offers.every(offer => offer.page === 'unreachable'));
-});
-
-test('unsure and could-not-find notes hold a variant for review even when its links work', async () => {
+test('unstated, unsure and could-not-find rows are held for review even when their links work', async () => {
   const rows = byTitle();
-  const brown = rows['Vagabond Hobo Bag - Brown'];
-  const pages = Object.fromEntries(brown.urls.map(url => [url, page({ image_reference: 'https://cdn.shop/x.jpg' })]));
-  const out = await intake.resolveIntakeItem(brown, deps({ pages }));
-  assert.equal(out.status, 'NEEDS_REVIEW');
-  same(out.reasons, ['partner_unsure']);
-  same(out.proposed_skus, [{ sku: 'M28392', support: 1, source: 'partner_link' }]);
+  for (const [title, reason] of [['Speedy Bag Bandouliere - Red (size unstated)', 'variant_unstated'], ['Vagabond Hobo Bag - Brown', 'partner_unsure']]) {
+    const row = rows[title];
+    const out = await intake.resolveIntakeItem(row, deps({ pages: Object.fromEntries(row.urls.map(url => [url, inStock({ image_reference: 'https://cdn.shop/x.jpg' })])) }));
+    assert.equal(out.status, 'NEEDS_REVIEW');
+    same(out.reasons, [reason]);
+  }
   const gap = await intake.resolveIntakeItem(rows['Neverfull Tote - Shearling'], deps());
   assert.ok(gap.reasons.includes('partner_could_not_find') && gap.reasons.includes('no_offer'));
-  assert.equal(gap.status, 'NEEDS_REVIEW');
+  const unreachable = await intake.resolveIntakeItem(carry(), deps({ pages: Object.fromEntries(carry().urls.map(url => [url, page({ resolution: 'unavailable', http_status: 0 })])) }));
+  same(unreachable.reasons, ['no_confirmed_offer', 'sellers_unreachable']);
 });
 
 test('a reseller’s own stock number does not contradict a manufacturer code the partner gave', async () => {
   const url = 'https://www.fashionphile.com/products/louis-vuitton-monogram-carryall-mm-1000003';
   const row = { index: 1, source_line: 'x', title: 'CarryAll MM', brand: 'Louis Vuitton', sku: 'M46197', gtin: null, object_type: 'bag', urls: [url], image_reference: null, price: null, timestamp_ms: null };
-  const out = await intake.resolveIntakeItem(row, deps({ pages: { [url]: page({ sku: '1000003', image_reference: 'https://cdn.shop/c.jpg' }) } }));
+  const out = await intake.resolveIntakeItem(row, deps({ pages: { [url]: inStock({ sku: '1000003', image_reference: 'https://cdn.shop/c.jpg' }) } }));
   assert.equal(out.status, 'READY', JSON.stringify(out.reasons));
   // A page that states a different code is still refused.
-  const other = await intake.resolveIntakeItem(row, deps({ pages: { [url]: page({ sku: 'M46987', image_reference: 'https://cdn.shop/c.jpg' }) } }));
+  const other = await intake.resolveIntakeItem(row, deps({ pages: { [url]: inStock({ sku: 'M46987', image_reference: 'https://cdn.shop/c.jpg' }) } }));
   assert.ok(other.reasons.some(reason => reason.startsWith('link_sku_mismatch')));
 });
 
@@ -235,6 +294,7 @@ test('a structure-only run checks nothing and can import nothing', () => {
   assert.match(review, /Structure only/);
   assert.match(review, /## 1\. Side Trunk/);
   assert.match(review, /Suggested SKU\(s\), not applied: M46197/);
+  assert.match(review, /Link set aside, not used as offer or photo/);
 });
 
 test('the cleaned roster round-trips as a spreadsheet and keeps its identities', async () => {
@@ -245,8 +305,8 @@ test('the cleaned roster round-trips as a spreadsheet and keeps its identities',
   same(again.items.map(item => item.sku), items.map(item => item.sku));
   same(again.items.map(item => item.urls), items.map(item => item.urls));
   // A video-local id read back from a sheet is still video-local: page SKUs do not reject its links.
-  const red = again.items.find(item => item.title === 'Speedy Bag Bandouliere - Red');
-  const out = await intake.resolveIntakeItem(red, deps({ pages: { [red.urls[0]]: page({ sku: '1000005', image_reference: 'https://cdn.shop/a.jpg' }) } }));
+  const red = again.items.find(item => item.title === 'Speedy Bag Bandouliere - Red 20');
+  const out = await intake.resolveIntakeItem(red, deps({ pages: { [red.urls[0]]: inStock({ sku: '1000005', image_reference: 'https://cdn.shop/a.jpg' }) } }));
   assert.equal(out.sku_source, 'partner_group');
   assert.equal(out.status, 'READY', JSON.stringify(out.reasons));
 });
@@ -303,7 +363,7 @@ test('CLI: a list that names its own video runs locally end to end without an AP
   const post = await localPoster({ fetchPages: false });
   const result = await runRosterIntake({ video: null, list: OUTLINE, post });
   same(result.video, { platform: 'youtube', content_ref: 'n9u8ynhBdSo' });
-  assert.equal(result.summary.products, 10);
+  assert.equal(result.summary.products, 15);
   assert.equal(result.summary.ready, 0);
   assert.equal(result.manifest.offers.length, 0);
   assert.match(result.roster_csv, /^section,family,variant label,/);
@@ -333,10 +393,158 @@ test('HTTP: parse takes the video from the list when none is sent, and manifest 
   const parsedBody = await (await post({ action: 'parse', list: OUTLINE })).json();
   same(parsedBody.video, { platform: 'youtube', content_ref: 'n9u8ynhBdSo' });
   assert.equal(parsedBody.layout, 'outline');
-  assert.equal(parsedBody.items.length, 10);
+  assert.equal(parsedBody.items.length, 15);
   const missing = await post({ action: 'parse', list: 'Side Trunk M2A578\nCarryAll M46197' });
   assert.equal(missing.status, 422);
   const built = await (await post({ action: 'manifest', video: 'n9u8ynhBdSo', items: parsedBody.items.map(intake.uncheckedIntakeItem) })).json();
   assert.match(built.roster_csv, /VR-n9u8ynhBdSo-1-black-with-gold-buckles/);
   assert.equal(built.manifest.offers.length, 0);
+});
+
+// ---- video-local identities stay scoped candidates through the resolver's own model ----
+
+const mapping = loadModule(new URL('../src/verified-product-mapping.ts', import.meta.url).pathname);
+const roster = loadModule(new URL('../src/partner-roster.ts', import.meta.url).pathname);
+const memory = loadModule(new URL('../src/canonical-product-memory.ts', import.meta.url).pathname);
+const replacement = loadModule(new URL('../src/roster-seed-replacement.ts', import.meta.url).pathname);
+const learning = loadModule(new URL('../src/partner-learning.ts', import.meta.url).pathname);
+
+const localRow = extra => ({
+  platform: 'youtube', content_ref: 'n9u8ynhBdSo', scope: 'entire_video', object_type: 'bag', brand: 'Louis Vuitton',
+  product_id: 'VR-n9u8ynhBdSo-4-main', variant_id: 'VR-n9u8ynhBdSo-4-main', identity_scope: 'video_local',
+  title: 'Louis Vuitton Carryall bag', destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-carryall-mm-1000003',
+  image_reference: 'https://cdn.shop/a.jpg', provider: 'fashionphile.com', provenance: 'admin_verified', ...extra,
+});
+
+test('a video-local id is only accepted declared, and only on its own video', () => {
+  const parse = rows => mapping.parseVerifiedProductMappings(JSON.stringify(rows));
+  assert.equal(parse([localRow()]).length, 1);
+  assert.equal(parse([localRow()])[0].identity_scope, 'video_local');
+  // Undeclared: would read as a manufacturer SKU. Dropped.
+  assert.equal(parse([localRow({ identity_scope: undefined })]).length, 0);
+  // Declared on a different video. Dropped.
+  assert.equal(parse([localRow({ content_ref: 'AAAAAAAAAAA' })]).length, 0);
+  // Declared without a video-local handle. Dropped.
+  assert.equal(parse([localRow({ product_id: 'M46197', variant_id: 'M46197' })]).length, 0);
+});
+
+test('a video-local id never resolves from text, never shows as a model, never crosses videos', () => {
+  const row = localRow({ scope: 'time_window', timestamp_start_ms: 0, timestamp_end_ms: 60000, variant_id: undefined });
+  // Even as the only row for the moment, with its handle spoken in the description, text cannot resolve it.
+  const hit = mapping.lookupVerifiedProductMapping({
+    mappings: [row], platform: 'youtube', contentRef: 'n9u8ynhBdSo', timestampMs: 1000,
+    description: { category: 'bag', subcategory: 'bag', brand_candidate: 'Louis Vuitton', model_candidate: 'VR-n9u8ynhBdSo-4-main', visible_text: ['VR-n9u8ynhBdSo-4-main'], logos_markings: [], distinctive_features: [], search_queries: [] },
+  });
+  assert.equal(hit, null);
+  const product = mapping.verifiedMappingProduct(localRow());
+  assert.equal(product.model, null);
+  assert.equal(product.metadata.model, undefined);
+  assert.match(product.identity_key, /^video-local:/);
+  assert.ok(!product.verification_reasons.some(reason => /verified SKU/i.test(reason)));
+  // The canonical identity carries the scope and is equivalent only to itself.
+  const identity = memory.canonicalProductIdentity({ mapping: localRow(), model: null, merchantItemId: '1000003', verifiedAt: '2026-11-11T00:00:00.000Z' });
+  assert.equal(identity.identity_scope, 'video_local');
+  assert.equal(memory.isVideoLocalIdentity(identity), true);
+  const elsewhere = memory.canonicalProductIdentity({ mapping: localRow({ content_ref: 'AAAAAAAAAAA', product_id: 'VR-AAAAAAAAAAA-4-main', variant_id: 'VR-AAAAAAAAAAA-4-main' }), model: null, merchantItemId: '1000003', verifiedAt: '2026-11-11T00:00:00.000Z' });
+  assert.notEqual(identity.canonical_key, elsewhere.canonical_key);
+  assert.equal(memory.canonicalProductsEquivalent(identity, elsewhere), false);
+  // A stored row that lost the flag is still recognised by its handle.
+  assert.equal(memory.isVideoLocalIdentity({ variant_id: 'VR-n9u8ynhBdSo-4-main' }), true);
+  assert.equal(memory.isVideoLocalIdentity({ variant_id: 'M46197' }), false);
+});
+
+test('the importer refuses a video-local id disguised as a SKU or attached to another video', async () => {
+  const offer = extra => ({ destination: 'https://shop.example.com/a', title: 'Carryall bag', brand: 'Louis Vuitton', object_type: 'bag', image_reference: 'https://cdn.shop/a.jpg', ...extra });
+  const stored = new Map();
+  const env = { VERIFIED_PRODUCT_LEDGER: { idFromName: x => x, get: () => ({ fetch: async () => Response.json({ accepted: true, image: { mimeType: 'image/png', data: 'AA==' } }) }) } };
+  const prepare = (contentRef, offers) => learning.preparePartnerRoster(env, 'https://api.scoop.shop', { platform: 'youtube', content_ref: contentRef, offers },
+    { metadata: async () => { throw new Error('explicit rows must not refetch pages'); }, image: async () => ({ mimeType: 'image/png', data: btoa('reference bytes') }) });
+  // The declared, in-scope form is accepted and keeps its scope on the stored row.
+  const [accepted] = await prepare('n9u8ynhBdSo', [offer({ variant_id: 'VR-n9u8ynhBdSo-4-main', identity_scope: 'video_local', supersedes: ['FP-1000003'] })]);
+  same([accepted.mapping.identity_scope, accepted.mapping.supersedes, accepted.identity.identity_scope], ['video_local', ['FP-1000003'], 'video_local']);
+  void stored;
+  await assert.rejects(() => prepare('n9u8ynhBdSo', [offer({ sku: 'VR-n9u8ynhBdSo-4-main' })]), /never as a SKU/);
+  await assert.rejects(() => prepare('n9u8ynhBdSo', [offer({ variant_id: 'VR-n9u8ynhBdSo-4-main' })]), /identity_scope/);
+  await assert.rejects(() => prepare('AAAAAAAAAAA', [offer({ variant_id: 'VR-n9u8ynhBdSo-4-main', identity_scope: 'video_local' })]), /different video/);
+  await assert.rejects(() => prepare('n9u8ynhBdSo', [offer({ sku: 'M46197', identity_scope: 'video_local' })]), /video-local/);
+});
+
+// ---- replacing hand-seeded rows without duplicates ----
+
+const seed = extra => ({
+  platform: 'youtube', content_ref: 'n9u8ynhBdSo', scope: 'entire_video', object_type: 'bag', brand: 'Louis Vuitton',
+  product_id: 'FP-1000003', title: 'Louis Vuitton Monogram CarryAll MM', destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-carryall-mm-1000003',
+  image_reference: 'https://cdn.shop/seed.jpg', provider: 'fashionphile.com', provenance: 'admin_verified',
+  candidate_window_start_ms: 400000, candidate_window_end_ms: 500000,
+  trusted_observations: [{ observed_at: '2026-10-07T00:00:00Z', source: 'creator', color: 'brown' }], ...extra,
+});
+const SEEDS = [
+  seed(),
+  seed({ product_id: 'M28392', title: 'Louis Vuitton Vagabond Hobo', destination: 'https://us.louisvuitton.com/p/M28392', candidate_window_start_ms: 161000, candidate_window_end_ms: 300000 }),
+  seed({ product_id: 'FP-1999999', title: 'Louis Vuitton Monogram Speedy Bandouliere 25', destination: 'https://www.fashionphile.com/products/louis-vuitton-monogram-speedy-bandouliere-25-1999999', candidate_window_start_ms: 805000, candidate_window_end_ms: 955000 }),
+  seed({ product_id: 'M46784', title: 'Louis Vuitton High Rise Bumbag', destination: 'https://us.louisvuitton.com/p/M46784' }),
+];
+
+async function resolvedRoster() {
+  const rows = byTitle();
+  const ready = async (title, image) => {
+    const row = rows[title];
+    return intake.resolveIntakeItem(row, deps({ pages: { [row.urls[0]]: inStock({ image_reference: image }) } }));
+  };
+  return [
+    await ready('Carryall bag', 'https://cdn.shop/carry.jpg'),
+    await ready('Speedy Bag Bandouliere - Red 20', 'https://cdn.shop/red20.jpg'),
+    await ready('Speedy Bag Bandouliere - Red 40', 'https://cdn.shop/red40.jpg'),
+    await intake.resolveIntakeItem(rows['Vagabond Hobo Bag - Brown'], deps()), // unsure, nothing confirmed: not READY
+  ];
+}
+
+test('seed replacement plan: a seed is retired only by READY variants, and never without a named replacement', async () => {
+  const items = await resolvedRoster();
+  const plan = replacement.planSeedReplacement(video, items, SEEDS);
+  assert.equal(plan.status, 'DRAFT_NOT_APPROVED');
+  const entry = id => plan.entries.find(e => e.seed_product_id === id);
+  // Same listing: evidence, no judgement needed.
+  same([entry('FP-1000003').basis, entry('FP-1000003').action, entry('FP-1000003').needs_signoff, entry('FP-1000003').replaced_by], ['same_listing', 'supersede', false, ['VR-n9u8ynhBdSo-4-main']]);
+  // Same manufacturer code, but the variant is not READY: the seed stays, coverage does not drop.
+  same([entry('M28392').basis, entry('M28392').action, entry('M28392').replaced_by, entry('M28392').not_ready], ['same_code', 'keep_seed', [], ['M28392']]);
+  // Family-only link: every READY variant of the family takes over, and it needs sign-off.
+  same([entry('FP-1999999').basis, entry('FP-1999999').action, entry('FP-1999999').needs_signoff], ['family', 'supersede', true]);
+  same(entry('FP-1999999').replaced_by, ['VR-n9u8ynhBdSo-5-red-20', 'VR-n9u8ynhBdSo-5-red-40']);
+  // Nothing in the list for this seed: untouched.
+  same([entry('M46784').basis, entry('M46784').action], ['none', 'keep_seed']);
+  same(plan.summary, { seeds: 4, superseded: 2, kept: 2, active_after: 5, duplicates_after: 0 });
+  assert.ok(plan.entries.every(e => /^[a-f0-9-]{8,}|.+/.test(e.seed_canonical_key) && e.seed_canonical_key));
+});
+
+test('a draft plan retires nothing; an applied plan retires exactly the named seeds and keeps their lineage', async () => {
+  const items = await resolvedRoster();
+  const plan = replacement.planSeedReplacement(video, items, SEEDS);
+  const draft = replacement.rosterMappingsWithPlan(video, items, plan, { seeds: SEEDS });
+  assert.ok(draft.length === 3 && draft.every(row => !row.supersedes));
+  assert.equal(roster.supersededProductIds(draft, 'youtube', 'n9u8ynhBdSo').size, 0);
+
+  const applied = replacement.rosterMappingsWithPlan(video, items, { ...plan, status: 'APPROVED', approved_by: 'reviewer' }, { seeds: SEEDS });
+  // Rows survive the resolver's own parser unchanged in the fields that matter.
+  const parsedRows = mapping.parseVerifiedProductMappings(JSON.stringify(applied));
+  assert.equal(parsedRows.length, 3);
+  const carryRow = parsedRows.find(row => row.product_id === 'VR-n9u8ynhBdSo-4-main');
+  same([carryRow.identity_scope, carryRow.supersedes], ['video_local', ['FP-1000003']]);
+  // The seed's discussion window carries over as a retrieval prior. Its observations are not copied:
+  // that would be an identity merge, and the seed row itself is kept.
+  same([carryRow.candidate_window_start_ms, carryRow.candidate_window_end_ms, carryRow.trusted_observations], [400000, 500000, undefined]);
+  assert.ok(applied.every(row => !row.trusted_observations));
+  const red20 = parsedRows.find(row => row.product_id === 'VR-n9u8ynhBdSo-5-red-20');
+  same([red20.supersedes, red20.candidate_window_start_ms], [['FP-1999999'], 805000]);
+
+  const superseded = roster.supersededProductIds(parsedRows, 'youtube', 'n9u8ynhBdSo');
+  same([...superseded].sort(), ['fp-1000003', 'fp-1999999']);
+  const seedRows = SEEDS.map(row => ({ mapping: row }));
+  same(roster.withoutSuperseded(seedRows, superseded).map(row => row.mapping.product_id), ['M28392', 'M46784']);
+  // Scoped to the content: the same rows retire nothing in another video.
+  assert.equal(roster.supersededProductIds(parsedRows, 'youtube', 'AAAAAAAAAAA').size, 0);
+  // A replacement with no loadable pixels cannot retire anything.
+  assert.equal(roster.supersededProductIds(parsedRows.map(row => ({ ...row, reference_image_status: 'pending_partner_image' })), 'youtube', 'n9u8ynhBdSo').size, 0);
+  // Removing the replacement brings the seed back.
+  same(roster.withoutSuperseded(seedRows, roster.supersededProductIds([], 'youtube', 'n9u8ynhBdSo')).length, 4);
 });

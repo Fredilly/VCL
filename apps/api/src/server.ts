@@ -44,7 +44,8 @@ import { fetchCatalogImage } from './candidate-images.js';
 import { preparePartnerRoster, ingestPartnerRoster, buildCorrectionBundle, cacheLearningImage, learningImage, persistCorrectionBundle, assetDigest, type RosterOfferInput, type CorrectionBundle } from './partner-learning.js';
 import { verifiedLedgerRequest } from './verified-product-ledger.js';
 import { rosterFallbackDescription, rosterFallbackRetrievalDescription } from './roster-fallback.js';
-import { scopedPartnerRosterCandidates, verifiedRosterCanonicalRowsForContent } from './partner-roster.js';
+import { scopedPartnerRosterCandidates, supersededProductIds, verifiedRosterCanonicalRowsForContent, withoutSuperseded } from './partner-roster.js';
+import { isVideoLocalIdentity } from './canonical-product-memory.js';
 export { AlphaAccessLedger } from './alpha-access.js';
 export { VerifiedProductLedger } from './verified-product-ledger.js';
 export { AdminAccessLedger } from './admin-access.js';
@@ -299,8 +300,10 @@ function verifiedSourceProviderName(value: string | null | undefined, destinatio
 function verifiedOfferHasExactIdentity(mapping: VerifiedProductMapping, product: ProductCandidate): boolean {
   const expectedModel = verifiedIdentityKey(mapping.product_id);
   if (!expectedModel) return false;
-  if (product.model && verifiedIdentityKey(product.model) === expectedModel) return true;
-  if (product.id && verifiedIdentityKey(product.id) === expectedModel) return true;
+  // A video-local handle can only match by being the very same listing.
+  const comparable = mapping.identity_scope !== 'video_local';
+  if (comparable && product.model && verifiedIdentityKey(product.model) === expectedModel) return true;
+  if (comparable && product.id && verifiedIdentityKey(product.id) === expectedModel) return true;
   if (product.destination && mapping.destination) {
     try {
       const actual = new URL(product.destination);
@@ -445,13 +448,16 @@ export async function refreshVerifiedOffers(
   const exactLookupSource = sourceProviders.find(({ provider }) =>
     typeof (provider as CommerceProvider & { getItemById?: unknown }).getItemById === 'function',
   );
-  if (exactLookupSource) {
+  // A video-local roster handle is not a product code: never send it to a
+  // merchant as a query or model, and never treat it as a merchant item id.
+  const videoLocal = mapping.identity_scope === 'video_local';
+  if (exactLookupSource && !(videoLocal && exactLookupSource.name !== 'ebay')) {
     const query: ProductQuery = {
-      query: mapping.product_id || mapping.title,
+      query: (videoLocal ? null : mapping.product_id) || mapping.title,
       category: mapping.object_type,
       subcategory: mapping.object_type,
       brand: mapping.brand || null,
-      model: mapping.product_id || null,
+      model: videoLocal ? null : mapping.product_id || null,
       attributes: [],
     };
     providersUsed.push(exactLookupSource.name);
@@ -499,8 +505,12 @@ export async function refreshVerifiedOffers(
 
   const fallback = verifiedMappingProduct(hydratedMapping);
 
-  const identityKey = `verified:${verifiedIdentityKey(canonicalModel) || verifiedIdentityKey(mapping.product_id)}`;
-  const makeExact = (product: ProductCandidate, reason = `${mapping.provenance} product identity; same verified SKU/model`): ProductCandidate => ({
+  const identityKey = videoLocal
+    ? `video-local:${verifiedIdentityKey(mapping.product_id)}`
+    : `verified:${verifiedIdentityKey(canonicalModel) || verifiedIdentityKey(mapping.product_id)}`;
+  const makeExact = (product: ProductCandidate, reason = videoLocal
+    ? 'partner-listed variant for this video; same listing'
+    : `${mapping.provenance} product identity; same verified SKU/model`): ProductCandidate => ({
     ...product,
     result_class: 'EXACT',
     relationship: 'EXACT',
@@ -527,7 +537,7 @@ export async function refreshVerifiedOffers(
 
   // A canonical product is the anchor. Search all configured commerce providers
   // with product-level identity evidence, not the original merchant item id.
-  const searchIdentity = canonicalModel || mapping.product_id || null;
+  const searchIdentity = videoLocal ? null : canonicalModel || mapping.product_id || null;
   const searchQuery: ProductQuery = {
     query: searchIdentity || mapping.title,
     category: mapping.object_type,
@@ -549,7 +559,7 @@ export async function refreshVerifiedOffers(
   }));
 
   const candidates = dedupeProducts(batches.flat());
-  const expectedSku = verifiedIdentityKey(canonicalModel || mapping.product_id);
+  const expectedSku = videoLocal ? '' : verifiedIdentityKey(canonicalModel || mapping.product_id);
   const metadataExact: ProductCandidate[] = [];
   const needsVisual: ProductCandidate[] = [];
 
@@ -1170,7 +1180,9 @@ async function confirmCrossVideoReuseWithImage(
     logos_markings: description.logos_markings,
     limit: 24,
   }).catch(() => []))
-    .filter((identity) => !excludeCanonicalKeys.has(identity.canonical_key));
+    .filter((identity) => !excludeCanonicalKeys.has(identity.canonical_key))
+    // A video-local identity exists for one video only. It is never a candidate anywhere else.
+    .filter((identity) => !isVideoLocalIdentity(identity));
 
   // During alpha, verified creator/admin roster entries must also be reusable
   // across videos. They are candidates only: cross-video Exact still requires
@@ -2311,11 +2323,16 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         failure_reasons: {},
       };
       const configuredRosterMappings = parseVerifiedProductMappings(env.VERIFIED_PRODUCT_MAPPINGS_JSON);
-      const alphaCanonicalRows = alphaVerifiedCanonicalRowsForContent(
+      // Seeds that an imported or configured row explicitly replaces are not
+      // active candidates: one product must not appear twice in the roster.
+      const supersededSeedIds = supersededProductIds(
+        [...configuredRosterMappings, ...durableMappings], context?.platform ?? null, contentRef);
+      const allAlphaCanonicalRows = alphaVerifiedCanonicalRowsForContent(
         context?.platform ?? null,
         contentRef,
         context?.timestamp_ms ?? null,
       );
+      const alphaCanonicalRows = withoutSuperseded(allAlphaCanonicalRows, supersededSeedIds);
       const configuredCanonicalRows = verifiedRosterCanonicalRowsForContent(
         configuredRosterMappings,
         context?.platform ?? null,
@@ -2503,6 +2520,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           roster_sources: {
             configured: configuredCanonicalRows.length,
             alpha_seed: alphaCanonicalRows.length,
+            superseded_seed: allAlphaCanonicalRows.length - alphaCanonicalRows.length,
             durable: durableMappings.length,
             canonical_candidates: canonicalRows.length,
           },
@@ -2734,6 +2752,15 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         verified_mapping: {
           hit: false,
           roster_retrieval: sameVideoVisualCheck.retrieval,
+          // Counts only, same as the hit response. Without them a replay that
+          // returns no Exact cannot show which roster the resolver actually used.
+          roster_sources: {
+            configured: configuredCanonicalRows.length,
+            alpha_seed: alphaCanonicalRows.length,
+            superseded_seed: allAlphaCanonicalRows.length - alphaCanonicalRows.length,
+            durable: durableMappings.length,
+            canonical_candidates: canonicalRows.length,
+          },
           reuse: crossVideoReuse.reason !== 'no_candidate' ? 'cross_video' : 'same_video',
           confidence: crossVideoReuse.reason !== 'no_candidate' ? crossVideoReuse.confidence : sameVideoReuse.confidence,
           reason: crossVideoReuse.reason !== 'no_candidate' ? crossVideoReuse.reason : sameVideoReuse.reason,

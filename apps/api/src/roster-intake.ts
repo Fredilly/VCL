@@ -3,8 +3,8 @@ import type { ProductCandidate, ProductQuery } from './commerce.js';
 import type { PartnerCatalogMetadata } from './partner-catalog.js';
 import type { RosterOfferInput } from './partner-learning.js';
 import {
-  brandFromHeadings, familyName, groupVariantId, isGroupVariantId, linkEvidence, looksLikeOutline, parseOutline,
-  plainListText, shortHash, variantLabel,
+  brandFromHeadings, coloursContradict, coloursIn, familyAnchors, familyName, groupVariantId, isGroupVariantId, linkEvidence,
+  looksLikeOutline, namesOtherProduct, parseOutline, plainListText, shortHash, sizesIn, variantLabel, type RejectedLink,
 } from './roster-outline.js';
 import { productType } from './verification-evidence.js';
 
@@ -66,8 +66,12 @@ export type IntakeItem = {
   link_codes?: Array<{ code: string; url: string }>;
   /** Merchant listing id per link (FP-1991017, POSH-..., EBAY-...). */
   listing_ids?: Record<string, string>;
-  /** partner_unsure | partner_could_not_find */
+  /** partner_unsure | partner_could_not_find | variant_unstated */
   flags?: string[];
+  /** Links set aside because they contradict the family or the variant. Never offers, never reference photos. */
+  rejected_links?: RejectedLink[];
+  /** What a seller page must not contradict: the family's model words, the variant's colours and size. */
+  match?: { anchors: string[]; colors: string[]; size: string | null };
   /** The partner's own side remarks, kept verbatim for the reviewer. */
   remarks?: string[];
   /** Machine notes for the reviewer that do not block import. */
@@ -88,8 +92,12 @@ export type IntakeOffer = {
   merchant_item_id: string | null;
   /** What reading the seller page told us. `unread` = reachable or blocked, but no product markup. */
   page?: 'resolved' | 'ambiguous' | 'unread' | 'blocked' | 'unreachable';
-  /** The page says this listing is sold/out of stock: kept as evidence, never imported as an offer. */
-  sold_out?: boolean;
+  /**
+   * in_stock: the seller's own page (or a live marketplace inventory API) says it can be bought now.
+   * sold_out: the page says it cannot. unconfirmed: nothing said so either way (page blocked,
+   * unreachable or without availability markup). Only in_stock is ever imported as an offer.
+   */
+  availability?: 'in_stock' | 'sold_out' | 'unconfirmed';
   /** This listing's own photo, when it loads. */
   image?: string | null;
   seller_sku?: string | null;
@@ -668,7 +676,9 @@ function itemsFromOutline(text: string, defaults: IntakeDefaults, video: VideoRe
     const gap = group.flags.includes('partner_could_not_find');
     const note = group.note ? parseLine(group.note, 0).item : null;
     const family = familyName(heading?.title ?? group.heading, brand);
-    const variant = group.note ? variantLabel(note?.title ?? group.note, heading?.title ?? group.heading, brand).label : null;
+    const noteLabel = group.note ? variantLabel(note?.title ?? group.note, heading?.title ?? group.heading, brand).label : null;
+    // Rows split out of one note keep the note's label and add the size/colour that tells them apart.
+    const variant = group.split_from !== null ? group.variant : noteLabel;
     const item = emptyItem(items.length + 1, [group.heading, group.note].filter(Boolean).join(' / '));
     item.section = group.section;
     item.family = family;
@@ -682,6 +692,8 @@ function itemsFromOutline(text: string, defaults: IntakeDefaults, video: VideoRe
     item.timestamp_ms = note?.timestamp_ms ?? heading?.timestamp_ms ?? null;
     item.gtin = note?.gtin ?? (group.note ? null : heading?.gtin ?? null);
     item.flags = [...new Set(group.flags)];
+    if (group.rejected.length) item.rejected_links = group.rejected;
+    item.match = { anchors: familyAnchors(heading?.title ?? group.heading, brand), colors: coloursIn(noteLabel ?? ''), size: group.size };
     item.remarks = group.remarks.map(remark => remark.slice(0, 300));
     item.listing_ids = Object.fromEntries(group.links.filter(link => link.listing_id).map(link => [link.url, link.listing_id!]));
     const hints: string[] = [];
@@ -703,21 +715,10 @@ function itemsFromOutline(text: string, defaults: IntakeDefaults, video: VideoRe
       if (linkCodes.length) item.link_codes = linkCodes;
       if (distinct.length > 1) hints.push(`codes_differ:${distinct.join(', ')}`);
     }
-    const sizes = [...new Set(group.links.flatMap(link => link.sizes))];
-    if (sizes.length > 1) hints.push(`sizes_mixed:${sizes.join(', ')}`);
+    if (group.split_from !== null) hints.push(`split_from:${group.split_from}`);
+    for (const link of group.rejected) hints.push(`link_rejected:${link.merchant}: ${link.detail}`);
     if (group.search_pages.length) hints.push(`search_page_ignored:${group.search_pages.length}`);
     if (group.links.length > INTAKE_LIMITS.maxLinksPerItem) hints.push(`links_over_limit:${group.links.length}`);
-    // A listing whose own name shares no word with the family is probably filed
-    // under the wrong heading. Only judged when the URL carries a readable name.
-    const familyWords = new Set(significantWords(family, brand));
-    for (const link of group.links) {
-      let name = '';
-      try { name = decodeURIComponent(new URL(link.url).pathname.split('/').filter(Boolean).pop() ?? ''); } catch { /* no name */ }
-      const nameWords = significantWords(name, brand).filter(word => /[a-z]/.test(word));
-      if (familyWords.size && nameWords.length >= 3 && !nameWords.some(word => [...familyWords].some(wanted => word.includes(wanted) || wanted.includes(word)))) {
-        hints.push(`link_names_other_product:${link.merchant}`);
-      }
-    }
     item.hints = hints;
     items.push(item);
   }
@@ -808,6 +809,39 @@ function buildIntakeQuery(item: IntakeItem): ProductQuery | null {
 }
 
 const SOLD_OUT = /sold\s*out|out\s*of\s*stock|discontinued/i;
+// schema.org values that mean a buyer can complete a purchase now.
+const IN_STOCK = /^(?:in\s*stock|instock|limited\s*availability|limitedavailability|online\s*only|onlineonly)$/i;
+// Search providers that answer from live inventory: a hit is a listing on sale now.
+// Web-search providers return pages, which says nothing about availability.
+const LIVE_INVENTORY_PROVIDERS = new Set(['ebay']);
+
+/**
+ * What a seller's own page says against this row. A contradiction means the
+ * link was filed under the wrong product or variant: it is not an offer and
+ * its photo is not a reference.
+ */
+function pageContradiction(item: IntakeItem, metadata: PartnerCatalogMetadata | null): { reason: RejectedLink['reason']; detail: string } | null {
+  if (!metadata) return null;
+  const brand = normalizeWords(metadata.brand).join(' ');
+  const wantedBrand = normalizeWords(item.brand).join(' ');
+  if (brand && wantedBrand && !brand.includes(wantedBrand) && !wantedBrand.includes(brand)) {
+    return { reason: 'brand_contradiction', detail: `page brand is ${metadata.brand}, list says ${item.brand}` };
+  }
+  const title = metadata.title ?? '';
+  if (!title || !item.match) return null;
+  if (namesOtherProduct(normalizeWords(title).filter(word => !normalizeWords(item.brand).includes(word)), item.match.anchors)) {
+    return { reason: 'other_product', detail: `page title does not mention ${item.match.anchors.join(' / ')}` };
+  }
+  const stated = [...new Set([...coloursIn(title), ...coloursIn(metadata.color)])];
+  if (coloursContradict(item.match.colors, stated)) {
+    return { reason: 'colour_contradiction', detail: `variant is ${item.match.colors.join(' / ')}, page says ${stated.join(' / ')}` };
+  }
+  const sizes = sizesIn(title);
+  if (item.match.size && sizes.length && !sizes.includes(item.match.size)) {
+    return { reason: 'size_contradiction', detail: `variant is size ${item.match.size}, page says ${sizes.join(' / ')}` };
+  }
+  return null;
+}
 
 export async function resolveIntakeItem(item: IntakeItem, deps: IntakeDependencies): Promise<ResolvedIntakeItem> {
   const reasons: string[] = [];
@@ -828,6 +862,7 @@ export async function resolveIntakeItem(item: IntakeItem, deps: IntakeDependenci
   const grouped = skuSource === 'partner_group';
   let pageCode: string | null = null;
   let removedLinks = 0;
+  const rejected: RejectedLink[] = [...(item.rejected_links ?? [])];
 
   // 1. Seller links the partner supplied. Their catalog markup can fill gaps,
   //    but a page whose SKU contradicts the partner's SKU is never used.
@@ -852,6 +887,12 @@ export async function resolveIntakeItem(item: IntakeItem, deps: IntakeDependenci
       reasons.push(`link_sku_mismatch:${hostOf(url)} lists ${rawPageSku}, partner listed ${resolved.sku}`);
       continue;
     }
+    const contradiction = pageContradiction(resolved, metadata);
+    if (contradiction) {
+      rejected.push({ url, merchant: hostOf(url), ...contradiction });
+      notes.push(`link_rejected:${hostOf(url)}: ${contradiction.detail}`);
+      continue;
+    }
     if (metadata?.resolution === 'ambiguous' && !resolved.sku) reasons.push(`link_variant_ambiguous:${hostOf(url)}`);
     if (!resolved.sku && !resolved.gtin && metadata?.resolution !== 'ambiguous' && (metadata?.variant_id || rawPageSku)) {
       resolved.sku = metadata?.variant_id || rawPageSku;
@@ -865,8 +906,13 @@ export async function resolveIntakeItem(item: IntakeItem, deps: IntakeDependenci
     resolved.object_type ??= bounded(metadata?.object_type, 100) ?? inferObjectType(metadata?.title ?? null, null);
     const pageImage = metadata?.image_reference && safeImageUrl(metadata.image_reference) ? metadata.image_reference : null;
     if (pageImage) imageCandidates.push(pageImage);
-    const soldOut = SOLD_OUT.test(metadata?.availability ?? '');
-    if (soldOut) notes.push(`offer_sold_out:${hostOf(url)}`);
+    // Availability has to be stated by the seller. A page we could not read, or
+    // one that says nothing, is not evidence that the item can be bought.
+    const stated = (metadata?.availability ?? '').trim();
+    const availability: IntakeOffer['availability'] = SOLD_OUT.test(stated) ? 'sold_out'
+      : metadata?.resolution === 'resolved' && IN_STOCK.test(stated) ? 'in_stock' : 'unconfirmed';
+    if (availability === 'sold_out') notes.push(`offer_sold_out:${hostOf(url)}`);
+    if (availability === 'unconfirmed') notes.push(`offer_unconfirmed:${hostOf(url)}`);
     const status = metadata?.http_status ?? null;
     offers.push({
       destination: url, source: 'partner_link', provider: hostOf(url),
@@ -874,10 +920,10 @@ export async function resolveIntakeItem(item: IntakeItem, deps: IntakeDependenci
       currency: metadata?.currency ?? null, merchant_item_id: stockNumber,
       page: metadata?.resolution === 'resolved' ? 'resolved' : metadata?.resolution === 'ambiguous' ? 'ambiguous'
         : status === 0 ? 'unreachable' : status !== null && status >= 400 ? 'blocked' : 'unread',
-      sold_out: soldOut, image: pageImage, seller_sku: rawPageSku,
+      availability, image: pageImage, seller_sku: rawPageSku,
     });
   }
-  const live = () => offers.filter(offer => !offer.sold_out);
+  const live = () => offers.filter(offer => offer.availability === 'in_stock');
 
   // 2. Marketplace search (eBay etc.) when we still lack a live offer or an image.
   //    Only listings that carry the same SKU/GTIN count as this product.
@@ -905,6 +951,7 @@ export async function resolveIntakeItem(item: IntakeItem, deps: IntakeDependenci
           offers.push({
             destination: hit.destination, source: 'sku_search', provider,
             title: bounded(hit.title, 300), price: hit.price, currency: hit.currency, merchant_item_id: hit.id || null,
+            availability: LIVE_INVENTORY_PROVIDERS.has(String(provider).toLowerCase()) ? 'in_stock' : 'unconfirmed',
           });
           searchOffers++;
         }
@@ -946,13 +993,15 @@ export async function resolveIntakeItem(item: IntakeItem, deps: IntakeDependenci
 
   if (resolved.flags?.includes('partner_could_not_find')) reasons.push('partner_could_not_find');
   if (resolved.flags?.includes('partner_unsure')) reasons.push('partner_unsure');
+  if (resolved.flags?.includes('variant_unstated')) reasons.push('variant_unstated');
   if (!resolved.sku && !resolved.gtin) reasons.push(proposedSkus.length ? 'sku_missing_proposal_needs_review' : 'sku_missing');
   if (!resolved.brand) reasons.push('brand_missing');
   if (!resolved.title) reasons.push('title_missing');
   if (!resolved.object_type) reasons.push('object_type_missing');
   if (!live().length) {
-    reasons.push(offers.length ? 'offers_sold_out' : removedLinks ? 'links_removed'
-      : reviewCandidates.length ? 'no_sku_matched_offer' : 'no_offer');
+    reasons.push(offers.some(offer => offer.availability === 'unconfirmed') ? 'no_confirmed_offer'
+      : offers.length ? 'offers_sold_out' : removedLinks ? 'links_removed'
+      : rejected.length ? 'links_rejected' : reviewCandidates.length ? 'no_sku_matched_offer' : 'no_offer');
   }
   // Nothing answered at all: say that, rather than "no image", so the fix is obvious.
   const unreachable = offers.length > 0 && offers.every(offer => offer.page === 'unreachable');
@@ -973,6 +1022,7 @@ export async function resolveIntakeItem(item: IntakeItem, deps: IntakeDependenci
     sku_source: skuSource,
     review_candidates: reviewCandidates,
     notes,
+    ...(rejected.length ? { rejected_links: rejected } : {}),
   };
 }
 
@@ -988,10 +1038,10 @@ export function uncheckedIntakeItem(item: IntakeItem): ResolvedIntakeItem {
   return {
     ...item,
     status: 'NEEDS_REVIEW',
-    reasons: ['not_checked', ...(item.flags ?? []).filter(flag => flag === 'partner_could_not_find' || flag === 'partner_unsure')],
+    reasons: ['not_checked', ...(item.flags ?? []).filter(flag => flag === 'partner_could_not_find' || flag === 'partner_unsure' || flag === 'variant_unstated')],
     offers: item.urls.slice(0, INTAKE_LIMITS.maxLinksPerItem).map(url => ({
       destination: url, source: 'partner_link' as const, provider: hostOf(url), title: null, price: null, currency: null,
-      merchant_item_id: (item.listing_ids?.[url] ?? '').replace(/^[A-Z]+-/, '') || null, page: 'unread' as const,
+      merchant_item_id: (item.listing_ids?.[url] ?? '').replace(/^[A-Z]+-/, '') || null, page: 'unread' as const, availability: 'unconfirmed' as const,
     })),
     verified_image: null,
     fallback_images: [],
@@ -1022,10 +1072,13 @@ export function buildRosterManifest(video: VideoRef, items: ResolvedIntakeItem[]
     if (item.status !== 'READY' || !item.verified_image) continue;
     const sku = (item.sku ?? item.gtin)!;
     for (const offer of item.offers) {
-      if (offer.sold_out) continue;
+      if (offer.availability !== 'in_stock') continue;
+      // A video-local id travels as a declared, scoped variant handle. It is
+      // never sent in the `sku` field, so no importer can read it as a SKU.
+      const videoLocal = item.sku_source === 'partner_group' || isGroupVariantId(sku);
       offers.push({
         destination: offer.destination,
-        sku,
+        ...(videoLocal ? { variant_id: sku, identity_scope: 'video_local' as const } : { sku }),
         title: item.title!,
         brand: item.brand!,
         object_type: item.object_type!,
@@ -1042,7 +1095,7 @@ export function buildRosterManifest(video: VideoRef, items: ResolvedIntakeItem[]
   return { platform: video.platform, content_ref: video.content_ref, offers };
 }
 
-const liveOffers = (item: ResolvedIntakeItem) => item.offers.filter(offer => !offer.sold_out);
+const liveOffers = (item: ResolvedIntakeItem) => item.offers.filter(offer => offer.availability === 'in_stock');
 
 export function summarizeIntake(items: ResolvedIntakeItem[]) {
   const count = (status: IntakeStatus) => items.filter(item => item.status === status).length;
@@ -1080,6 +1133,9 @@ const REASON_TEXT: Record<string, string> = {
   no_offer: 'No seller link and no marketplace listing carries this SKU.',
   no_sku_matched_offer: 'Marketplace results found, but none list this exact SKU. Lookalikes are shown for review only.',
   offers_sold_out: 'Every seller link the partner gave is marked sold out. Needs a live listing.',
+  no_confirmed_offer: 'No seller page confirmed the item can be bought now (blocked, unreachable, or no availability stated). Not imported until one does.',
+  links_rejected: 'Every link filed here contradicts the product or the variant. Needs a correct listing.',
+  variant_unstated: 'These listings do not say which size/colour they are, and the note mixes several. Assign each to its variant (or state the size next to the link).',
   links_removed: 'Every seller link the partner gave has been taken down. Needs a live listing.',
   sellers_unreachable: 'None of the seller pages could be reached from where this ran, so there is no reference image yet. Re-run from another network or through the API.',
   image_missing: 'No reference image found. The verifier cannot compare pixels without one.',
@@ -1090,13 +1146,14 @@ const REASON_TEXT: Record<string, string> = {
 };
 
 const NOTE_TEXT: Record<string, (detail: string) => string> = {
-  sizes_mixed: detail => `Listings span sizes ${detail}. Kept as one variant because the partner grouped them; split the note per size if a viewer must land on the exact size.`,
+  split_from: detail => `Split out of "${detail}": the links under that note mix sizes or colours, so each is its own variant.`,
+  link_rejected: detail => `Link set aside, not used as offer or photo (${detail}).`,
+  offer_unconfirmed: detail => `${detail} did not confirm availability; link not imported.`,
   codes_differ: detail => `Links state different manufacturer codes (${detail}), so no single code was adopted.`,
   search_page_ignored: detail => `${detail} search-results link ignored (not a product).`,
   links_over_limit: detail => `${detail} links listed; only the first ${INTAKE_LIMITS.maxLinksPerItem} are checked.`,
   link_removed: detail => `${detail} listing has been taken down; not imported.`,
   offer_sold_out: detail => `${detail} listing is sold out; its photo is still used as a reference, the link is not imported.`,
-  link_names_other_product: detail => `${detail} listing's name does not mention this product. Check it belongs here.`,
 };
 
 function reasonText(reason: string): string {
@@ -1121,7 +1178,8 @@ function identityText(item: ResolvedIntakeItem): string {
 }
 
 function offersText(item: ResolvedIntakeItem): string {
-  return item.offers.map(offer => `${offer.sold_out ? '~~' : ''}[${md(offer.provider)}](${offer.destination})${offer.sold_out ? '~~ (sold out)' : ''}${offer.source === 'sku_search' ? ' (search)' : ''}`).join('<br>') || '—';
+  const state = (offer: IntakeOffer) => offer.availability === 'in_stock' ? ' ✓' : offer.availability === 'sold_out' ? ' (sold out)' : ' (availability unconfirmed)';
+  return item.offers.map(offer => `[${md(offer.provider)}](${offer.destination})${state(offer)}${offer.source === 'sku_search' ? ' (search)' : ''}`).join('<br>') || '—';
 }
 
 /** "Products on a page": what to import, what to ask the partner for. */
@@ -1200,7 +1258,9 @@ export function renderIntakeCsv(items: ResolvedIntakeItem[]): string {
   const rows = items.map(item => [
     item.section ?? '', item.family ?? '', item.variant ?? '', item.title ?? '', item.brand ?? '', item.object_type ?? '',
     item.sku ?? item.gtin ?? '', item.sku_source ?? '', item.status,
-    liveOffers(item).filter(offer => offer.source === 'partner_link').map(offer => offer.destination).join(' '),
+    // Every link still filed under this row, whatever its current availability:
+    // the sheet is the partner's list, cleaned, not the import manifest.
+    item.urls.join(' '),
     item.verified_image ?? '', item.reasons.map(reason => reason.split(':')[0]).join(' '),
   ]);
   return `${[header, ...rows].map(row => row.map(csvCell).join(',')).join('\n')}\n`;

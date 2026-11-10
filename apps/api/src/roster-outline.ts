@@ -27,9 +27,15 @@ export type LinkEvidence = {
   listing_id: string | null;
   /** Manufacturer-style codes stated in the URL path (never from query strings). */
   codes: string[];
-  /** Size words in the listing slug (PM, MM, 25, 40 ...). Review hint only. */
+  /** Size words in the listing's own name (PM, MM, 25, 40 ...). */
   sizes: string[];
+  /** Basic colour words in the listing's own name, normalised (grey, not gray). */
+  colors: string[];
+  /** Words of the listing's own name, when the URL carries a readable one. */
+  name_words: string[];
 };
+
+export type RejectedLink = { url: string; merchant: string; reason: 'other_product' | 'colour_contradiction' | 'size_contradiction' | 'brand_contradiction'; detail: string };
 
 export type OutlineGroup = {
   section: number | null;
@@ -40,6 +46,11 @@ export type OutlineGroup = {
   /** Cleaned variant label ("black with gold buckles"); null for the default group. */
   variant: string | null;
   links: LinkEvidence[];
+  /** Links the partner filed here whose own name contradicts the family or the variant note. Never offers. */
+  rejected: RejectedLink[];
+  /** Set on rows produced by splitting one note whose links mix sizes or colours. */
+  size: string | null;
+  split_from: string | null;
   image_reference: string | null;
   search_pages: string[];
   /** partner_unsure | partner_could_not_find */
@@ -65,7 +76,52 @@ const GENERIC_LABEL = /^(?:(?:another|a|an|the|one|other|weird|new|different|mor
 // "1. Name", "2) Name", "8 Name" (number typed without a dot), optionally after a chapter time.
 const HEADING_RE = /^\s*(?:#{1,6}\s+)?((?:\d{1,2}:)?\d{1,2}:\d{2}\s+)?(?:\(?(\d{1,3})\s*[.)\]]\s*|(\d{1,3})\s+(?=[A-Z]))(\S.*)$/;
 const MD_HEADING_RE = /^\s*#{1,6}\s+(\S.*)$/;
-const SIZE_WORDS = /^(?:nano|mini|micro|bb|pm|mm|gm|xs|xl|small|medium|large|\d{2})$/i;
+const SIZE_WORDS = /^(?:nano|mini|micro|bb|pm|mm|gm|xs|xl|small|medium|large|(?:1[5-9]|[2-5]\d|60))$/i;
+
+const COLOURS = ['black', 'white', 'red', 'blue', 'green', 'yellow', 'pink', 'brown', 'beige', 'cream', 'grey', 'silver', 'gold', 'orange', 'purple', 'burgundy', 'tan', 'navy'];
+// Words that say what kind of thing it is, or how it is made, rather than which
+// model it is. They cannot tell two products apart, so they never anchor a family.
+const GENERIC_WORDS = new Set([
+  'bag', 'bags', 'handbag', 'handbags', 'tote', 'hobo', 'bucket', 'pouch', 'bumbag', 'clutch', 'satchel', 'crossbody',
+  'shoulder', 'purse', 'wallet', 'chain', 'top', 'handle', 'boston', 'leather', 'canvas', 'calfskin', 'lambskin', 'suede',
+  'monogram', 'version', 'variant', 'variation', 'for', 'men', 'mens', 'women', 'womens', 'with', 'and', 'the', 'new',
+  'authentic', 'auth', 'used', 'preowned', 'style', 'size', ...COLOURS, 'gray',
+]);
+
+/** "bluish", "greyish", "gray", "silver1" -> the plain colour, or null. */
+export function colourOf(word: string): string | null {
+  const text = word.toLowerCase().replace(/\d+$/, '').replace(/^gray/, 'grey');
+  for (const candidate of [text, text.replace(/(?:ish|y)$/, ''), `${text.replace(/ish$/, '')}e`, text.replace(/(.)\1ish$/, '$1')]) {
+    if (COLOURS.includes(candidate)) return candidate;
+  }
+  return null;
+}
+
+export function coloursIn(text: string | null | undefined): string[] {
+  return [...new Set(words(text ?? '').map(colourOf).filter((colour): colour is string => Boolean(colour)))];
+}
+
+export function sizesIn(text: string | null | undefined): string[] {
+  return [...new Set((text ?? '').split(/[^A-Za-z0-9]+/).filter(word => SIZE_WORDS.test(word)).map(word => word.toUpperCase()))];
+}
+
+/** The words of a family heading that name the model: brand, type, material and colour words removed. */
+export function familyAnchors(family: string, brand?: string | null): string[] {
+  const brandWords = new Set(words(brand ?? ''));
+  return [...new Set(words(family).filter(word => word.length > 2 && !brandWords.has(word) && !GENERIC_WORDS.has(word) && !/^\d+$/.test(word)))];
+}
+
+/** Does a listing name mention the family at all? Only judged when the name is readable (3+ words). */
+export function namesOtherProduct(nameWords: string[], anchors: string[]): boolean {
+  const readable = nameWords.filter(word => /[a-z]/.test(word) && word.length > 2);
+  if (!anchors.length || readable.length < 3) return false;
+  return !readable.some(word => anchors.some(anchor => word === anchor || (anchor.length > 3 && word.includes(anchor)) || (word.length > 3 && anchor.includes(word))));
+}
+
+/** Two stated colour sets contradict when both say something and share nothing. */
+export function coloursContradict(wanted: string[], stated: string[]): boolean {
+  return wanted.length > 0 && stated.length > 0 && !wanted.some(colour => stated.includes(colour));
+}
 
 /** Google Docs/Markdown exports escape punctuation and wrap links; undo both. */
 export function plainListText(source: string): string {
@@ -152,9 +208,9 @@ export function linkEvidence(raw: string, brand?: string | null): LinkEvidence {
     if (!rule.brand.test(hints)) continue;
     for (const match of path.toUpperCase().matchAll(rule.code)) codes.add(match[1]);
   }
-  const sizes = new Set<string>();
-  for (const word of last.split(/[^A-Za-z0-9]+/)) if (SIZE_WORDS.test(word)) sizes.add(word.toUpperCase());
-  return { url, merchant, listing_id: listingId, codes: [...codes], sizes: [...sizes] };
+  // Only a slug with letters is a name; an item number or hex id says nothing.
+  const name = /[A-Za-z]{3,}[-_ ]+[A-Za-z]{3,}/.test(last) ? last.replace(/-[0-9a-f]{24}$/i, '').replace(/-\d{5,}$/, '') : '';
+  return { url, merchant, listing_id: listingId, codes: [...codes], sizes: sizesIn(name), colors: coloursIn(name), name_words: words(name) };
 }
 
 /**
@@ -258,7 +314,7 @@ export function parseOutline(source: string, brand?: string | null): Outline {
   const open = (note: string | null, line: number): OutlineGroup => {
     const { label, remark } = note ? variantLabel(note, heading!.text, brand) : { label: null, remark: null };
     const group: OutlineGroup = {
-      section: heading!.number, heading: heading!.text, note, variant: label, links: [], image_reference: null,
+      section: heading!.number, heading: heading!.text, note, variant: label, links: [], rejected: [], size: null, split_from: null, image_reference: null,
       search_pages: [], flags: note && UNSURE.test(note) ? ['partner_unsure'] : [], remarks: remark ? [remark] : [], source_line: line,
     };
     groups.push(group);
@@ -328,9 +384,78 @@ export function parseOutline(source: string, brand?: string | null): Outline {
   });
 
   // A heading's empty default group only matters when the heading has nothing else.
-  const kept = groups.filter(group => group.note !== null || group.links.length || group.image_reference || group.flags.length
+  const filtered = groups.filter(group => group.note !== null || group.links.length || group.image_reference || group.flags.length
     || !groups.some(other => other !== group && other.section === group.section && other.heading === group.heading));
+  // The brand has to be known before judging names: "Louis Vuitton" in every
+  // listing title must not count as mentioning the family.
+  const knownBrand = brand ?? brandFromHeadings(filtered.map(group => group.heading));
+  const kept = filtered.flatMap(group => splitMixedGroup(rejectContradictoryLinks(group, knownBrand)));
   return { video_url: videoUrl, groups: kept, warnings };
+}
+
+/**
+ * A listing whose own name does not mention the family, or states a colour the
+ * variant note rules out, was filed under the wrong note. It is set aside with
+ * the reason, never offered and never used as a reference photo.
+ */
+function rejectContradictoryLinks(group: OutlineGroup, brand?: string | null): OutlineGroup {
+  const anchors = familyAnchors(group.heading, brand);
+  const wanted = coloursIn(group.note ? variantLabel(group.note, group.heading, brand).label : '');
+  const links: LinkEvidence[] = [];
+  const rejected: RejectedLink[] = [...group.rejected];
+  for (const link of group.links) {
+    if (namesOtherProduct(link.name_words, anchors)) {
+      rejected.push({ url: link.url, merchant: link.merchant, reason: 'other_product', detail: `listing name does not mention ${anchors.join(' / ')}` });
+    } else if (coloursContradict(wanted, link.colors)) {
+      rejected.push({ url: link.url, merchant: link.merchant, reason: 'colour_contradiction', detail: `note says ${wanted.join(' / ')}, listing says ${link.colors.join(' / ')}` });
+    } else links.push(link);
+  }
+  return { ...group, links, rejected };
+}
+
+/**
+ * One note whose links state different sizes (or, when the note names no
+ * colour, different colours) is several variants. Each stated combination
+ * becomes its own row. Links that do not say which one they are stay behind in
+ * a row marked unstated, which is held for review rather than guessed into a size.
+ */
+function splitMixedGroup(group: OutlineGroup): OutlineGroup[] {
+  const noteColours = coloursIn(group.variant ?? '');
+  const sizeOf = (link: LinkEvidence) => link.sizes.length === 1 ? link.sizes[0] : '';
+  const colourOf_ = (link: LinkEvidence) => [...link.colors].sort().join('/');
+  const sizes = [...new Set(group.links.map(sizeOf).filter(Boolean))];
+  const colourSets = [...new Map(group.links.filter(link => link.colors.length).map(link => [colourOf_(link), link.colors])).values()];
+  const splitSize = sizes.length > 1;
+  const splitColour = !noteColours.length && colourSets.length > 1
+    && colourSets.every((a, i) => colourSets.every((b, j) => i === j || !a.some(colour => b.includes(colour))));
+  if (!splitSize && !splitColour) return [group];
+  const parts = new Map<string, { label: string; size: string | null; links: LinkEvidence[] }>();
+  const unstated: LinkEvidence[] = [];
+  for (const link of group.links) {
+    const size = splitSize ? sizeOf(link) : '';
+    const colour = splitColour ? colourOf_(link) : '';
+    if ((splitSize && !size) || (splitColour && !colour)) { unstated.push(link); continue; }
+    const label = [colour, size].filter(Boolean).join(' ');
+    const part = parts.get(label) ?? { label, size: size || null, links: [] };
+    part.links.push(link);
+    parts.set(label, part);
+  }
+  const base = group.variant;
+  const out: OutlineGroup[] = [...parts.values()].map(part => ({
+    ...group, links: part.links, rejected: [], search_pages: [], remarks: [], size: part.size,
+    variant: [base, part.label].filter(Boolean).join(' '), split_from: base ?? group.heading,
+  }));
+  if (unstated.length) {
+    const what = [splitSize ? 'size' : '', splitColour ? 'colour' : ''].filter(Boolean).join(' and ');
+    out.push({
+      ...group, links: unstated, size: null, split_from: base ?? group.heading,
+      variant: [base, `(${what} unstated)`].filter(Boolean).join(' '), flags: [...group.flags, 'variant_unstated'],
+    });
+  } else if (out.length) {
+    // Nothing left behind: the note's remarks and set-aside links travel with the first row.
+    out[0] = { ...out[0], rejected: group.rejected, search_pages: group.search_pages, remarks: group.remarks };
+  }
+  return out;
 }
 
 /** When most headings open with the same two words, that is the brand ("Louis Vuitton ..."). */
@@ -377,8 +502,20 @@ export const GROUP_ID_PREFIX = 'VR-';
  */
 export function groupVariantId(scope: string, section: number | null, family: string, variant: string | null): string {
   const slug = (text: string) => words(text).join('-').slice(0, 40).replace(/-+$/, '');
-  const safeScope = /^[A-Za-z0-9_-]{4,20}$/.test(scope) ? scope : shortHash(scope);
-  return `${GROUP_ID_PREFIX}${safeScope}-${section ?? slug(family)}-${variant ? slug(variant) : 'main'}`.slice(0, 120);
+  return `${GROUP_ID_PREFIX}${videoLocalScope(scope)}-${section ?? slug(family)}-${variant ? slug(variant) : 'main'}`.slice(0, 120);
 }
 
 export const isGroupVariantId = (code: string | null | undefined) => Boolean(code && code.toUpperCase().startsWith(GROUP_ID_PREFIX));
+
+/** The scope segment a video-local id must carry for this content. */
+export function videoLocalScope(contentRef: string): string {
+  let ref = contentRef.trim().replace(/^youtube:/i, '');
+  try { const id = new URL(ref).searchParams.get('v'); if (id) ref = id; } catch { /* not a URL */ }
+  return /^[A-Za-z0-9_-]{4,20}$/.test(ref) ? ref : shortHash(ref);
+}
+
+/** A video-local id is only valid on the content it was minted for. */
+export function videoLocalIdBelongsTo(id: string | null | undefined, contentRef: string | null | undefined): boolean {
+  if (!id || !contentRef || !isGroupVariantId(id)) return false;
+  return id.toLowerCase().startsWith(`${GROUP_ID_PREFIX}${videoLocalScope(contentRef)}-`.toLowerCase());
+}

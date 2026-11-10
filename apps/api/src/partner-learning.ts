@@ -7,6 +7,7 @@ import { resolveSameVideoReuse, type SameVideoCanonicalCandidate } from './same-
 import type { VerifiedProductMapping } from './verified-product-mapping.js';
 import type { ObjectDescription } from './types.js';
 import type { ImageComparison } from './verification-evidence.js';
+import { isGroupVariantId, videoLocalIdBelongsTo } from './roster-outline.js';
 
 export type RosterOfferInput = {
   destination: string;
@@ -23,6 +24,10 @@ export type RosterOfferInput = {
   merchant_item_id?: string;
   candidate_window_start_ms?: number;
   candidate_window_end_ms?: number;
+  /** 'video_local': variant_id is a roster handle for this video (VR-<video>-...), not a manufacturer SKU. */
+  identity_scope?: 'video_local';
+  /** product_ids of earlier roster rows for this content that this row replaces. */
+  supersedes?: string[];
 };
 export type LearningFixture = {
   id: string;
@@ -103,6 +108,11 @@ export async function preparePartnerRoster(
     }
     if (metadata.resolution === 'ambiguous') throw new Error(`Offer ${index + 1}: linked variant is ambiguous; provide its catalog fields and reference`);
     if (!variant || variant.length > 160 || !brand || !title || !objectType) throw new Error(`Offer ${index + 1}: explicit variant/SKU, brand, title and object type required when catalog metadata is incomplete`);
+    // A video-local handle has to be declared and has to belong to this video.
+    // It can never arrive disguised as a SKU, or be attached to other content.
+    const videoLocal = offer.identity_scope === 'video_local';
+    if (isGroupVariantId(variant) !== videoLocal || isGroupVariantId(offer.sku)) throw new Error(`Offer ${index + 1}: a video-local variant id must be sent as variant_id with identity_scope "video_local", never as a SKU`);
+    if (videoLocal && !videoLocalIdBelongsTo(variant, input.content_ref)) throw new Error(`Offer ${index + 1}: video-local variant id belongs to a different video`);
     const requestedVariant = offer.sku || offer.variant_id;
     if (!offer.image_reference && requestedVariant && metadata.sku && ![metadata.sku, metadata.variant_id].includes(requestedVariant.trim())) throw new Error(`Offer ${index + 1}: reference belongs to a different SKU`);
     if (!imageUrl) throw new Error(`Offer ${index + 1}: reference image missing`);
@@ -120,6 +130,9 @@ export async function preparePartnerRoster(
       title, destination: offer.destination, image_reference: reference,
       provider: new URL(offer.destination).hostname, provenance: 'admin_verified',
       ...(start != null ? { candidate_window_start_ms: start, candidate_window_end_ms: end } : {}),
+      ...(videoLocal ? { identity_scope: 'video_local' as const } : {}),
+      ...(Array.isArray(offer.supersedes) && offer.supersedes.length
+        ? { supersedes: offer.supersedes.filter(id => typeof id === 'string' && id.trim()).map(id => id.trim().slice(0, 160)).slice(0, 20) } : {}),
     };
     const identity = canonicalProductIdentity({ mapping, model: offer.model || metadata.model || null,
       merchantItemId: offer.merchant_item_id || null, color: offer.color || metadata.color || null, material: offer.material || metadata.material || null });

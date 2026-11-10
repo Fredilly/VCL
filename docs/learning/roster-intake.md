@@ -56,11 +56,12 @@ Couldn't find it online
 
 Read line by line that is forty "products" called `Black variant` and `Couldn't find it online`. Read as an outline it is what the partner meant: the thing a viewer clicks is the **variant** (family + note), and every link under the note is a place to buy that variant. Intake switches to outline reading when a list has numbered (or `#`) headings without links and at least one note sitting between a heading and its links; everything else keeps the line-by-line reader.
 
-- One row per variant: `Neverfull Tote - Flower floral`, with all of its links as offers and each listing's own photo as a reference image. One identity with several real photos is what the verifier can match; one identity per listing is a pile of indistinguishable siblings it has to abstain on.
+- One row per variant: `Neverfull Tote - Flower floral`, with its links as offers and each listing's own photo as a reference image. One identity with several real photos is what the verifier can match; one identity per listing is a pile of indistinguishable siblings it has to abstain on.
 - The brand is read from the headings when most of them start with the same two words; `--brand` overrides.
 - Search-results links, the video link, social links and repeated links are not offers. Tracking parameters are dropped; variant selectors (`?variant=`) are kept; an eBay link is reduced to its item id.
 - Side remarks are kept as review flags, never as products: "not sure about this link" holds the variant for review; "couldn't find it online" records a variant that is in the video but has no listing yet.
-- Hints that do not block import: listings in one variant that span sizes (`20`, `40`), links that state different codes, a listing whose own name does not mention the product.
+- **Mixed notes are split.** When the links under one note state different sizes (`20`, `40`, `PM`, `MM`), each size is its own variant (`Speedy - Red 20`, `Speedy - Red 40`). Links that do not say which size they are wait in a `(size unstated)` row that is held for review; they are never guessed into a size. The same applies to colours when the note names none.
+- **Contradicting links are set aside.** A listing whose own name does not mention the family (a Pochette Métis filed under Trunkie), or states a colour the note rules out (note says black, listing says white), is not an offer and its photo is not a reference. It is listed in the review with the reason. The same test runs again on the seller page once it is read: other product, other brand, other colour, other size.
 
 ### Identity for a variant
 
@@ -70,11 +71,24 @@ Strongest first:
 2. a manufacturer code stated by **every** link of the variant (`.../M28347`, `lv-m25669`);
 3. otherwise a **video-local** id, `VR-<video>-<section>-<variant>`. It means "the thing this partner calls X in this video". It joins only the links the partner put under that variant, never searches marketplaces by code, and can never match another video or another catalog.
 
+A video-local id is a scoped candidate identity, not a SKU, and the code keeps it that way end to end:
+
+- the import manifest sends it as `variant_id` with `identity_scope: "video_local"`, never in `sku`; the importer refuses one sent as a SKU, undeclared, or attached to a different video;
+- the resolver never resolves it from text, never sends it to a merchant as a query or model, never shows it as a model number, and never offers it as a cross-video candidate;
+- a matched result is keyed `video-local:…` and says "partner-listed variant for this video", not "verified SKU";
+- it still has to win the same-video visual verifier like any other roster candidate.
+
 A code that only some links state is shown as a suggestion and not applied. A reseller's page SKU is normally its own stock number (the id in its URL); that is recorded per offer and is not treated as contradicting anything. Writing the real code next to the variant upgrades the row.
 
-### Listings that are gone
+### What counts as an offer
 
-Resale links die. A link that returns 404/410 is dropped with a note. A page that says sold out / out of stock is kept as a reference photo but never imported as an offer. A variant with no live offer left is `NEEDS_REVIEW`, not READY.
+A listing becomes a purchasable offer only when the seller says it can be bought now: the page was read and states `InStock` (or limited / online-only availability), or the listing came from a live marketplace inventory search. Everything else is not an offer:
+
+- 404/410: the link is dropped with a note;
+- sold out / out of stock: kept as a reference photo, never imported;
+- blocked, unreachable, or a page that states no availability: `unconfirmed`, not imported.
+
+A variant with no confirmed offer is `NEEDS_REVIEW`, not READY.
 
 ## Any brand, any category
 
@@ -95,7 +109,7 @@ Resale links die. A link that returns 404/410 is dropped with a note. A page tha
 
 Everything else is `NEEDS_REVIEW` (with the reason and what to ask the partner for) or `UNRESOLVED`. Nothing is guessed.
 
-Before importing an outline roster for a video that already has hand-seeded rows (`alpha-verified-product-seeds.ts`), decide which set stands. Importing variants next to family-level seeds of the same bags gives the verifier near-identical siblings, and it abstains on those.
+A video that already has hand-seeded rows gets a `seed-replacement-plan.json`: which seeds the READY variants would replace, on what basis, with no duplicates and no seed retired without a replacement. See [roster-seed-replacement.md](roster-seed-replacement.md).
 
 Known limits, deliberately fail-closed:
 

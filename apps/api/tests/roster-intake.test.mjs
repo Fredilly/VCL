@@ -104,7 +104,7 @@ test('video references: YouTube URLs, short links, shorts and bare IDs', () => {
   assert.throws(() => intake.parseVideoRef('not a video'), /video/i);
 });
 
-const lvPage = { sku: 'M46197', variant_id: null, title: 'CarryAll MM', brand: 'Louis Vuitton', object_type: 'bag', canonical_url: null, image_reference: 'https://img.lv.com/M46197.jpg', price: '3050.00', currency: 'USD', resolution: 'resolved' };
+const lvPage = { sku: 'M46197', variant_id: null, title: 'CarryAll MM', brand: 'Louis Vuitton', object_type: 'bag', canonical_url: null, image_reference: 'https://img.lv.com/M46197.jpg', price: '3050.00', currency: 'USD', resolution: 'resolved', availability: 'InStock' };
 const hit = (title, destination, extra = {}) => ({ id: destination.split('/').pop(), title, brand: 'Louis Vuitton', model: null, category: 'bag', image_reference: `${destination}.jpg`, provenance: 'ebay', provider: 'ebay', destination, price: '1200', currency: 'USD', result_class: 'SIMILAR', ...extra });
 function deps({ pages = {}, hits = [], loads = () => true } = {}) {
   const calls = { search: 0, metadata: 0 };
@@ -255,7 +255,7 @@ test('CLI orchestration: parse once, resolve in batches of 8, import READY offer
 
 test('HTTP: /roster-intake requires an admin session and runs parse -> resolve -> manifest', async () => {
   const env = { ADMIN_ACCESS_LEDGER: { idFromName: x => x, get: () => ({ fetch: async () => Response.json({ admin: true, admin_id: 'reviewer' }) }) } };
-  const page = `<html><script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'Product', name: 'CarryAll MM', sku: 'M46197', brand: { '@type': 'Brand', name: 'Louis Vuitton' }, image: 'https://images.shop/M46197.png', offers: { '@type': 'Offer', price: '3050', priceCurrency: 'USD', url: 'https://catalog.shop/carryall' } })}</script></html>`;
+  const page = `<html><script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'Product', name: 'CarryAll MM', sku: 'M46197', brand: { '@type': 'Brand', name: 'Louis Vuitton' }, image: 'https://images.shop/M46197.png', offers: { '@type': 'Offer', price: '3050', priceCurrency: 'USD', availability: 'https://schema.org/InStock', url: 'https://catalog.shop/carryall' } })}</script></html>`;
   let server;
   const mockFetch = async (url, options) => {
     const parsed = new URL(String(url));
@@ -368,7 +368,7 @@ test('a non-bag product resolves through a seller page with no category assumpti
   const shoePage = {
     sku: 'DD1391-100', variant_id: null, title: 'Nike Dunk Low Retro', brand: 'Nike',
     object_type: 'sneakers', canonical_url: null, image_reference: 'https://img.shop/DD1391-100.jpg',
-    price: '110.00', currency: 'USD', resolution: 'resolved',
+    price: '110.00', currency: 'USD', resolution: 'resolved', availability: 'InStock',
   };
   const d = deps({ pages: { 'https://shop.example.com/dunk': shoePage } });
   const out = await intake.resolveIntakeItem(item({

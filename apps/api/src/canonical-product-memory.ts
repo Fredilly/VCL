@@ -26,6 +26,8 @@ export type CanonicalProductIdentity = {
   model: string | null;
   /** Explicit catalog SKU/variant, never a generic model hypothesis. */
   variant_id?: string | null;
+  /** 'video_local': variant_id is a roster handle for one video, not a catalog SKU. Never a cross-video candidate. */
+  identity_scope?: 'video_local' | null;
   family?: string | null;
   object_type: string;
   visible_text: string[];
@@ -178,6 +180,12 @@ function wordOverlap(a: string[], b: string[]): { shared: number; ratio: number 
   return { shared, ratio: shared / Math.max(1, Math.min(left.size, right.size)) };
 }
 
+/** A video-local identity only ever stands for itself. The handle prefix is checked
+ * as well as the flag so a stored row that lost the flag is still contained. */
+export function isVideoLocalIdentity(identity: Pick<CanonicalProductIdentity, 'variant_id'> & { identity_scope?: 'video_local' | null }): boolean {
+  return identity.identity_scope === 'video_local' || /^vr-/i.test((identity.variant_id ?? '').trim());
+}
+
 export function canonicalProductsEquivalent(
   a: Pick<CanonicalProductIdentity, 'title' | 'brand' | 'model' | 'variant_id' | 'object_type' | 'visible_text' | 'logos_markings' | 'color'>,
   b: Pick<CanonicalProductIdentity, 'title' | 'brand' | 'model' | 'variant_id' | 'object_type' | 'visible_text' | 'logos_markings' | 'color'>,
@@ -315,6 +323,7 @@ export function canonicalProductIdentity(input: CanonicalIdentityInput): Canonic
     brand,
     model,
     ...(variantId ? { variant_id: variantId } : {}),
+    ...(mapping.identity_scope === 'video_local' ? { identity_scope: 'video_local' as const } : {}),
     ...(family ? { family } : {}),
     object_type: objectType,
     visible_text: visibleText,

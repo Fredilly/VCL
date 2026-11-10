@@ -25,6 +25,9 @@ import { readListFile } from './roster-list-file.mjs';
  *                             (no marketplace search)
  *   --parse-only              structure only: read the list, fetch nothing
  *   --import                  import READY rows into the video's roster afterwards
+ *   --evaluation-roster       (with --local) also write evaluation-roster.json: the READY
+ *                             rows as resolver mappings with the draft seed-replacement plan
+ *                             applied. For an isolated replay worker only; never production.
  *
  * Writes review.md (products on a page), roster.csv (editable, can be fed back
  * in), report.json and manifest.json.
@@ -37,10 +40,10 @@ const RESOLVE_BATCH = 8;
 // well inside a Worker invocation's subrequest budget.
 const RESOLVE_LINK_BUDGET = 16;
 const IMPORT_BATCH = 6;
-const USAGE = 'Usage: node tools/roster-intake.mjs [video-url-or-id] <list-file|-> [--brand X] [--object-type TYPE] [--out dir] [--local] [--parse-only] [--import]';
+const USAGE = 'Usage: node tools/roster-intake.mjs [video-url-or-id] <list-file|-> [--brand X] [--object-type TYPE] [--out dir] [--local] [--parse-only] [--import] [--evaluation-roster]';
 
 export function parseArgs(argv) {
-  const options = { brand: null, objectType: null, out: null, import: false, local: false, parseOnly: false, positional: [] };
+  const options = { brand: null, objectType: null, out: null, import: false, local: false, parseOnly: false, evaluationRoster: false, positional: [] };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--brand') options.brand = argv[++i] ?? null;
@@ -49,6 +52,7 @@ export function parseArgs(argv) {
     else if (arg === '--import') options.import = true;
     else if (arg === '--local') options.local = true;
     else if (arg === '--parse-only') options.parseOnly = true;
+    else if (arg === '--evaluation-roster') options.evaluationRoster = true;
     else if (arg.startsWith('--')) throw new Error(`Unknown option ${arg}`);
     else options.positional.push(arg);
   }
@@ -105,6 +109,7 @@ export async function runRosterIntake({ video, list, defaults = {}, importReady 
   return {
     video: built.video, summary: built.summary, items: resolved, warnings: parsed.warnings, manifest: built.manifest,
     review_markdown: built.review_markdown, roster_csv: built.roster_csv ?? null, imported,
+    seed_replacement_plan: built.seed_replacement_plan ?? null, evaluation_roster: built.evaluation_roster ?? null,
   };
 }
 
@@ -134,6 +139,7 @@ export async function localPoster({ fetchPages = true, dist = new URL('../apps/a
     return import(pathToFileURL(fileURLToPath(file)).href);
   };
   const intake = await load('roster-intake.js');
+  const replacement = await load('roster-seed-replacement.js');
   let deps = null;
   if (fetchPages) {
     const [catalog, images] = [await load('partner-catalog.js'), await load('candidate-images.js')];
@@ -156,12 +162,17 @@ export async function localPoster({ fetchPages = true, dist = new URL('../apps/a
     if (body.action === 'resolve') {
       return { video: stated, items: deps ? await intake.resolveRosterIntake(body.items, deps) : body.items.map(intake.uncheckedIntakeItem) };
     }
+    // Hand-seeded rows already exist for some videos. The plan says which of
+    // them the READY variants would replace; it is a draft and changes nothing.
+    const plan = replacement.planSeedReplacement(stated, body.items);
     return {
       video: stated,
       summary: intake.summarizeIntake(body.items),
       manifest: intake.buildRosterManifest(stated, body.items),
       review_markdown: intake.renderIntakeReview(stated, body.items, body.warnings ?? []),
       roster_csv: intake.renderIntakeCsv(body.items),
+      seed_replacement_plan: plan.entries.length ? plan : null,
+      evaluation_roster: replacement.rosterMappingsWithPlan(stated, body.items, plan, { applyDraft: true }),
     };
   };
 }
@@ -175,6 +186,7 @@ async function main() {
   if (!local && !hasApi) throw new Error('SCOOP_API_URL (HTTPS) and SCOOP_ADMIN_SESSION are required. To run on this machine without them, add --local (or --parse-only to just read the list).');
   if (args.import && !hasApi) throw new Error('--import needs SCOOP_API_URL (HTTPS) and SCOOP_ADMIN_SESSION');
   if (args.import && args.parseOnly) throw new Error('--parse-only checks nothing, so there is nothing to import');
+  if (args.evaluationRoster && !args.local) throw new Error('--evaluation-roster needs --local');
   const list = readListFile(args.listFile);
   const defaults = { ...(args.brand ? { brand: args.brand } : {}), ...(args.objectType ? { object_type: args.objectType } : {}) };
   const apiPost = hasApi ? poster(base, session) : null;
@@ -185,8 +197,14 @@ async function main() {
   writeFileSync(join(out, 'review.md'), result.review_markdown);
   if (result.roster_csv) writeFileSync(join(out, 'roster.csv'), result.roster_csv);
   writeFileSync(join(out, 'manifest.json'), `${JSON.stringify(result.manifest, null, 2)}\n`);
+  if (result.seed_replacement_plan) writeFileSync(join(out, 'seed-replacement-plan.json'), `${JSON.stringify(result.seed_replacement_plan, null, 2)}\n`);
+  if (args.evaluationRoster && result.evaluation_roster) writeFileSync(join(out, 'evaluation-roster.json'), `${JSON.stringify(result.evaluation_roster)}\n`);
   writeFileSync(join(out, 'report.json'), `${JSON.stringify({ video: result.video, summary: result.summary, imported: result.imported, warnings: result.warnings, items: result.items }, null, 2)}\n`);
-  console.log(JSON.stringify({ ...result.summary, imported: result.imported, review: join(out, 'review.md') }, null, 2));
+  console.log(JSON.stringify({
+    ...result.summary, imported: result.imported,
+    ...(result.seed_replacement_plan ? { seed_replacement: { status: result.seed_replacement_plan.status, ...result.seed_replacement_plan.summary } } : {}),
+    review: join(out, 'review.md'),
+  }, null, 2));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(error => { console.error(error.message); process.exitCode = 1; });
