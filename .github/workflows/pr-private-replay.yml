@@ -231,7 +231,11 @@ jobs:
           node tools/replay-scoop-har-resolver.mjs \
             "$RUNNER_TEMP/private-scoop.har" \
             "$RUNNER_TEMP/pr-replay-report.json" \
-            "$SCOOP_REPLAY_HAR_ENDPOINT"
+            "$SCOOP_REPLAY_HAR_ENDPOINT" || status=$?
+          # Roster handles, scores and decisions only.
+          pnpm --filter @vcl/api build > /dev/null
+          node tools/compare-roster-replay.mjs --replay-only "$RUNNER_TEMP/pr-replay-report.json" youtube "$SCOOP_REPLAY_CONTENT_REF"
+          exit "${status:-0}"
 
       # ---- Roster intake evaluation (only when intake_list is given) ----
       # Live intake reads the partner's seller pages and images from this runner.
@@ -317,9 +321,9 @@ jobs:
           path: |
             ${{ runner.temp }}/pr-replay-report.json
             ${{ runner.temp }}/pr-replay-baseline.json
-            ${{ runner.temp }}/intake/report.json
-            ${{ runner.temp }}/intake/review.md
-            ${{ runner.temp }}/intake/seed-replacement-plan.json
+            # Intake outputs (report, review, plan) contain the partner's listing
+            # links and are deliberately NOT uploaded: artifacts of a public
+            # repository can be downloaded by any signed-in GitHub user.
             ${{ runner.temp }}/wrangler-dev*.log
           if-no-files-found: warn
           retention-days: 3

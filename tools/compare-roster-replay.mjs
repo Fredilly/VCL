@@ -91,11 +91,13 @@ const shortId = id => (id ?? '').replace(/^vr-[a-z0-9_-]{4,20}?-(?=\d{1,3}-)/i, 
  * Agreement here is a sanity signal for ranking quality, never accuracy.
  */
 export function rankingDiagnostics(replay, roster = []) {
+  // A family is an outline section for intake variants, and the row itself for
+  // hand-seeded rows (each seed is one family).
+  const familyOf = id => sectionOf(id) ?? flat(id);
   const windows = new Map();
   for (const row of roster) {
-    const section = sectionOf(row.product_id);
-    if (section == null || typeof row.candidate_window_start_ms !== 'number') continue;
-    windows.set(section, [row.candidate_window_start_ms, row.candidate_window_end_ms]);
+    if (typeof row.candidate_window_start_ms !== 'number' || typeof row.candidate_window_end_ms !== 'number') continue;
+    windows.set(familyOf(row.product_id), [row.candidate_window_start_ms, row.candidate_window_end_ms]);
   }
   const cases = (replay.rows ?? []).map((row, index) => {
     const scored = (row.current?.scores ?? []).filter(score => typeof score.similarity === 'number')
@@ -107,8 +109,12 @@ export function rankingDiagnostics(replay, roster = []) {
       window_section: inWindow.length === 1 ? inWindow[0] : null,
       scored: scored.length, unscored: (row.current?.scores ?? []).length - scored.length,
       top: scored.slice(0, 6).map(score => `${shortId(score.id)} ${score.similarity.toFixed(2)}/${(score.confidence ?? 0).toFixed(2)}/${score.details}`),
-      top_section: scored.length ? sectionOf(scored[0].id) : null,
-      top3_sections: [...new Set(scored.slice(0, 3).map(score => sectionOf(score.id)))],
+      top_section: scored.length ? familyOf(scored[0].id) : null,
+      top3_sections: [...new Set(scored.slice(0, 3).map(score => familyOf(score.id)))],
+      window_rank: inWindow.length === 1 ? (() => { const at = scored.findIndex(score => familyOf(score.id) === inWindow[0]); return at < 0 ? null : at + 1; })() : null,
+      decision: row.current?.mapping_reason ?? null, class: row.current?.top_class ?? null,
+      identity: row.current?.top_class === 'EXACT' ? row.current?.top_identity ?? null : null,
+      latency_ms: row.current?.latency_ms ?? null,
       margin: scored.length > 1 ? Number((scored[0].similarity - scored[1].similarity).toFixed(2)) : null,
       confident_090: scored.filter(score => (score.confidence ?? 0) >= 0.9).length,
     };
@@ -197,7 +203,20 @@ export function accuracy(replay, labels, options = {}) {
   };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+async function replayOnly(reportFile, platform, contentRef) {
+  // Seeds-only replay: windows come from the public seeds for this video.
+  const replay = read(reportFile);
+  let roster = [];
+  try {
+    const { seedsForVideo } = await import(new URL('../apps/api/dist/src/roster-seed-replacement.js', import.meta.url).href);
+    roster = seedsForVideo({ platform, content_ref: contentRef });
+  } catch { /* no build: ranking is still printed, without windows */ }
+  console.log(JSON.stringify({ replay: replayMetrics(replay, roster), verifier_ranking: rankingDiagnostics(replay, roster) }, null, 1));
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv[2] === '--replay-only') {
+  await replayOnly(process.argv[3], process.argv[4] ?? 'youtube', process.argv[5] ?? '');
+} else if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [intakeDir, rosterReplay, baselineReplay, labelsFile] = process.argv.slice(2);
   if (!intakeDir) throw new Error('Usage: node tools/compare-roster-replay.mjs <intake-dir> [roster-replay.json] [baseline-replay.json] [labels.json]');
   const report = read(resolve(intakeDir, 'report.json'));
