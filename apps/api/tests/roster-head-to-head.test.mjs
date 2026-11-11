@@ -24,7 +24,7 @@ function environment() {
 const catalog = { mimeType: 'image/png', data: btoa('catalog reference bytes') };
 const crop = { mimeType: 'image/png', data: btoa('selected crop bytes') };
 const deps = { metadata: async () => { throw new Error('explicit rows must not refetch pages'); }, image: async () => catalog };
-const description = { category: 'accessories', subcategory: 'bag', brand_candidate: 'Louis Vuitton', model_candidate: null, color: 'brown', material: 'canvas', visible_text: [], logos_markings: [], distinctive_features: [], shape_silhouette: [], style_attributes: [], hardware_details: [], search_terms: [], confidence: .9, identity_confidence: 0 };
+const description = { category: 'accessories', subcategory: 'bag', brand_candidate: 'Louis Vuitton', model_candidate: 'Guessed Alma BB', contextual_text: ['page said Keepall'], color: 'brown', material: 'canvas', visible_text: [], logos_markings: [], distinctive_features: [], shape_silhouette: [], style_attributes: [], hardware_details: [], search_terms: ['guessed alma bb bag'], confidence: .9, identity_confidence: .8 };
 const evidence = { subtype: { value: 'bag', confidence: .98, basis: 'image' }, color: { value: 'brown', confidence: .98, basis: 'image' } };
 
 // Eight variants across three families; the first one is a video-local identity.
@@ -40,7 +40,7 @@ async function resolve({ stage, round = () => null, failBatchWith = null }) {
   const rows = await learning.preparePartnerRoster(env, 'https://api.scoop.shop', { platform: 'youtube', content_ref: 'video-A', offers }, deps);
   await learning.ingestPartnerRoster(env, rows);
   Object.assign(env, { GEMINI_API_KEY: 'test-only', BRAVE_SEARCH_API_KEY: 'test-only', BENCHMARK_MODE: 'true' });
-  const calls = { stage: 0, round: 0, roundOrder: null };
+  const calls = { stage: 0, round: 0, roundOrder: null, told: [] };
   let server;
   server = loadModule(new URL('../src/server.ts', import.meta.url).pathname, { console: { error() {}, warn() {} },
     fetch: async (url, options) => {
@@ -50,6 +50,7 @@ async function resolve({ stage, round = () => null, failBatchWith = null }) {
       if (host === 'generativelanguage.googleapis.com') {
         const request = JSON.parse(options.body);
         const isRound = request.systemInstruction.parts[0].text.includes('close alternatives');
+        calls.told.push(request.contents[0].parts.map(part => part.text ?? '').join(' '));
         const listed = request.contents[0].parts.flatMap(part => {
           try { const value = JSON.parse(part.text); return typeof value.index === 'number' ? [value] : []; } catch { return []; }
         });
@@ -68,7 +69,7 @@ async function resolve({ stage, round = () => null, failBatchWith = null }) {
     } });
   const response = await server.default.fetch(new Request('https://api.scoop.shop/resolve-products', { method: 'POST',
     headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, source_image: `data:${crop.mimeType};base64,${crop.data}`,
-      context: { platform: 'youtube', content_ref: 'video-A', timestamp_ms: 9000 } }),
+      context: { platform: 'youtube', content_ref: 'video-A', timestamp_ms: 9000, title: 'My Keepall and Alma haul' } }),
   }), env);
   const result = await response.json();
   assert.equal(response.status, 200, JSON.stringify(result).slice(0, 400));
@@ -96,6 +97,15 @@ test('a clear winner on a roster of lookalikes becomes Exact after winning the h
   assert.equal(top.model, null);
   assert.ok(!(top.verification_reasons ?? []).some(reason => /verified SKU/i.test(reason)));
   assert.equal(result.products.filter(product => product.result_class === 'EXACT').length, 1);
+  // The verifier was shown pixels and physical description only: no upstream
+  // brand/model guess, no search terms, no page title or context to repeat back.
+  assert.equal(calls.told.length, 3);
+  for (const told of calls.told) {
+    assert.doesNotMatch(told, /Guessed Alma|guessed alma|Keepall|haul/);
+    assert.match(told, /"model_candidate":null/);
+    assert.match(told, /"brand_candidate":null/);
+    assert.match(told, /"material":"canvas"/);
+  }
 });
 
 test('a rival that closes in during the round stops the Exact; the likely products are shown as SIMILAR instead', async () => {

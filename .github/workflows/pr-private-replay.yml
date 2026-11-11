@@ -33,6 +33,12 @@ on:
         description: 'Optional: repo path of a partner list. Runs live roster intake on it and replays against that roster (seeds it replaces are superseded in the local worker only)'
         required: false
         default: ''
+      structured_output:
+        description: 'Verifier schema-enforced output (true is the product default; false to compare)'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true','false']
       baseline:
         description: 'With intake_list: also replay the same cases against the current seeds first (doubles resolver calls)'
         required: false
@@ -180,6 +186,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
           SERPAPI_API_KEY: ${{ secrets.SERPAPI_API_KEY }}
+          STRUCTURED_OUTPUT: ${{ inputs.structured_output }}
         run: |
           set -euo pipefail
           umask 077
@@ -203,6 +210,7 @@ jobs:
             value="${!name:-}"
             [ -n "$value" ] && printf '%s=%s\n' "$name" "$value" >> apps/api/.dev.vars
           done
+          [ "$STRUCTURED_OUTPUT" = 'false' ] && printf 'VERIFIER_STRUCTURED_OUTPUT=false\n' >> apps/api/.dev.vars || true
 
       - name: Start local worker
         if: inputs.intake_list == ''

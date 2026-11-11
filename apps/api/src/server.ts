@@ -44,7 +44,7 @@ import { fetchPartnerCatalogMetadata } from './partner-catalog.js';
 import { fetchCatalogImage } from './candidate-images.js';
 import { preparePartnerRoster, ingestPartnerRoster, buildCorrectionBundle, cacheLearningImage, learningImage, persistCorrectionBundle, assetDigest, type RosterOfferInput, type CorrectionBundle } from './partner-learning.js';
 import { verifiedLedgerRequest } from './verified-product-ledger.js';
-import { rosterFallbackDescription, rosterFallbackRetrievalDescription } from './roster-fallback.js';
+import { rosterFallbackDescription, rosterFallbackRetrievalDescription, rosterVerifierDescription } from './roster-fallback.js';
 import { scopedPartnerRosterCandidates, supersededProductIds, verifiedRosterCanonicalRowsForContent, withoutSuperseded } from './partner-roster.js';
 import { isVideoLocalIdentity } from './canonical-product-memory.js';
 export { AlphaAccessLedger } from './alpha-access.js';
@@ -97,6 +97,8 @@ export interface Env {
   VERIFIER_CONCURRENCY?: string;
   VERIFIER_PACING_MS?: string;
   VERIFIER_MAX_ATTEMPTS?: string;
+  /** 'false' turns off schema-enforced verifier output (OpenRouter). Default on. */
+  VERIFIER_STRUCTURED_OUTPUT?: string;
 }
 
 /**
@@ -105,7 +107,7 @@ export interface Env {
  * clamped in compareCandidateImages; an absent or invalid value falls back to
  * the built-in default rather than failing the request.
  */
-export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIER_PACING_MS' | 'VERIFIER_MAX_ATTEMPTS'>, useOpenRouter: boolean): VerifierOptions {
+export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIER_PACING_MS' | 'VERIFIER_MAX_ATTEMPTS' | 'VERIFIER_STRUCTURED_OUTPUT'>, useOpenRouter: boolean): VerifierOptions {
   const concurrency = Number(env.VERIFIER_CONCURRENCY);
   const pacing = Number(env.VERIFIER_PACING_MS);
   const attempts = Number(env.VERIFIER_MAX_ATTEMPTS);
@@ -114,6 +116,7 @@ export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIE
     ...(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 4 ? { concurrency } : {}),
     ...(Number.isFinite(pacing) && pacing >= 0 && pacing <= 5000 ? { pacingMs: pacing } : {}),
     ...(Number.isInteger(attempts) && attempts >= 1 && attempts <= 3 ? { maxAttempts: attempts } : {}),
+    ...(env.VERIFIER_STRUCTURED_OUTPUT === 'false' ? { structuredOutput: false } : {}),
   };
 }
 
@@ -992,13 +995,17 @@ async function confirmSameVideoReuseWithImage(
   };
 
   const budget = imageRequestBudget();
+  // The verifier compares pixels with pixels. It is not told the upstream
+  // brand/model guess or the page title: it repeats them as its own reading of
+  // the click, and that reading then vetoes correctly matched roster products.
+  const seen = rosterVerifierDescription(description);
   const images = await compareCandidateImages(
     key,
     model,
     sourceImage,
-    description,
+    seen,
     rows.map((row) => row.product),
-    context,
+    undefined,
     budget,
     verifierOptions(env, useOpenRouter),
   ).catch(() => null);
@@ -1063,9 +1070,9 @@ async function confirmSameVideoReuseWithImage(
         key,
         model,
         sourceImage,
-        description,
+        seen,
         recoveredRows.map((row) => row.product),
-        context,
+        undefined,
         budget,
         verifierOptions(env, useOpenRouter),
       ).catch(() => null);
@@ -1128,7 +1135,7 @@ async function confirmSameVideoReuseWithImage(
       return product ? [{ canonicalKey, product }] : [];
     });
     const round = finalists.length === order.length ? await compareCandidateImages(
-      key, model, sourceImage, description, finalists.map(finalist => finalist.product), context, budget,
+      key, model, sourceImage, seen, finalists.map(finalist => finalist.product), undefined, budget,
       { ...verifierOptions(env, useOpenRouter), headToHead: true },
     ).catch(() => null) : null;
     const roundComparisons = new Map<string, ImageComparison>();

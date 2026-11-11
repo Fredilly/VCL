@@ -83,6 +83,10 @@ export function replayMetrics(replay, roster = []) {
     // an Exact, or a SIMILAR suggestion. Before this change it was always 0.
     roster_backed_top: tally(current.filter(value => rosterBacked(value.top_identity)).map(value => value.top_class)),
     head_to_head: tally(current.filter(value => value.head_to_head).map(value => value.head_to_head.outcome)),
+    // A click where the model provider rate-limited or dropped out is not a
+    // product result either way. Counted apart, as AGENTS.md requires.
+    provider_blocked_cases: current.filter(value => Object.keys(value.visual_failure_reasons ?? {}).some(reason => /^model_(http_429|provider_unavailable|timeout|fetch)$/.test(reason))).length,
+    cost_usd: Number(current.reduce((sum, value) => sum + (Number.isFinite(value.cost_usd) ? value.cost_usd : 0), 0).toFixed(4)),
     latency_ms: { p50: percentile(current.map(value => value.latency_ms), 0.5), p95: percentile(current.map(value => value.latency_ms), 0.95) },
     acceptance: replay.acceptance?.status ?? null,
   };

@@ -343,6 +343,8 @@ export type VerifierOptions = {
    * these are close alternatives it has to tell apart.
    */
   headToHead?: boolean;
+  /** OpenRouter only: ask for schema-enforced output (default true). */
+  structuredOutput?: boolean;
 };
 
 const HEAD_TO_HEAD_SUFFIX = ` The numbered candidates are close alternatives from one product list, and at most one of them is the selected object. Judge each on its own against the crop. Look for what separates them: size and proportions, colour, pattern, material, hardware, handles and straps, closures. Give high similarity only to a candidate whose distinguishing details are actually visible in the crop; when the crop cannot tell two candidates apart, give both the same moderate similarity and low confidence.`;
@@ -363,7 +365,7 @@ export async function compareCandidateImages(
   // Structured output is requested from OpenRouter first. If the routed
   // endpoint refuses the schema, the rest of this interaction uses plain JSON
   // mode, exactly as before.
-  let structuredOutput = verificationProvider === 'openrouter';
+  let structuredOutput = verificationProvider === 'openrouter' && options.structuredOutput !== false;
   // Pacing is shared across concurrent batches so the aggregate call rate is
   // bounded, not just each batch's. Retries go through the same gate.
   let nextSlotAt = 0;

@@ -15,6 +15,29 @@ export function rosterFallbackDescription(description: ObjectDescription): Objec
 }
 
 /**
+ * What the visual verifier is told about the click when it compares it with a
+ * video's roster: what can be seen, and nothing that was guessed.
+ *
+ * The verifier reports its own reading of the click (brand, model, colour ...)
+ * and a firm reading that disagrees with a candidate vetoes that candidate.
+ * Handed the upstream brand/model guess, a small model repeats it as if it had
+ * read it off the pixels, and the guess then vetoes the correct roster product
+ * whenever the roster words it differently. Text actually readable in the
+ * frame stays: that is evidence. The guess, the search terms derived from it
+ * and the surrounding page context do not.
+ */
+export function rosterVerifierDescription(description: ObjectDescription): ObjectDescription {
+  return {
+    ...description,
+    brand_candidate: null,
+    model_candidate: null,
+    identity_confidence: 0,
+    search_terms: [],
+    contextual_text: [],
+  };
+}
+
+/**
  * Retrieval may use the model's family guess as one bounded search hypothesis,
  * but verification must continue to use rosterFallbackDescription().
  *
