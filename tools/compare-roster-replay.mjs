@@ -80,29 +80,50 @@ export function replayMetrics(replay, roster = []) {
   };
 }
 
-/** Reviewed labels: [{ case_id, expected_identity | expected_sku, in_roster }] or { cases: [...] }. */
+/** Ground truth is per selection, not a proxy inferred from timestamps. */
 export function accuracy(replay, labels) {
-  if (!labels) return { status: 'NOT_MEASURABLE', reason: 'No reviewed labels were available to this run. SKU accuracy and false EXACT cannot be computed from an unlabeled replay.' };
-  const list = Array.isArray(labels) ? labels : labels.cases ?? [];
-  const byCase = new Map(list.map(label => [label.case_id, label]));
-  let labeled = 0, exactCorrect = 0, exactWrong = 0, exactOnUnlabeled = 0, missed = 0;
+  if (!labels) return { status: 'NOT_MEASURABLE', reason: 'No reviewed labels supplied; do not infer correct SKU accuracy from EXACT count.' };
+  const list = Array.isArray(labels) ? labels : labels.cases;
+  if (!Array.isArray(list)) return { status: 'NOT_MEASURABLE', reason: 'Unsupported reviewed-label schema.' };
+  const byCase = new Map();
+  for (const label of list) {
+    if (typeof label.case_id !== 'string' || byCase.has(label.case_id)) return { status: 'NOT_MEASURABLE', reason: 'Labels must have unique case_id strings.' };
+    byCase.set(label.case_id, label);
+  }
+  let inRoster = 0, outOfRoster = 0, ambiguous = 0, correct = 0, wrong = 0, misses = 0;
+  let falseExact = 0, cleanReject = 0, outFallback = 0, matched = 0, exactOnUnlabeled = 0;
   for (const row of replay.rows ?? []) {
     const label = byCase.get(row.case_id);
     const isExact = row.current?.top_class === 'EXACT';
     if (!label) { if (isExact) exactOnUnlabeled++; continue; }
-    labeled++;
+    matched++;
+    const classification = label.in_roster === true ? 'IN' : label.in_roster === false ? 'OUT' : 'AMBIGUOUS';
+    if (classification === 'AMBIGUOUS') { ambiguous++; continue; }
+    const actual = flat(handle(row.current?.top_identity) ?? '');
+    if (classification === 'OUT') {
+      outOfRoster++;
+      if (isExact) falseExact++;
+      else if (!row.current?.top_identity && (row.current?.mapping_reason === 'visual_rejected' || row.current?.top_class === 'NONE')) cleanReject++;
+      else outFallback++;
+      continue;
+    }
+    inRoster++;
     const expected = flat(label.expected_identity ?? label.expected_sku ?? '');
-    const returned = flat(handle(row.current?.top_identity) ?? '');
-    if (isExact && expected && returned === expected) exactCorrect++;
-    else if (isExact) exactWrong++;
-    else if (expected && label.in_roster !== false) missed++;
+    if (!expected) return { status: 'NOT_MEASURABLE', reason: 'In-roster labels require an expected_identity or expected_sku; do not report misleading accuracy.' };
+    if (isExact && actual && actual === expected) correct++;
+    else if (isExact) { wrong++; falseExact++; }
+    else misses++;
   }
-  if (!labeled) return { status: 'NOT_MEASURABLE', reason: 'A labels file was supplied but none of its case ids match this replay.' };
+  if (!matched || (!inRoster && !outOfRoster)) return { status: 'NOT_MEASURABLE', reason: 'No scored case ids match the replay.' };
   return {
-    status: 'MEASURED', labeled_cases: labeled, exact_correct: exactCorrect, false_exact: exactWrong, missed_in_roster: missed,
+    status: 'MEASURED', matched_labels: matched, in_roster_cases: inRoster, out_of_roster_cases: outOfRoster,
+    ambiguous_excluded: ambiguous, correct_in_roster_exact: correct, wrong_in_roster_exact: wrong,
+    missed_in_roster: misses, clean_out_of_roster_rejections: cleanReject,
+    non_exact_out_of_roster_fallbacks: outFallback, false_exact: falseExact,
     exact_on_unlabeled_cases: exactOnUnlabeled,
-    sku_accuracy: Number((exactCorrect / labeled).toFixed(4)),
-    false_exact_rate: Number((exactWrong / labeled).toFixed(4)),
+    in_roster_exact_accuracy: inRoster ? Number((correct / inRoster).toFixed(4)) : null,
+    out_of_roster_clean_rejection_rate: outOfRoster ? Number((cleanReject / outOfRoster).toFixed(4)) : null,
+    false_exact_count: falseExact,
   };
 }
 
