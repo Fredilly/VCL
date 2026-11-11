@@ -302,12 +302,19 @@ jobs:
           node tools/roster-intake.mjs "$INTAKE_LIST" --local --evaluation-roster --out "$RUNNER_TEMP/intake"
           node - "$RUNNER_TEMP/intake/report.json" <<'JS'
           const report = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
-          console.log('row | status | identity | offers (host:page:availability) | image | reasons');
-          for (const item of report.items) {
-            const offers = (item.offers ?? []).map(o => `${o.provider}:${o.page}:${o.availability}`).join(' ');
-            console.log([item.index, item.status, item.sku_source, offers || '-', item.verified_image ? 'image' : 'no-image',
-              [...item.reasons, ...(item.rejected_links ?? []).map(l => `rejected:${l.reason}`)].map(r => r.split(':').slice(0, 2).join(':')).join(',') || '-'].join(' | '));
-          }
+          // Never print seller links, product names or private roster details in
+          // a public repository's Actions logs.
+          const tally = key => report.items.reduce((acc, row) => {
+            const status = row[key] ?? 'unknown';
+            acc[status] = (acc[status] ?? 0) + 1;
+            return acc;
+          }, {});
+          console.log(JSON.stringify({
+            variants: report.items.length,
+            status_counts: tally('status'),
+            image_ready: report.items.filter(item => item.verified_image).length,
+            rejected_links: report.items.reduce((count, item) => count + (item.rejected_links?.length ?? 0), 0),
+          }));
           JS
 
       - name: Replay against seeds, then against the intake roster
@@ -370,7 +377,6 @@ jobs:
             # Intake outputs (report, review, plan) contain the partner's listing
             # links and are deliberately NOT uploaded: artifacts of a public
             # repository can be downloaded by any signed-in GitHub user.
-            ${{ runner.temp }}/wrangler-dev*.log
           if-no-files-found: warn
           retention-days: 3
 
