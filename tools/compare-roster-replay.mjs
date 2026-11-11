@@ -20,7 +20,10 @@ import { fileURLToPath } from 'node:url';
 
 const read = file => JSON.parse(readFileSync(file, 'utf8'));
 const tally = values => values.reduce((out, value) => ({ ...out, [value ?? 'none']: (out[value ?? 'none'] ?? 0) + 1 }), {});
-const handle = key => typeof key === 'string' ? key.replace(/^(verified|video-local):/, '').toLowerCase() : null;
+const handle = key => typeof key === 'string' ? key.replace(/^(verified|video-local|roster-candidate):/, '').toLowerCase() : null;
+/** Does the top result come from this video's roster (as Exact, or as a SIMILAR suggestion)? */
+const rosterBacked = key => typeof key === 'string' && /^(verified|video-local|roster-candidate):/.test(key);
+const percentile = (values, p) => { const sorted = values.filter(Number.isFinite).sort((a, b) => a - b); return sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))] : null; };
 const flat = value => (value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 
 export function intakeMetrics(report) {
@@ -76,6 +79,11 @@ export function replayMetrics(replay, roster = []) {
       return out;
     }, {}),
     exact_window_consistency_not_accuracy: tally(consistency),
+    // "Roster-backed" = the top result is a product from this video's list:
+    // an Exact, or a SIMILAR suggestion. Before this change it was always 0.
+    roster_backed_top: tally(current.filter(value => rosterBacked(value.top_identity)).map(value => value.top_class)),
+    head_to_head: tally(current.filter(value => value.head_to_head).map(value => value.head_to_head.outcome)),
+    latency_ms: { p50: percentile(current.map(value => value.latency_ms), 0.5), p95: percentile(current.map(value => value.latency_ms), 0.95) },
     acceptance: replay.acceptance?.status ?? null,
   };
 }
@@ -94,6 +102,9 @@ export function rankingDiagnostics(replay, roster = []) {
   // A family is an outline section for intake variants, and the row itself for
   // hand-seeded rows (each seed is one family).
   const familyOf = id => sectionOf(id) ?? flat(id);
+  // Result identity keys are normalised (no punctuation), so match them back to a roster id first.
+  const rosterIds = new Map(roster.map(row => [flat(row.product_id), row.product_id]));
+  const familyOfHandle = value => familyOf(rosterIds.get(flat(value)) ?? value);
   const windows = new Map();
   for (const row of roster) {
     if (typeof row.candidate_window_start_ms !== 'number' || typeof row.candidate_window_end_ms !== 'number') continue;
@@ -113,7 +124,12 @@ export function rankingDiagnostics(replay, roster = []) {
       top3_sections: [...new Set(scored.slice(0, 3).map(score => familyOf(score.id)))],
       window_rank: inWindow.length === 1 ? (() => { const at = scored.findIndex(score => familyOf(score.id) === inWindow[0]); return at < 0 ? null : at + 1; })() : null,
       decision: row.current?.mapping_reason ?? null, class: row.current?.top_class ?? null,
-      identity: row.current?.top_class === 'EXACT' ? row.current?.top_identity ?? null : null,
+      identity: rosterBacked(row.current?.top_identity) ? row.current.top_identity : null,
+      result_in_window_family: inWindow.length === 1 && rosterBacked(row.current?.top_identity)
+        ? familyOfHandle(handle(row.current.top_identity)) === inWindow[0] : null,
+      round: (row.current?.scores ?? []).filter(score => typeof score.round_similarity === 'number')
+        .map(score => `${shortId(score.id)} ${score.round_similarity.toFixed(2)}/${(score.round_confidence ?? 0).toFixed(2)}`),
+      head_to_head: row.current?.head_to_head?.outcome ?? null,
       latency_ms: row.current?.latency_ms ?? null,
       margin: scored.length > 1 ? Number((scored[0].similarity - scored[1].similarity).toFixed(2)) : null,
       confident_090: scored.filter(score => (score.confidence ?? 0) >= 0.9).length,
@@ -126,6 +142,9 @@ export function rankingDiagnostics(replay, roster = []) {
     cases_in_one_window: windowed.length,
     top1_in_window_family: windowed.filter(item => item.top_section === item.window_section).length,
     top3_include_window_family: windowed.filter(item => item.top3_sections.includes(item.window_section)).length,
+    roster_backed_results_in_one_window: cases.filter(item => item.result_in_window_family !== null).length,
+    roster_backed_results_in_window_family: cases.filter(item => item.result_in_window_family === true).length,
+    roster_backed_results_outside_window_family: cases.filter(item => item.result_in_window_family === false).length,
     mean_candidates_scored: cases.length ? Number((cases.reduce((sum, item) => sum + item.scored, 0) / cases.length).toFixed(1)) : 0,
     mean_candidates_with_confidence_090: cases.length ? Number((cases.reduce((sum, item) => sum + item.confident_090, 0) / cases.length).toFixed(1)) : 0,
     cases,

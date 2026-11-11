@@ -222,13 +222,118 @@ test('73-entry retrieval is bounded, reaches the evidence match at the tail and 
 
 test('missing or uncertain sibling comparison blocks live Exact, even when a nominee looks excellent', () => {
   const candidates = ['A', 'B'].map(key => rosterCandidate({ key, title: `Acme Orbit ${key}`, family: 'Orbit', color: 'white' }));
-  for (const evidence of [undefined, { ...comparison(.98), confidence: .4 }, { ...comparison(NaN), confidence: .99 }]) {
+  // A sibling nobody looked at (no comparison, or an unusable one) is missing evidence.
+  for (const evidence of [undefined, { ...comparison(NaN), confidence: .99 }]) {
     const comparisons = new Map([['A', comparison(.98)]]);
     if (evidence) comparisons.set('B', evidence);
     const result = reuse.resolveSameVideoReuse({ description: description(), candidates, comparisons, require_complete_comparisons: true });
     assert.equal(result.mapping, null);
     assert.equal(result.reason, 'incomplete_comparison');
   }
+  // A sibling that was examined but scored just as high, uncertainly, still blocks
+  // Exact: there is no match to act on, only a front-runner that must win a
+  // head-to-head round, and it cannot while the sibling stays this close.
+  const comparisons = new Map([['A', comparison(.98)], ['B', { ...comparison(.98), confidence: .4 }]]);
+  const held = reuse.resolveSameVideoReuse({ description: description(), candidates, comparisons, require_complete_comparisons: true });
+  assert.equal(held.mapping, null);
+  assert.equal(held.canonical_key, null);
+  assert.equal(held.reason, 'head_to_head_required');
+  assert.equal(held.front_runner.canonical_key, 'A');
+  assert.equal(JSON.stringify(held.head_to_head_rivals), JSON.stringify(['B']));
+  const round = reuse.confirmHeadToHead({ decision: held, comparisons });
+  assert.equal(round.mapping, null);
+  assert.equal(round.reason, 'ambiguous');
+});
+
+// ---- coverage: examined + head-to-head, instead of "the model must be 0.9-sure of every rejection" ----
+
+const roster = keys => keys.map(key => rosterCandidate({ key, title: `Acme Orbit ${key}`, family: 'Orbit', color: 'white' }));
+const live = (candidates, comparisons) => reuse.resolveSameVideoReuse({ description: description(), candidates, comparisons, require_complete_comparisons: true });
+// How a real verifier answers: sure of the match, only fairly sure of each rejection.
+const unsure = similarity => ({ ...comparison(similarity), confidence: .75 });
+
+test('a fully examined roster with one strict winner yields a front-runner, never a match on its own', () => {
+  const candidates = roster(['A', 'B', 'C', 'D', 'E']);
+  const comparisons = new Map([['A', comparison(.95)], ['B', unsure(.6)], ['C', unsure(.4)], ['D', unsure(.3)], ['E', unsure(.1)]]);
+  const held = live(candidates, comparisons);
+  // Before: 'incomplete_comparison' on every click, because no rejection reached 0.9 confidence.
+  assert.equal(held.reason, 'head_to_head_required');
+  assert.equal(held.mapping, null);
+  assert.equal(held.front_runner.canonical_key, 'A');
+  // The three closest rivals go into the round, closest first.
+  assert.equal(JSON.stringify(held.head_to_head_rivals), JSON.stringify(['B', 'C', 'D']));
+  assert.equal(reuse.ROSTER_RIVAL_MARGIN, 0.15);
+});
+
+test('the head-to-head round promotes the front-runner only when it wins again, clearly', () => {
+  const candidates = roster(['A', 'B', 'C']);
+  const held = live(candidates, new Map([['A', comparison(.95)], ['B', unsure(.7)], ['C', unsure(.3)]]));
+  const round = entries => reuse.confirmHeadToHead({ decision: held, comparisons: new Map(entries) });
+
+  const won = round([['A', comparison(.93)], ['B', unsure(.5)], ['C', unsure(.2)]]);
+  assert.equal(won.reason, 'visual_confirmed');
+  assert.equal(won.canonical_key, 'A');
+  assert.equal(won.mapping.product_id, 'A');
+  // Reported strength is the weaker of the two looks.
+  assert.equal(won.visual_similarity, .93);
+
+  // A rival within the margin in the round: too close to call.
+  const close = round([['A', comparison(.93)], ['B', unsure(.80)], ['C', unsure(.2)]]);
+  assert.deepEqual([close.mapping, close.reason], [null, 'ambiguous']);
+  assert.equal(JSON.stringify(close.rival_keys), JSON.stringify(['A', 'B']));
+  // Exactly at the margin is clear; one step inside is not.
+  assert.equal(round([['A', comparison(.95)], ['B', unsure(.80)], ['C', unsure(.2)]]).reason, 'visual_confirmed');
+  // The front-runner no longer passes the strict check on a second look.
+  assert.deepEqual([round([['A', comparison(.85)], ['B', unsure(.3)], ['C', unsure(.2)]]).mapping, round([['A', comparison(.85)], ['B', unsure(.3)], ['C', unsure(.2)]]).reason], [null, 'ambiguous']);
+  assert.equal(round([['A', { ...comparison(.95), confidence: .8 }], ['B', unsure(.3)], ['C', unsure(.2)]]).reason, 'ambiguous');
+  // A rival missing from the round, or no round at all, is never a win.
+  assert.deepEqual([round([['A', comparison(.95)], ['B', unsure(.3)]]).mapping, round([['A', comparison(.95)], ['B', unsure(.3)]]).reason], [null, 'incomplete_comparison']);
+  assert.equal(round([]).reason, 'incomplete_comparison');
+  // A decision that is not waiting for a round cannot be promoted by one.
+  assert.equal(reuse.confirmHeadToHead({ decision: { mapping: null, canonical_key: null, confidence: 0, reason: 'ambiguous' }, comparisons: new Map([['A', comparison(.99)]]) }).mapping, null);
+});
+
+test('an unexamined candidate blocks even a clear winner; too many close rivals is ambiguous outright', () => {
+  const candidates = roster(['A', 'B', 'C', 'D', 'E', 'F']);
+  // F was never compared (failed batch / missing image).
+  const missing = live(candidates, new Map([['A', comparison(.97)], ['B', unsure(.2)], ['C', unsure(.2)], ['D', unsure(.2)], ['E', unsure(.2)]]));
+  assert.deepEqual([missing.mapping, missing.reason], [null, 'incomplete_comparison']);
+  assert.equal(JSON.stringify(reuse.unexaminedRosterCandidateKeys({ candidates, comparisons: new Map([['A', comparison(.97)], ['B', unsure(.2)]]) })), JSON.stringify(['C', 'D', 'E', 'F']));
+  // Four rivals within the margin cannot fit one round.
+  const crowded = live(candidates, new Map([['A', comparison(.95)], ['B', unsure(.9)], ['C', unsure(.9)], ['D', unsure(.85)], ['E', unsure(.85)], ['F', unsure(.2)]]));
+  assert.deepEqual([crowded.mapping, crowded.reason], [null, 'ambiguous']);
+  // No strict winner at all: unchanged, still incomplete.
+  const nobody = live(candidates, new Map(candidates.map(row => [row.identity.canonical_key, unsure(.85)])));
+  assert.deepEqual([nobody.mapping, nobody.reason], [null, 'incomplete_comparison']);
+  // Two strict winners: unchanged, never a match.
+  const two = live(roster(['A', 'B', 'C']), new Map([['A', comparison(.95)], ['B', comparison(.95)], ['C', unsure(.2)]]));
+  assert.equal(two.mapping, null);
+});
+
+test('the original strictest path is untouched: every candidate confidently settled resolves directly', () => {
+  const candidates = roster(['A', 'B']);
+  const settled = live(candidates, new Map([['A', comparison(.97)], ['B', comparison(.2)]]));
+  assert.equal(settled.reason, 'visual_confirmed');
+  assert.equal(settled.canonical_key, 'A');
+});
+
+test('probable roster candidates: strongly alike, specific, uncontradicted; best first, at most three', () => {
+  const candidates = roster(['A', 'B', 'C', 'D', 'E', 'F']);
+  const strong = (similarity, confidence = .85) => ({ ...comparison(similarity), confidence });
+  const contradicted = strong(.9);
+  contradicted.source = { ...contradicted.source, color: { value: 'white', confidence: .95, basis: 'image' } };
+  contradicted.candidate = { ...contradicted.candidate, color: { value: 'black', confidence: .95, basis: 'image' } };
+  const comparisons = new Map([
+    ['A', strong(.85)], ['B', strong(.9)], ['C', strong(.75)],            // C below the similarity bar
+    ['D', strong(.95, .7)],                                               // D not confident enough
+    ['E', contradicted],                                                  // E contradicted by pixels
+    ['F', { ...strong(.88), matching_details: ['black'] }],               // F has no specific shared detail
+  ]);
+  const probable = reuse.probableRosterCandidates({ candidates, comparisons });
+  assert.deepEqual(probable.map(row => row.candidate.identity.canonical_key), ['B', 'A']);
+  assert.equal(reuse.probableRosterCandidates({ candidates, comparisons: new Map() }).length, 0);
+  const many = new Map(candidates.map((row, index) => [row.identity.canonical_key, strong(.9 - index * .01)]));
+  assert.equal(reuse.probableRosterCandidates({ candidates, comparisons: many }).length, 3);
 });
 
 test('a deferred different category can be ruled out by independent pixels, never model guesses', () => {

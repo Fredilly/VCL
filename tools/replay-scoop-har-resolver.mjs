@@ -40,7 +40,12 @@ function summarize(response) {
         similarity: typeof score?.similarity === 'number' ? score.similarity : null,
         confidence: typeof score?.confidence === 'number' ? score.confidence : null,
         details: Number.isInteger(score?.details) ? score.details : 0,
+        ...(typeof score?.round_similarity === 'number' ? { round_similarity: score.round_similarity, round_confidence: typeof score?.round_confidence === 'number' ? score.round_confidence : null } : {}),
       })) : null,
+    head_to_head: response?.verified_mapping?.head_to_head && typeof response.verified_mapping.head_to_head === 'object'
+      ? { rivals: Number.isInteger(response.verified_mapping.head_to_head.rivals) ? response.verified_mapping.head_to_head.rivals : null,
+        outcome: typeof response.verified_mapping.head_to_head.outcome === 'string' ? response.verified_mapping.head_to_head.outcome.slice(0, 40) : null }
+      : null,
     roster_retrieved: Array.isArray(response?.verified_mapping?.roster_retrieval?.retrieved_keys) ? response.verified_mapping.roster_retrieval.retrieved_keys.length : null,
     roster_unresolved: Array.isArray(response?.verified_mapping?.roster_retrieval?.unresolved_keys) ? response.verified_mapping.roster_retrieval.unresolved_keys.length : null,
     roster_sources: response?.verified_mapping?.roster_sources && typeof response.verified_mapping.roster_sources === 'object'

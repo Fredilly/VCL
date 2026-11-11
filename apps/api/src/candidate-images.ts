@@ -185,11 +185,33 @@ const observationSchema = { type: 'OBJECT', properties: {
   value: { type: 'STRING', nullable: true }, confidence: { type: 'NUMBER' }, basis: { type: 'STRING', enum: ['image', 'metadata'] },
 }, required: ['value', 'confidence', 'basis'] };
 const evidenceSchema = { type: 'OBJECT', properties: Object.fromEntries(attributes.map((key) => [key, observationSchema])), required: [...attributes] };
+// The selected crop is pixels only, so its observations can only be basis "image".
+const sourceObservationSchema = { ...observationSchema, properties: { ...observationSchema.properties, basis: { type: 'STRING', enum: ['image'] } } };
+const sourceEvidenceSchema = { type: 'OBJECT', properties: Object.fromEntries(attributes.map((key) => [key, sourceObservationSchema])), required: [...attributes] };
 const responseSchema = { type: 'OBJECT', properties: {
-  source: evidenceSchema,
+  source: sourceEvidenceSchema,
   candidates: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
     index: { type: 'INTEGER' }, attributes: evidenceSchema, similarity: { type: 'NUMBER' }, confidence: { type: 'NUMBER' },
     matching_details: { type: 'ARRAY', items: { type: 'STRING' } },
+  }, required: ['index', 'attributes', 'similarity', 'confidence', 'matching_details'] } },
+}, required: ['source', 'candidates'] };
+
+// The same contract as responseSchema, as standard JSON Schema for providers
+// that take one (OpenRouter structured outputs). Two deliberate differences:
+// - the source block can only ever be basis "image": the selected crop has no
+//   metadata, and a provider that labelled its own pixels "metadata" used to
+//   get its whole batch of comparisons discarded;
+// - nothing optional, nothing extra, so a strict provider cannot omit a key.
+const jsonObservation = (basis: string[]) => ({ type: 'object', additionalProperties: false, properties: {
+  value: { type: ['string', 'null'] }, confidence: { type: 'number' }, basis: { type: 'string', enum: basis },
+}, required: ['value', 'confidence', 'basis'] });
+const jsonEvidence = (basis: string[]) => ({ type: 'object', additionalProperties: false,
+  properties: Object.fromEntries(attributes.map((key) => [key, jsonObservation(basis)])), required: [...attributes] });
+export const VERIFIER_JSON_SCHEMA = { type: 'object', additionalProperties: false, properties: {
+  source: jsonEvidence(['image']),
+  candidates: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
+    index: { type: 'integer' }, attributes: jsonEvidence(['image', 'metadata']), similarity: { type: 'number' }, confidence: { type: 'number' },
+    matching_details: { type: 'array', items: { type: 'string' } },
   }, required: ['index', 'attributes', 'similarity', 'confidence', 'matching_details'] } },
 }, required: ['source', 'candidates'] };
 
@@ -315,7 +337,15 @@ export type VerifierOptions = {
   maxAttempts?: number;
   /** Base backoff for retryable provider responses; doubles per attempt. */
   backoffMs?: number;
+  /**
+   * Head-to-head round: the candidates are a confirmed front-runner and its
+   * closest rivals. Same contract and thresholds; the model is only told that
+   * these are close alternatives it has to tell apart.
+   */
+  headToHead?: boolean;
 };
+
+const HEAD_TO_HEAD_SUFFIX = ` The numbered candidates are close alternatives from one product list, and at most one of them is the selected object. Judge each on its own against the crop. Look for what separates them: size and proportions, colour, pattern, material, hardware, handles and straps, closures. Give high similarity only to a candidate whose distinguishing details are actually visible in the crop; when the crop cannot tell two candidates apart, give both the same moderate similarity and low confidence.`;
 
 export async function compareCandidateImages(
   apiKey: string, model: string, source: Image, description: ObjectDescription,
@@ -330,6 +360,10 @@ export async function compareCandidateImages(
   const pacingMs = Math.max(0, Math.min(5000, options.pacingMs ?? 0));
   const maxAttempts = Math.max(1, Math.min(3, Math.trunc(options.maxAttempts ?? 2) || 2));
   const backoffMs = Math.max(0, Math.min(5000, options.backoffMs ?? 750));
+  // Structured output is requested from OpenRouter first. If the routed
+  // endpoint refuses the schema, the rest of this interaction uses plain JSON
+  // mode, exactly as before.
+  let structuredOutput = verificationProvider === 'openrouter';
   // Pacing is shared across concurrent batches so the aggregate call rate is
   // bounded, not just each batch's. Retries go through the same gate.
   let nextSlotAt = 0;
@@ -446,9 +480,12 @@ export async function compareCandidateImages(
       try {
         // One model call. Retries and recovery both go through this so the
         // request shape, usage accounting and timeouts stay identical.
-        const send = async (recovery: boolean): Promise<{ ok: boolean; status: number; text: string; retryAfterMs: number | null }> => {
+        const send = async (recovery: boolean): Promise<{ ok: boolean; status: number; text: string; retryAfterMs: number | null; structured?: boolean }> => {
           usage.requests++;
-          const system = recovery ? INSTRUCTIONS + RECOVERY_SUFFIX : INSTRUCTIONS;
+          // Read once: a concurrent batch may switch the shared flag mid-request.
+          const structured = structuredOutput;
+          const base = options.headToHead ? INSTRUCTIONS + HEAD_TO_HEAD_SUFFIX : INSTRUCTIONS;
+          const system = recovery ? base + RECOVERY_SUFFIX : base;
           const response = verificationProvider === 'openrouter'
             ? await fetch('https://openrouter.ai/api/v1/chat/completions', {
                 method: 'POST',
@@ -467,7 +504,9 @@ export async function compareCandidateImages(
                       ? { type: 'text', text: part.text }
                       : { type: 'image_url', image_url: { url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` } }) },
                   ],
-                  response_format: { type: 'json_object' },
+                  response_format: structured
+                    ? { type: 'json_schema', json_schema: { name: 'candidate_comparison', strict: true, schema: VERIFIER_JSON_SCHEMA } }
+                    : { type: 'json_object' },
                   temperature: 0,
                   max_tokens: 12000,
                   usage: { include: true },
@@ -485,7 +524,7 @@ export async function compareCandidateImages(
             // fixed backoff. Honour it, clamped so one interaction stays bounded.
             const retryAfter = Number(response.headers.get('retry-after'));
             await response.body?.cancel();
-            return { ok: false, status: response.status, text: '',
+            return { ok: false, status: response.status, text: '', structured,
               retryAfterMs: Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(15000, retryAfter * 1000) : null };
           }
           const payload = await response.json() as any;
@@ -523,13 +562,22 @@ export async function compareCandidateImages(
             if (delayMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
           }
           await pace();
-          let result: { ok: boolean; status: number; text: string; retryAfterMs: number | null };
+          let result: { ok: boolean; status: number; text: string; retryAfterMs: number | null; structured?: boolean };
           try {
             result = await send(attempt > 0);
           } catch (error) {
             reason = error instanceof Error && error.name === 'TimeoutError' ? 'model_timeout' : 'model_fetch';
             if (attempt + 1 < maxAttempts) { delayMs = Math.min(15000, backoffMs * 2 ** attempt); continue; }
             break;
+          }
+          if (!result.ok && result.status === 400 && result.structured) {
+            // The endpoint does not accept the schema. Plain JSON mode for the
+            // rest of this interaction; this batch repeats its request once
+            // without losing one of its attempts to a request-shape problem.
+            if (structuredOutput) failure('structured_output_unsupported');
+            structuredOutput = false;
+            attempt--;
+            continue;
           }
           if (!result.ok) {
             reason = `model_http_${result.status}`;

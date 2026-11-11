@@ -31,6 +31,7 @@ import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerc
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, parseVerifiedProductMappings, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { backfillLegacyAdminCanonicalMappings, consolidateCanonicalProducts, durableCanonicalCandidates, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
+import { confirmHeadToHead, probableRosterCandidates } from './same-video-verified-reuse.js';
 import { eligibleSameVideoCanonicalCandidates, resolveSameVideoReuse, identityWithTrustedVpmObservations, rankSameVideoRosterCandidates, retrieveSameVideoRosterCandidates, unresolvedRosterCandidateKeys, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, preferredCanonicalReference, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
@@ -800,6 +801,8 @@ export async function refreshVerifiedOffers(
 type SameVideoVisualCheck = {
   retrieval?: { roster_count: number; retrieved_keys: string[]; verified_keys: string[]; unresolved_keys: string[] };
   comparisons?: Record<string, ImageComparison>;
+  /** The head-to-head round, when one ran: how many rivals, and how it ended. */
+  head_to_head?: { rivals: number; outcome: SameVideoReuseDecision['reason']; comparisons: Record<string, ImageComparison> };
   decision: SameVideoReuseDecision;
   compared: number;
   failures: number;
@@ -1020,6 +1023,8 @@ async function confirmSameVideoReuseWithImage(
   // then run the same strict visual verifier again. Missing or rejected evidence
   // still fails closed; no generic lookalike can inherit Exact.
   let retryVerification: typeof images | null = null;
+  // Which product (image) each recovered candidate was actually compared with.
+  const recoveredProducts = new Map<string, ProductCandidate>();
   // Recover missing reference images across a full verifier batch, rather than
   // silently dropping every missing roster identity after the first two.
   // The shared request budget still caps fetches; recovered images must pass
@@ -1068,7 +1073,7 @@ async function confirmSameVideoReuseWithImage(
       if (retryVerification) {
         for (const row of recoveredRows) {
           const comparison = retryVerification.comparisons.get(candidateKey(row.product));
-          if (comparison) comparisons.set(row.identity.canonical_key, comparison);
+          if (comparison) { comparisons.set(row.identity.canonical_key, comparison); recoveredProducts.set(row.identity.canonical_key, row.product); }
         }
       }
     }
@@ -1099,19 +1104,71 @@ async function confirmSameVideoReuseWithImage(
     ],
   } : images.timing;
 
+  // Missing/blocked image evidence is candidate-local. Keep every successful
+  // comparison and let the existing strict visual threshold decide among them.
+  // Uncompared roster identities remain visible in retrieval telemetry.
+  let decision = resolveSameVideoReuse({ description, candidates: eligible, comparisons, require_complete_comparisons: true });
+
+  // Head-to-head round. One candidate passed the strict check and every roster
+  // candidate was examined; it becomes Exact only if it wins again in a call
+  // that sees just it and its closest rivals. The round spends what is left of
+  // this interaction's shared budget and nothing more: no budget, no Exact.
+  let headToHead: SameVideoVisualCheck['head_to_head'];
+  let roundUsage: typeof images.usage | null = null;
+  let roundTiming: typeof images.timing | null = null;
+  let roundCompared = 0;
+  if (decision.reason === 'head_to_head_required' && decision.front_runner) {
+    const comparedProduct = new Map(rows.map(row => [row.identity.canonical_key, row.product]));
+    for (const [canonicalKey, product] of recoveredProducts) comparedProduct.set(canonicalKey, product);
+    const rivals = decision.head_to_head_rivals ?? [];
+    // Rivals first, front-runner last, so list position cannot favour it.
+    const order = [...rivals, decision.front_runner.canonical_key];
+    const finalists = order.flatMap(canonicalKey => {
+      const product = comparedProduct.get(canonicalKey);
+      return product ? [{ canonicalKey, product }] : [];
+    });
+    const round = finalists.length === order.length ? await compareCandidateImages(
+      key, model, sourceImage, description, finalists.map(finalist => finalist.product), context, budget,
+      { ...verifierOptions(env, useOpenRouter), headToHead: true },
+    ).catch(() => null) : null;
+    const roundComparisons = new Map<string, ImageComparison>();
+    if (round) {
+      for (const finalist of finalists) {
+        const comparison = round.comparisons.get(candidateKey(finalist.product));
+        if (comparison) roundComparisons.set(finalist.canonicalKey, comparison);
+      }
+      roundUsage = round.usage;
+      roundTiming = round.timing;
+      roundCompared = round.compared;
+      for (const [reason, count] of Object.entries(round.failure_reasons ?? {})) failureReasons[reason] = (failureReasons[reason] ?? 0) + count;
+    }
+    decision = confirmHeadToHead({ decision, comparisons: roundComparisons });
+    headToHead = { rivals: rivals.length, outcome: decision.reason, comparisons: Object.fromEntries(roundComparisons) };
+  }
+
   return {
-    // Missing/blocked image evidence is candidate-local. Keep every successful
-    // comparison and let the existing strict visual threshold decide among them.
-    // Uncompared roster identities remain visible in retrieval telemetry.
-    decision: resolveSameVideoReuse({ description, candidates: eligible, comparisons, require_complete_comparisons: true }),
+    decision,
     retrieval: { ...retrieval, verified_keys: [...comparisons.keys()],
       unresolved_keys: unresolvedRosterCandidateKeys({ candidates: eligible, comparisons }) },
     comparisons: Object.fromEntries(comparisons),
-    compared: images.compared + (retryVerification?.compared ?? 0),
+    ...(headToHead ? { head_to_head: headToHead } : {}),
+    compared: images.compared + (retryVerification?.compared ?? 0) + roundCompared,
     failures: images.failures + (retryVerification?.failures ?? 0),
     failure_reasons: failureReasons,
-    usage,
-    timing,
+    usage: roundUsage ? {
+      ...usage,
+      requests: usage.requests + roundUsage.requests,
+      prompt_tokens: usage.prompt_tokens + roundUsage.prompt_tokens,
+      completion_tokens: usage.completion_tokens + roundUsage.completion_tokens,
+      total_tokens: usage.total_tokens + roundUsage.total_tokens,
+      ...((usage.cost_usd != null || roundUsage.cost_usd != null) ? { cost_usd: (usage.cost_usd ?? 0) + (roundUsage.cost_usd ?? 0) } : {}),
+    } : usage,
+    timing: roundTiming ? {
+      image_fetch_ms: timing.image_fetch_ms + roundTiming.image_fetch_ms,
+      model_ms: timing.model_ms + roundTiming.model_ms,
+      total_ms: timing.total_ms + roundTiming.total_ms,
+      batches: [...timing.batches, ...roundTiming.batches.map((batch, index) => ({ ...batch, batch_index: timing.batches.length + index }))],
+    } : timing,
   };
 }
 
@@ -2522,13 +2579,16 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           // Numbers and roster ids, never images, titles or model text.
           ...(benchmarkMode ? { roster_comparison_scores: canonicalRows.map((row) => {
             const comparison = sameVideoVisualCheck.comparisons?.[row.identity.canonical_key];
+            const round = sameVideoVisualCheck.head_to_head?.comparisons[row.identity.canonical_key];
             return {
               id: row.mapping.product_id,
               similarity: comparison?.similarity ?? null,
               confidence: comparison?.confidence ?? null,
               details: comparison?.matching_details?.length ?? 0,
+              ...(round ? { round_similarity: round.similarity, round_confidence: round.confidence } : {}),
             };
           }) } : {}),
+          ...(sameVideoVisualCheck.head_to_head ? { head_to_head: { rivals: sameVideoVisualCheck.head_to_head.rivals, outcome: sameVideoVisualCheck.head_to_head.outcome } } : {}),
           roster_sources: {
             configured: configuredCanonicalRows.length,
             alpha_seed: alphaCanonicalRows.length,
@@ -2656,6 +2716,36 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           resolved.timing.verification_batches.push(...sameVideoVisualCheck.timing.batches);
         }
       }
+      // No Exact from this video's roster, but the verifier found one or more
+      // roster products strongly alike. Show those, as SIMILAR, ahead of open-web
+      // results: the partner's own listing of the likely product is more useful
+      // than a web search, and it claims likeness, not identity.
+      const rosterSuggestions: ProductCandidate[] = probableRosterCandidates({
+        candidates: canonicalRows,
+        comparisons: new Map(Object.entries(sameVideoVisualCheck.comparisons ?? {})),
+      }).map(({ candidate, similarity, confidence }) => {
+        const base = verifiedMappingProduct(candidate.mapping);
+        return {
+          ...base,
+          id: `roster-candidate:${base.id}`,
+          result_class: 'SIMILAR' as const,
+          relationship: 'SIMILAR' as const,
+          identity_key: `roster-candidate:${verifiedIdentityKey(candidate.mapping.product_id)}`,
+          verification_status: 'multimodal' as const,
+          verification_image_similarity: similarity,
+          verification_image_confidence: confidence,
+          verification_score: Math.round(similarity * 100),
+          verification_reasons: ['strong visual match to a product in this video; not confirmed as the exact item'],
+        };
+      });
+      if (rosterSuggestions.length) {
+        const suggested = new Set(rosterSuggestions.map(product => product.destination));
+        const rest = resolved.products.filter(product => !product.destination || !suggested.has(product.destination));
+        const exactCount = rest.filter(product => product.result_class === 'EXACT').length;
+        // Anything already Exact stays on top; suggestions lead everything else.
+        resolved.products = [...rest.slice(0, exactCount), ...rosterSuggestions, ...rest.slice(exactCount)];
+        if (resolved.state === 'NO_RESULTS') resolved.state = 'RESULTS';
+      }
       const feedbackEvidenceKey = evidenceFingerprint(description);
       const feedbackFamilyKey = feedbackFamily({
         category: resolved.query.category,
@@ -2771,13 +2861,16 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           // Numbers and roster ids, never images, titles or model text.
           ...(benchmarkMode ? { roster_comparison_scores: canonicalRows.map((row) => {
             const comparison = sameVideoVisualCheck.comparisons?.[row.identity.canonical_key];
+            const round = sameVideoVisualCheck.head_to_head?.comparisons[row.identity.canonical_key];
             return {
               id: row.mapping.product_id,
               similarity: comparison?.similarity ?? null,
               confidence: comparison?.confidence ?? null,
               details: comparison?.matching_details?.length ?? 0,
+              ...(round ? { round_similarity: round.similarity, round_confidence: round.confidence } : {}),
             };
           }) } : {}),
+          ...(sameVideoVisualCheck.head_to_head ? { head_to_head: { rivals: sameVideoVisualCheck.head_to_head.rivals, outcome: sameVideoVisualCheck.head_to_head.outcome } } : {}),
           roster_sources: {
             configured: configuredCanonicalRows.length,
             alpha_seed: alphaCanonicalRows.length,
