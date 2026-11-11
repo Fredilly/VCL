@@ -995,9 +995,10 @@ async function confirmSameVideoReuseWithImage(
   };
 
   const budget = imageRequestBudget();
-  // The verifier compares pixels with pixels. It is not told the upstream
-  // brand/model guess or the page title: it repeats them as its own reading of
-  // the click, and that reading then vetoes correctly matched roster products.
+  // The verifier compares pixels with pixels. It is told which kind of object
+  // to look at and nothing the upstream model guessed about it, and no page
+  // title: it repeats those back as its own reading of the click, and that
+  // reading then vetoes correctly matched roster products.
   const seen = rosterVerifierDescription(description);
   const images = await compareCandidateImages(
     key,
@@ -1007,7 +1008,7 @@ async function confirmSameVideoReuseWithImage(
     rows.map((row) => row.product),
     undefined,
     budget,
-    verifierOptions(env, useOpenRouter),
+    { ...verifierOptions(env, useOpenRouter), pixelOnlySource: true },
   ).catch(() => null);
 
   if (!images) {
@@ -1074,7 +1075,7 @@ async function confirmSameVideoReuseWithImage(
         recoveredRows.map((row) => row.product),
         undefined,
         budget,
-        verifierOptions(env, useOpenRouter),
+        { ...verifierOptions(env, useOpenRouter), pixelOnlySource: true },
       ).catch(() => null);
 
       if (retryVerification) {
@@ -1136,7 +1137,7 @@ async function confirmSameVideoReuseWithImage(
     });
     const round = finalists.length === order.length ? await compareCandidateImages(
       key, model, sourceImage, seen, finalists.map(finalist => finalist.product), undefined, budget,
-      { ...verifierOptions(env, useOpenRouter), headToHead: true },
+      { ...verifierOptions(env, useOpenRouter), pixelOnlySource: true, headToHead: true },
     ).catch(() => null) : null;
     const roundComparisons = new Map<string, ImageComparison>();
     if (round) {

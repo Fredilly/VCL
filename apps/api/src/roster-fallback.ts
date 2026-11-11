@@ -16,15 +16,16 @@ export function rosterFallbackDescription(description: ObjectDescription): Objec
 
 /**
  * What the visual verifier is told about the click when it compares it with a
- * video's roster: what can be seen, and nothing that was guessed.
+ * video's roster: which kind of object to look at, and the text readable in
+ * the frame. Nothing else.
  *
- * The verifier reports its own reading of the click (brand, model, colour ...)
- * and a firm reading that disagrees with a candidate vetoes that candidate.
- * Handed the upstream brand/model guess, a small model repeats it as if it had
- * read it off the pixels, and the guess then vetoes the correct roster product
- * whenever the roster words it differently. Text actually readable in the
- * frame stays: that is evidence. The guess, the search terms derived from it
- * and the surrounding page context do not.
+ * The verifier reports its own reading of the click (brand, model, colour,
+ * material ...) and a firm reading that disagrees with a candidate vetoes that
+ * candidate. Handed the upstream description, a small model repeats it back as
+ * if it had read it off the pixels: the brand/model guess then vetoes the
+ * correct roster product whenever the roster words it differently, and a
+ * repeated colour or material can excuse a candidate nobody examined. The
+ * verifier has the crop; it can read colour and material for itself.
  */
 export function rosterVerifierDescription(description: ObjectDescription): ObjectDescription {
   return {
@@ -32,6 +33,13 @@ export function rosterVerifierDescription(description: ObjectDescription): Objec
     brand_candidate: null,
     model_candidate: null,
     identity_confidence: 0,
+    color: '',
+    material: '',
+    style_attributes: [],
+    logos_markings: [],
+    distinctive_features: [],
+    hardware_details: [],
+    shape_silhouette: [],
     search_terms: [],
     contextual_text: [],
   };

@@ -185,23 +185,27 @@ const observationSchema = { type: 'OBJECT', properties: {
   value: { type: 'STRING', nullable: true }, confidence: { type: 'NUMBER' }, basis: { type: 'STRING', enum: ['image', 'metadata'] },
 }, required: ['value', 'confidence', 'basis'] };
 const evidenceSchema = { type: 'OBJECT', properties: Object.fromEntries(attributes.map((key) => [key, observationSchema])), required: [...attributes] };
-// The selected crop is pixels only, so its observations can only be basis "image".
-const sourceObservationSchema = { ...observationSchema, properties: { ...observationSchema.properties, basis: { type: 'STRING', enum: ['image'] } } };
-const sourceEvidenceSchema = { type: 'OBJECT', properties: Object.fromEntries(attributes.map((key) => [key, sourceObservationSchema])), required: [...attributes] };
 const responseSchema = { type: 'OBJECT', properties: {
-  source: sourceEvidenceSchema,
+  source: evidenceSchema,
   candidates: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
     index: { type: 'INTEGER' }, attributes: evidenceSchema, similarity: { type: 'NUMBER' }, confidence: { type: 'NUMBER' },
     matching_details: { type: 'ARRAY', items: { type: 'STRING' } },
   }, required: ['index', 'attributes', 'similarity', 'confidence', 'matching_details'] } },
 }, required: ['source', 'candidates'] };
 
-// The same contract as responseSchema, as standard JSON Schema for providers
-// that take one (OpenRouter structured outputs). Two deliberate differences:
-// - the source block can only ever be basis "image": the selected crop has no
-//   metadata, and a provider that labelled its own pixels "metadata" used to
-//   get its whole batch of comparisons discarded;
-// - nothing optional, nothing extra, so a strict provider cannot omit a key.
+// Pixel-only rounds (the same-video roster check). The verifier is given the
+// crop and no upstream guess about it, so everything it reports about the crop
+// can only have come from the pixels. The schemas say so: the source block's
+// basis has one legal value. Without this, a provider that labelled its own
+// reading of the crop "metadata" had its whole batch of comparisons discarded
+// (18 batches in one 22-click replay).
+// Rounds that do pass a description keep the two-valued basis and the original
+// request shape, untouched.
+const pixelSourceObservationSchema = { ...observationSchema, properties: { ...observationSchema.properties, basis: { type: 'STRING', enum: ['image'] } } };
+const pixelSourceResponseSchema = { ...responseSchema, properties: { ...responseSchema.properties,
+  source: { type: 'OBJECT', properties: Object.fromEntries(attributes.map((key) => [key, pixelSourceObservationSchema])), required: [...attributes] } } };
+// The same contract as standard JSON Schema, for OpenRouter structured outputs:
+// nothing optional, nothing extra, so a strict provider cannot omit a key.
 const jsonObservation = (basis: string[]) => ({ type: 'object', additionalProperties: false, properties: {
   value: { type: ['string', 'null'] }, confidence: { type: 'number' }, basis: { type: 'string', enum: basis },
 }, required: ['value', 'confidence', 'basis'] });
@@ -343,7 +347,14 @@ export type VerifierOptions = {
    * these are close alternatives it has to tell apart.
    */
   headToHead?: boolean;
-  /** OpenRouter only: ask for schema-enforced output (default true). */
+  /**
+   * The crop is the only thing the verifier is told about the click (no
+   * description guesses, no page context). Source observations are then
+   * image-based by construction and the response schema enforces it; on
+   * OpenRouter the request also asks for schema-enforced output.
+   */
+  pixelOnlySource?: boolean;
+  /** With pixelOnlySource on OpenRouter: false keeps plain JSON mode (for comparison runs). */
   structuredOutput?: boolean;
 };
 
@@ -365,7 +376,7 @@ export async function compareCandidateImages(
   // Structured output is requested from OpenRouter first. If the routed
   // endpoint refuses the schema, the rest of this interaction uses plain JSON
   // mode, exactly as before.
-  let structuredOutput = verificationProvider === 'openrouter' && options.structuredOutput !== false;
+  let structuredOutput = verificationProvider === 'openrouter' && options.pixelOnlySource === true && options.structuredOutput !== false;
   // Pacing is shared across concurrent batches so the aggregate call rate is
   // bounded, not just each batch's. Retries go through the same gate.
   let nextSlotAt = 0;
@@ -519,7 +530,7 @@ export async function compareCandidateImages(
                 // Keep this bounded below the former 25s serial-batch stall; failure
                 // remains an unknown comparison and never promotes a candidate.
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(12000),
-                body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', responseSchema, temperature: 0, maxOutputTokens: 12000 } }),
+                body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', responseSchema: options.pixelOnlySource ? pixelSourceResponseSchema : responseSchema, temperature: 0, maxOutputTokens: 12000 } }),
               });
           if (!response.ok) {
             // A provider that states when the quota resets knows better than a

@@ -97,14 +97,15 @@ test('a clear winner on a roster of lookalikes becomes Exact after winning the h
   assert.equal(top.model, null);
   assert.ok(!(top.verification_reasons ?? []).some(reason => /verified SKU/i.test(reason)));
   assert.equal(result.products.filter(product => product.result_class === 'EXACT').length, 1);
-  // The verifier was shown pixels and physical description only: no upstream
-  // brand/model guess, no search terms, no page title or context to repeat back.
+  // The verifier was shown the crop and the kind of object, nothing the upstream
+  // model guessed about it: no brand/model, colour, material, search terms or page title.
   assert.equal(calls.told.length, 3);
   for (const told of calls.told) {
-    assert.doesNotMatch(told, /Guessed Alma|guessed alma|Keepall|haul/);
+    assert.doesNotMatch(told, /Guessed Alma|guessed alma|Keepall|haul|canvas|"color":"brown"/);
     assert.match(told, /"model_candidate":null/);
     assert.match(told, /"brand_candidate":null/);
-    assert.match(told, /"material":"canvas"/);
+    assert.match(told, /"subcategory":"bag"/);
+    assert.match(told, /"surface_context":null/);
   }
 });
 
