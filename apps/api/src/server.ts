@@ -2517,6 +2517,18 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             roster_retrieval: sameVideoVisualCheck.retrieval,
           // Counts only: establish whether a replay is using imported variants
           // or falling back to alpha seeds, without disclosing catalog content.
+          // Benchmark worker only: per-candidate verifier scores keyed by roster
+          // handle, so a replay can show how the verifier ranked the roster.
+          // Numbers and roster ids, never images, titles or model text.
+          ...(benchmarkMode ? { roster_comparison_scores: canonicalRows.map((row) => {
+            const comparison = sameVideoVisualCheck.comparisons?.[row.identity.canonical_key];
+            return {
+              id: row.mapping.product_id,
+              similarity: comparison?.similarity ?? null,
+              confidence: comparison?.confidence ?? null,
+              details: comparison?.matching_details?.length ?? 0,
+            };
+          }) } : {}),
           roster_sources: {
             configured: configuredCanonicalRows.length,
             alpha_seed: alphaCanonicalRows.length,
@@ -2754,6 +2766,18 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           roster_retrieval: sameVideoVisualCheck.retrieval,
           // Counts only, same as the hit response. Without them a replay that
           // returns no Exact cannot show which roster the resolver actually used.
+          // Benchmark worker only: per-candidate verifier scores keyed by roster
+          // handle, so a replay can show how the verifier ranked the roster.
+          // Numbers and roster ids, never images, titles or model text.
+          ...(benchmarkMode ? { roster_comparison_scores: canonicalRows.map((row) => {
+            const comparison = sameVideoVisualCheck.comparisons?.[row.identity.canonical_key];
+            return {
+              id: row.mapping.product_id,
+              similarity: comparison?.similarity ?? null,
+              confidence: comparison?.confidence ?? null,
+              details: comparison?.matching_details?.length ?? 0,
+            };
+          }) } : {}),
           roster_sources: {
             configured: configuredCanonicalRows.length,
             alpha_seed: alphaCanonicalRows.length,

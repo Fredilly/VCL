@@ -80,6 +80,52 @@ export function replayMetrics(replay, roster = []) {
   };
 }
 
+/** "VR-<video>-<section>-<variant>" -> section number; null for any other id. */
+const sectionOf = id => { const match = /^vr-.{4,20}?-(\d{1,3})-/i.exec(id ?? ''); return match ? Number(match[1]) : null; };
+const shortId = id => (id ?? '').replace(/^vr-[a-z0-9_-]{4,20}?-(?=\d{1,3}-)/i, '');
+
+/**
+ * How the verifier ranked the roster on each click, next to the partner's own
+ * discussion window for that moment. The window is a WEAK reference: it says
+ * which product the creator was talking about, not which object was clicked.
+ * Agreement here is a sanity signal for ranking quality, never accuracy.
+ */
+export function rankingDiagnostics(replay, roster = []) {
+  const windows = new Map();
+  for (const row of roster) {
+    const section = sectionOf(row.product_id);
+    if (section == null || typeof row.candidate_window_start_ms !== 'number') continue;
+    windows.set(section, [row.candidate_window_start_ms, row.candidate_window_end_ms]);
+  }
+  const cases = (replay.rows ?? []).map((row, index) => {
+    const scored = (row.current?.scores ?? []).filter(score => typeof score.similarity === 'number')
+      .sort((a, b) => b.similarity - a.similarity || (b.confidence ?? 0) - (a.confidence ?? 0));
+    const t = row.video_timestamp_ms;
+    const inWindow = typeof t === 'number' ? [...windows].filter(([, [start, end]]) => t >= start && t <= end).map(([section]) => section) : [];
+    return {
+      n: index + 1, t_s: typeof t === 'number' ? Math.round(t / 1000) : null,
+      window_section: inWindow.length === 1 ? inWindow[0] : null,
+      scored: scored.length, unscored: (row.current?.scores ?? []).length - scored.length,
+      top: scored.slice(0, 6).map(score => `${shortId(score.id)} ${score.similarity.toFixed(2)}/${(score.confidence ?? 0).toFixed(2)}/${score.details}`),
+      top_section: scored.length ? sectionOf(scored[0].id) : null,
+      top3_sections: [...new Set(scored.slice(0, 3).map(score => sectionOf(score.id)))],
+      margin: scored.length > 1 ? Number((scored[0].similarity - scored[1].similarity).toFixed(2)) : null,
+      confident_090: scored.filter(score => (score.confidence ?? 0) >= 0.9).length,
+    };
+  });
+  const windowed = cases.filter(item => item.window_section != null && item.scored > 0);
+  return {
+    note: 'Discussion windows are a weak reference, not ground truth.',
+    cases_with_scores: cases.filter(item => item.scored > 0).length,
+    cases_in_one_window: windowed.length,
+    top1_in_window_family: windowed.filter(item => item.top_section === item.window_section).length,
+    top3_include_window_family: windowed.filter(item => item.top3_sections.includes(item.window_section)).length,
+    mean_candidates_scored: cases.length ? Number((cases.reduce((sum, item) => sum + item.scored, 0) / cases.length).toFixed(1)) : 0,
+    mean_candidates_with_confidence_090: cases.length ? Number((cases.reduce((sum, item) => sum + item.confident_090, 0) / cases.length).toFixed(1)) : 0,
+    cases,
+  };
+}
+
 /** Ground truth is relative to a specific candidate roster, not merely a video.
  * Private crop-review v2 labels refer to the original ten-seed roster. The
  * 26-variant intake roster changes the meaning of NONE and uses different IDs.
@@ -168,6 +214,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const replay = read(rosterReplay);
     out.replay_with_intake_roster = replayMetrics(replay, roster);
     out.accuracy = accuracy(replay, labels, { roster: 'intake' });
+    out.verifier_ranking = rankingDiagnostics(replay, roster);
     // Per case, handles only. The timestamp is the moment the reviewer clicked.
     out.cases = (replay.rows ?? []).map((row, index) => ({ n: index + 1, t_s: typeof row.video_timestamp_ms === 'number' ? Math.round(row.video_timestamp_ms / 1000) : null, class: row.current?.top_class ?? null, identity: row.current?.top_identity ?? null, reason: row.current?.mapping_reason ?? null, retrieved: row.current?.roster_retrieved ?? null, unresolved: row.current?.roster_unresolved ?? null, compared: row.current?.compared ?? null, failures: row.current?.visual_failure_reasons ?? null }));
   }
