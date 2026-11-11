@@ -506,6 +506,10 @@ test('seed replacement plan: a seed is retired only by READY variants, and never
   const entry = id => plan.entries.find(e => e.seed_product_id === id);
   // Same listing: evidence, no judgement needed.
   same([entry('FP-1000003').basis, entry('FP-1000003').action, entry('FP-1000003').needs_signoff, entry('FP-1000003').replaced_by], ['same_listing', 'supersede', false, ['VR-n9u8ynhBdSo-4-main']]);
+  // A second READY variant of the same family, linked by name only, also takes over, and that part needs sign-off.
+  const sibling = { ...items[0], sku: 'VR-n9u8ynhBdSo-4-black', urls: ['https://www.fashionphile.com/products/other-1000099'] };
+  const mixed = replacement.planSeedReplacement(video, [...items, sibling], SEEDS).entries.find(e => e.seed_product_id === 'FP-1000003');
+  same([mixed.basis, mixed.replaced_by, mixed.needs_signoff], ['same_listing', ['VR-n9u8ynhBdSo-4-main', 'VR-n9u8ynhBdSo-4-black'], true]);
   // Same manufacturer code, but the variant is not READY: the seed stays, coverage does not drop.
   same([entry('M28392').basis, entry('M28392').action, entry('M28392').replaced_by, entry('M28392').not_ready], ['same_code', 'keep_seed', [], ['M28392']]);
   // Family-only link: every READY variant of the family takes over, and it needs sign-off.
@@ -534,6 +538,8 @@ test('a draft plan retires nothing; an applied plan retires exactly the named se
   // that would be an identity merge, and the seed row itself is kept.
   same([carryRow.candidate_window_start_ms, carryRow.candidate_window_end_ms, carryRow.trusted_observations], [400000, 500000, undefined]);
   assert.ok(applied.every(row => !row.trusted_observations));
+  // One reference image per variant: the verifier's image budget is per URL per candidate.
+  assert.ok(applied.every(row => row.image_reference && !row.reference_images));
   const red20 = parsedRows.find(row => row.product_id === 'VR-n9u8ynhBdSo-5-red-20');
   same([red20.supersedes, red20.candidate_window_start_ms], [['FP-1999999'], 805000]);
 

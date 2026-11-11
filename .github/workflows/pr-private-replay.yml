@@ -51,7 +51,7 @@ jobs:
   replay:
     if: inputs.confirm == 'LOCAL_REPLAY'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     env:
       R2_ACCESS_KEY_ID: ${{ secrets.SCOOP_REPLAY_R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.SCOOP_REPLAY_R2_SECRET_ACCESS_KEY }}

@@ -38,6 +38,7 @@ export function intakeMetrics(report) {
     valid_offers: offers.filter(offer => offer.availability === 'in_stock').length,
     valid_offers_on_ready_rows: ready.flatMap(item => item.offers ?? []).filter(offer => offer.availability === 'in_stock').length,
     offers_by_state: tally(offers.map(offer => offer.availability ?? 'unconfirmed')),
+    seller_availability_wording: tally(offers.map(offer => `${offer.provider}:${offer.page}:${offer.availability_stated ?? 'not stated'}`)),
     pages_by_state: tally(offers.map(offer => offer.page ?? 'unread')),
     identity_basis: tally(items.map(item => item.sku_source)),
     ready_identity_basis: tally(ready.map(item => item.sku_source)),

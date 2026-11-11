@@ -86,17 +86,25 @@ export function planSeedReplacement(video: VideoRef, items: ResolvedIntakeItem[]
       // Whole words only: "Trunkie" is not "Side Trunk".
       return small.length > 0 && small.every(word => large.includes(word));
     });
-    const [basis, matched]: [SeedReplacementBasis, ResolvedIntakeItem[]] = sameListing.length ? ['same_listing', sameListing]
-      : sameCode.length ? ['same_code', sameCode] : family.length ? ['family', family] : ['none', []];
-    // On a family match every READY variant of the family takes over, not just one.
-    const pool = basis === 'none' ? [] : [...new Set([...matched, ...family])];
-    const ready = pool.filter(item => item.status === 'READY').map(variantKey);
+    // Every READY variant of the family takes over, not just the one that shares
+    // evidence with the seed: leaving a family seed next to its own variants is
+    // exactly the duplicate this plan exists to prevent.
+    const pool = [...new Set([...sameListing, ...sameCode, ...family])];
+    const readyItems = pool.filter(item => item.status === 'READY');
+    const evidenced = (item: ResolvedIntakeItem) => sameListing.includes(item) || sameCode.includes(item);
+    // The basis describes what actually replaces the seed. When nothing is READY
+    // it describes the strongest link found, for the reviewer.
+    const judged = readyItems.length ? readyItems : pool;
+    const basis: SeedReplacementBasis = !pool.length ? 'none'
+      : judged.some(item => sameListing.includes(item)) ? 'same_listing'
+      : judged.some(item => sameCode.includes(item)) ? 'same_code' : 'family';
     const identity = canonicalProductIdentity({ mapping: seed, model: null, merchantItemId: seed.product_id, verifiedAt: '2026-10-06T00:00:00.000Z' });
     return {
       seed_product_id: seed.product_id, seed_title: seed.title, seed_canonical_key: identity.canonical_key, basis,
-      replaced_by: ready, not_ready: pool.filter(item => item.status !== 'READY').map(variantKey),
-      action: ready.length ? 'supersede' as const : 'keep_seed' as const,
-      needs_signoff: basis === 'family',
+      replaced_by: readyItems.map(variantKey), not_ready: pool.filter(item => item.status !== 'READY').map(variantKey),
+      action: readyItems.length ? 'supersede' as const : 'keep_seed' as const,
+      // Sign-off is needed as soon as any replacing variant is linked by name only.
+      needs_signoff: readyItems.some(item => !evidenced(item)),
     };
   });
   const superseded = entries.filter(entry => entry.action === 'supersede').length;
@@ -133,17 +141,20 @@ export function rosterMappingsWithPlan(
     const windowSeed = replacedSeeds.find(seed => typeof seed.candidate_window_start_ms === 'number' && typeof seed.candidate_window_end_ms === 'number');
     const start = item.candidate_window_start_ms ?? windowSeed?.candidate_window_start_ms;
     const end = item.candidate_window_end_ms ?? windowSeed?.candidate_window_end_ms;
-    const photos = [...new Set(item.offers.map(offer => offer.image).filter((url): url is string => Boolean(url)))];
     for (const offer of item.offers) {
       if (offer.availability !== 'in_stock') continue;
-      const image = offer.image ?? item.verified_image;
+      // One reference image per variant, shared by all its offers. The verifier
+      // reserves its per-click image budget by URL count per candidate, so a
+      // roster of ~25 variants with several photos each starves the later
+      // candidates and every comparison comes back incomplete (measured on the
+      // first live replay of this roster).
+      const image = item.verified_image;
       out.push({
         platform: video.platform, content_ref: video.content_ref, scope: 'entire_video',
         object_type: item.object_type!, brand: item.brand!, product_id: id, variant_id: id,
         ...(item.family ? { family: item.family } : {}),
         title: [item.brand, item.title].filter(Boolean).join(' '),
         destination: offer.destination, image_reference: image,
-        reference_images: photos.filter(url => url !== image).slice(0, 6),
         price: offer.price, currency: offer.currency, provider: offer.provider,
         ...(typeof start === 'number' && typeof end === 'number' ? { candidate_window_start_ms: start, candidate_window_end_ms: end } : {}),
         ...(item.sku_source === 'partner_group' ? { identity_scope: 'video_local' as const } : {}),

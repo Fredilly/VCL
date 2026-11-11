@@ -98,6 +98,8 @@ export type IntakeOffer = {
    * unreachable or without availability markup). Only in_stock is ever imported as an offer.
    */
   availability?: 'in_stock' | 'sold_out' | 'unconfirmed';
+  /** The seller's own availability wording, as read. Null when the page stated none. */
+  availability_stated?: string | null;
   /** This listing's own photo, when it loads. */
   image?: string | null;
   seller_sku?: string | null;
@@ -920,7 +922,7 @@ export async function resolveIntakeItem(item: IntakeItem, deps: IntakeDependenci
       currency: metadata?.currency ?? null, merchant_item_id: stockNumber,
       page: metadata?.resolution === 'resolved' ? 'resolved' : metadata?.resolution === 'ambiguous' ? 'ambiguous'
         : status === 0 ? 'unreachable' : status !== null && status >= 400 ? 'blocked' : 'unread',
-      availability, image: pageImage, seller_sku: rawPageSku,
+      availability, availability_stated: stated.slice(0, 60) || null, image: pageImage, seller_sku: rawPageSku,
     });
   }
   const live = () => offers.filter(offer => offer.availability === 'in_stock');
@@ -1083,8 +1085,9 @@ export function buildRosterManifest(video: VideoRef, items: ResolvedIntakeItem[]
         brand: item.brand!,
         object_type: item.object_type!,
         ...(item.family ? { family: item.family } : {}),
-        // Each listing keeps its own photo when it loaded: more real pixels of the same variant.
-        image_reference: offer.image ?? item.verified_image,
+        // One reference image per variant. The verifier budgets image fetches per
+        // URL per candidate; several photos per variant starve the rest of a large roster.
+        image_reference: item.verified_image,
         ...(offer.merchant_item_id ? { merchant_item_id: offer.merchant_item_id } : {}),
         ...(typeof item.candidate_window_start_ms === 'number' && typeof item.candidate_window_end_ms === 'number'
           ? { candidate_window_start_ms: item.candidate_window_start_ms, candidate_window_end_ms: item.candidate_window_end_ms }
