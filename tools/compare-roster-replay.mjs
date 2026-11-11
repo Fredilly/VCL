@@ -80,43 +80,67 @@ export function replayMetrics(replay, roster = []) {
   };
 }
 
-/** Ground truth is per selection, not a proxy inferred from timestamps. */
-export function accuracy(replay, labels) {
-  if (!labels) return { status: 'NOT_MEASURABLE', reason: 'No reviewed labels supplied; do not infer correct SKU accuracy from EXACT count.' };
+/** Ground truth is relative to a specific candidate roster, not merely a video.
+ * Private crop-review v2 labels refer to the original ten-seed roster. The
+ * 26-variant intake roster changes the meaning of NONE and uses different IDs.
+ * A reviewed identity crosswalk + new roster membership labels are required
+ * before scoring an intake replay against the old labels.
+ */
+export function accuracy(replay, labels, options = {}) {
+  if (!labels) return { status: 'NOT_MEASURABLE', reason: 'No reviewed labels supplied.' };
+  if (options.roster === 'intake' && labels.schema === 'scoop-private-labels-v2') {
+    return { status: 'NOT_MEASURABLE', reason: 'Private v2 truth labels describe the original ten-seed roster. New intake variants change membership and identity keys; require a reviewed crosswalk and revalidated NONE labels.' };
+  }
   const list = Array.isArray(labels) ? labels : labels.cases;
   if (!Array.isArray(list)) return { status: 'NOT_MEASURABLE', reason: 'Unsupported reviewed-label schema.' };
   const byCase = new Map();
   for (const label of list) {
     if (typeof label.case_id !== 'string' || byCase.has(label.case_id)) return { status: 'NOT_MEASURABLE', reason: 'Labels must have unique case_id strings.' };
-    byCase.set(label.case_id, label);
+    let kind;
+    let expected = null;
+    if (labels.schema === 'scoop-private-labels-v2') {
+      kind = label.truth === 'SKU' ? 'IN' : label.truth === 'NONE' ? 'OUT' : label.truth === 'UNKNOWN' ? 'AMBIGUOUS' : null;
+      expected = label.true_sku;
+    } else {
+      kind = label.in_roster === true ? 'IN' : label.in_roster === false ? 'OUT' : 'AMBIGUOUS';
+      expected = label.expected_identity ?? label.expected_sku ?? null;
+    }
+    if (!kind || (kind === 'IN' && (!expected || typeof expected !== 'string'))) {
+      return { status: 'NOT_MEASURABLE', reason: 'Unrecognized truth or missing expected identity in reviewed labels.' };
+    }
+    byCase.set(label.case_id, { kind, expected });
   }
   let inRoster = 0, outOfRoster = 0, ambiguous = 0, correct = 0, wrong = 0, misses = 0;
   let falseExact = 0, cleanReject = 0, outFallback = 0, matched = 0, exactOnUnlabeled = 0;
+  const seen = new Set();
   for (const row of replay.rows ?? []) {
+    if (typeof row.case_id !== 'string' || seen.has(row.case_id)) return { status: 'NOT_MEASURABLE', reason: 'Replay case IDs missing or duplicated.' };
+    seen.add(row.case_id);
     const label = byCase.get(row.case_id);
     const isExact = row.current?.top_class === 'EXACT';
     if (!label) { if (isExact) exactOnUnlabeled++; continue; }
     matched++;
-    const classification = label.in_roster === true ? 'IN' : label.in_roster === false ? 'OUT' : 'AMBIGUOUS';
-    if (classification === 'AMBIGUOUS') { ambiguous++; continue; }
+    if (label.kind === 'AMBIGUOUS') { ambiguous++; continue; }
     const actual = flat(handle(row.current?.top_identity) ?? '');
-    if (classification === 'OUT') {
+    if (label.kind === 'OUT') {
       outOfRoster++;
       if (isExact) falseExact++;
-      else if (!row.current?.top_identity && (row.current?.mapping_reason === 'visual_rejected' || row.current?.top_class === 'NONE')) cleanReject++;
+      else if (!row.current?.top_identity && (row.current?.mapping_reason === 'visual_rejected' || row.current?.top_class === 'NONE' && row.current?.mapping_reason !== 'incomplete_comparison')) cleanReject++;
       else outFallback++;
       continue;
     }
     inRoster++;
-    const expected = flat(label.expected_identity ?? label.expected_sku ?? '');
-    if (!expected) return { status: 'NOT_MEASURABLE', reason: 'In-roster labels require an expected_identity or expected_sku; do not report misleading accuracy.' };
+    const expected = flat(label.expected);
+    // Keep the existing strict identity comparison. No family/name aliases:
+    // the app must resolve to the correct canonical key, not a lookalike.
     if (isExact && actual && actual === expected) correct++;
     else if (isExact) { wrong++; falseExact++; }
     else misses++;
   }
-  if (!matched || (!inRoster && !outOfRoster)) return { status: 'NOT_MEASURABLE', reason: 'No scored case ids match the replay.' };
+  if (!matched || (!inRoster && !outOfRoster)) return { status: 'NOT_MEASURABLE', reason: 'No scored case IDs match this replay.' };
   return {
-    status: 'MEASURED', matched_labels: matched, in_roster_cases: inRoster, out_of_roster_cases: outOfRoster,
+    status: 'MEASURED', matched_labels: matched, unmatched_labels: byCase.size - matched,
+    in_roster_cases: inRoster, out_of_roster_cases: outOfRoster,
     ambiguous_excluded: ambiguous, correct_in_roster_exact: correct, wrong_in_roster_exact: wrong,
     missed_in_roster: misses, clean_out_of_roster_rejections: cleanReject,
     non_exact_out_of_roster_fallbacks: outFallback, false_exact: falseExact,
@@ -143,13 +167,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (rosterReplay && existsSync(rosterReplay)) {
     const replay = read(rosterReplay);
     out.replay_with_intake_roster = replayMetrics(replay, roster);
-    out.accuracy = accuracy(replay, labels);
+    out.accuracy = accuracy(replay, labels, { roster: 'intake' });
     // Per case, handles only. The timestamp is the moment the reviewer clicked.
     out.cases = (replay.rows ?? []).map((row, index) => ({ n: index + 1, t_s: typeof row.video_timestamp_ms === 'number' ? Math.round(row.video_timestamp_ms / 1000) : null, class: row.current?.top_class ?? null, identity: row.current?.top_identity ?? null, reason: row.current?.mapping_reason ?? null, retrieved: row.current?.roster_retrieved ?? null, unresolved: row.current?.roster_unresolved ?? null, compared: row.current?.compared ?? null, failures: row.current?.visual_failure_reasons ?? null }));
   }
   if (baselineReplay && existsSync(baselineReplay)) {
     const baseline = read(baselineReplay);
     out.replay_with_seeds_only = replayMetrics(baseline);
+    out.seeds_only_accuracy = accuracy(baseline, labels, { roster: 'seeds' });
     if (out.cases) (baseline.rows ?? []).forEach((row, index) => { if (out.cases[index]) Object.assign(out.cases[index], { seeds_class: row.current?.top_class ?? null, seeds_identity: row.current?.top_identity ?? null }); });
   }
   console.log(JSON.stringify(out, null, 1));
