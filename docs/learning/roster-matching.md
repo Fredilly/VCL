@@ -107,3 +107,24 @@ handles only. `baseline=true` replays the base commit for comparison.
   (9 of 22). It draws on the existing per-click budget.
 - Provider rate limiting (HTTP 429) removes comparisons and shows up as
   `incomplete_comparison`; the replay reports those clicks separately.
+
+## Private full-variant replay (CI)
+
+The public fixture is not the partner's full roster. To test the actual variants
+without committing them, store the partner list in the existing private R2
+bucket under `private-replay/` as a `.txt`, `.csv` or `.docx` object.
+Configure Actions secrets `SCOOP_REPLAY_ROSTER_OBJECT_KEY` and
+`SCOOP_REPLAY_ROSTER_SHA256` (lowercase SHA-256 of the original bytes).
+The existing bucket-scoped replay R2 credentials are reused.
+
+Run `pr-private-replay` with `intake_list=PRIVATE_R2`,
+`ref=feat/roster-intake-messy-lists`, `case_limit=22` and
+`confirm=LOCAL_REPLAY`. This downloads and checksum-verifies the private
+list into the ephemeral runner, runs intake, supersedes the seeds only in the
+local evaluation worker and replays the pinned clicks. It does not deploy.
+Only the metadata-only replay report is uploaded; the source list and
+intake reports are not artifacts.
+
+This is **not a passing accuracy gate** until the replay is scored against
+reviewed labels aligned to the new variant identities. Never mark zero false
+EXACT from unlabeled replay counts. A fresh Golden browser run remains required.
