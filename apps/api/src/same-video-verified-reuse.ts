@@ -2,7 +2,7 @@ import type { ObjectDescription } from './types.js';
 import type { CanonicalProductIdentity } from './canonical-product-memory.js';
 import type { VerifiedProductMapping } from './verified-product-mapping.js';
 import { normalizeIdentityText } from './canonical-product-memory.js';
-import { canonical, compatible, type ImageComparison } from './verification-evidence.js';
+import { canonical, compatible, phrase, type ImageComparison } from './verification-evidence.js';
 
 export type SameVideoReuseReason =
   | 'model_exact'
@@ -207,6 +207,54 @@ export function chooseSameVideoVerifiedReuse(input: {
 }
 
 
+/** A model reference that is a code (M46197, II5381-417), as opposed to a name (Speedy 25). */
+// Readings arrive normalised ("fp 1977706", "ii5381 417"): a code has digits and no real word in it.
+const modelCode = (value: string) => /\d/.test(value) && !value.split(' ').some(token => /^\p{L}{3,}$/u.test(token));
+
+/**
+ * Do two model readings name different products?
+ *
+ * The verifier reports a model as free text: the roster's own wording for the
+ * candidate ("Side Trunk PM") and whatever it could read for the click ("Side
+ * Trunk"). Comparing those for string equality called every difference in
+ * naming detail a contradiction, and vetoed the correct candidate on most
+ * clicks. They contradict only when they cannot be the same thing:
+ * - two names where neither is a whole-word part of the other
+ *   ("Side Trunk" vs "Side Trunk PM" agree; "PM" vs "MM", "Speedy 25" vs
+ *   "Speedy 30", "Neverfull" vs "CarryAll" do not);
+ * - two codes that differ.
+ * A code and a name are different kinds of reference and say nothing about
+ * each other. This only ever removes a veto; it never counts as agreement.
+ */
+export function modelNamesContradict(a: string, b: string): boolean {
+  if (a === b) return false;
+  const [codeA, codeB] = [modelCode(a), modelCode(b)];
+  if (codeA !== codeB) return false;
+  if (codeA) return true;
+  return !(phrase(a, b) || phrase(b, a));
+}
+
+const CRITICAL_ATTRIBUTES = ['subtype', 'color', 'sleeve', 'brand', 'model', 'material'] as const;
+
+/**
+ * The first identity attribute on which firm readings of the click and of the
+ * candidate disagree, or null. Material is variant identity evidence, not
+ * merely commercial metadata: an independently observed contradiction vetoes
+ * an Exact even when overall similarity looks convincing.
+ */
+export function criticalContradictionKey(comparison: ImageComparison): (typeof CRITICAL_ATTRIBUTES)[number] | null {
+  for (const key of CRITICAL_ATTRIBUTES) {
+    const source = comparison.source[key];
+    const candidate = comparison.candidate[key];
+    const a = canonical(key, source?.value);
+    const b = canonical(key, candidate?.value);
+    if (!a || !b || !source || !candidate) continue;
+    if (source.confidence < 0.8 || candidate.confidence < 0.8) continue;
+    if (key === 'model' ? modelNamesContradict(a, b) : !compatible(key, a, b)) return key;
+  }
+  return null;
+}
+
 export function confirmSameVideoVisual(
   decision: SameVideoReuseDecision,
   comparison: ImageComparison | null | undefined,
@@ -216,27 +264,16 @@ export function confirmSameVideoVisual(
     return { ...decision, mapping: null, canonical_key: null, confidence: 0, reason: 'visual_unavailable' };
   }
 
-  // Material is variant identity evidence, not merely commercial metadata. An
-  // independently observed material contradiction must veto an Exact even when
-  // overall image similarity and the shared model family appear convincing.
-  const critical = ['subtype', 'color', 'sleeve', 'brand', 'model', 'material'] as const;
-  for (const key of critical) {
-    const source = comparison.source[key];
-    const candidate = comparison.candidate[key];
-    const a = canonical(key, source?.value);
-    const b = canonical(key, candidate?.value);
-    if (!a || !b || !source || !candidate) continue;
-    if (source.confidence >= 0.8 && candidate.confidence >= 0.8 && !compatible(key, a, b)) {
-      return {
-        ...decision,
-        mapping: null,
-        canonical_key: null,
-        confidence: 0,
-        reason: 'visual_rejected',
-        visual_similarity: comparison.similarity,
-        visual_confidence: comparison.confidence,
-      };
-    }
+  if (criticalContradictionKey(comparison)) {
+    return {
+      ...decision,
+      mapping: null,
+      canonical_key: null,
+      confidence: 0,
+      reason: 'visual_rejected',
+      visual_similarity: comparison.similarity,
+      visual_confidence: comparison.confidence,
+    };
   }
 
   const specificDetails = (comparison.matching_details ?? []).filter((detail) => {
@@ -273,14 +310,8 @@ export function confirmSameVideoVisual(
  */
 export function strictVisualOutcome(comparison: ImageComparison | null | undefined): string {
   if (!comparison || ![comparison.similarity, comparison.confidence].every(value => Number.isFinite(value) && value >= 0 && value <= 1)) return 'no_comparison';
-  for (const key of ['subtype', 'color', 'sleeve', 'brand', 'model', 'material'] as const) {
-    const source = comparison.source[key];
-    const candidate = comparison.candidate[key];
-    const a = canonical(key, source?.value);
-    const b = canonical(key, candidate?.value);
-    if (!a || !b || !source || !candidate) continue;
-    if (source.confidence >= 0.8 && candidate.confidence >= 0.8 && !compatible(key, a, b)) return `contradiction_${key}`;
-  }
+  const contradiction = criticalContradictionKey(comparison);
+  if (contradiction) return `contradiction_${contradiction}`;
   if (comparison.similarity < 0.90) return 'below_similarity';
   if (comparison.confidence < 0.90) return 'below_confidence';
   if (!(comparison.matching_details ?? []).some(detail => distinctiveWords([detail]).length >= 2)) return 'no_specific_detail';
@@ -504,18 +535,6 @@ export const PROBABLE_ROSTER_SIMILARITY = 0.8;
 export const PROBABLE_ROSTER_CONFIDENCE = 0.8;
 export const PROBABLE_ROSTER_LIMIT = 3;
 
-function criticalContradiction(comparison: ImageComparison): boolean {
-  for (const key of ['subtype', 'color', 'sleeve', 'brand', 'model', 'material'] as const) {
-    const source = comparison.source[key];
-    const candidate = comparison.candidate[key];
-    const a = canonical(key, source?.value);
-    const b = canonical(key, candidate?.value);
-    if (!a || !b || !source || !candidate) continue;
-    if (source.confidence >= 0.8 && candidate.confidence >= 0.8 && !compatible(key, a, b)) return true;
-  }
-  return false;
-}
-
 /**
  * When the roster has no Exact for this click, the candidates worth showing
  * anyway: strongly alike, with a specific shared detail, and nothing the
@@ -531,7 +550,7 @@ export function probableRosterCandidates(input: {
     if (!validComparison(comparison)) return [];
     if (comparison.similarity < PROBABLE_ROSTER_SIMILARITY || comparison.confidence < PROBABLE_ROSTER_CONFIDENCE) return [];
     if (!(comparison.matching_details ?? []).some(detail => distinctiveWords([detail]).length >= 2)) return [];
-    if (criticalContradiction(comparison)) return [];
+    if (criticalContradictionKey(comparison)) return [];
     return [{ candidate, similarity: comparison.similarity, confidence: comparison.confidence }];
   }).sort((a, b) => b.similarity - a.similarity || b.confidence - a.confidence
     || a.candidate.identity.canonical_key.localeCompare(b.candidate.identity.canonical_key))

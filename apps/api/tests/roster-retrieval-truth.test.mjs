@@ -353,3 +353,32 @@ test('contradictory source comparisons cannot selectively excuse an unseen rival
   const brown = comparison(.4); brown.source.color = { value: 'brown', confidence: .99, basis: 'image' };
   assert.equal(reuse.resolveSameVideoReuse({ description: description(), candidates, comparisons: new Map([['A', white], ['B', brown]]), require_complete_comparisons: true }).mapping, null);
 });
+
+test('model readings contradict only when they cannot be the same product; naming detail is not a contradiction', () => {
+  const evidence = loadModule(new URL('../src/verification-evidence.ts', import.meta.url).pathname);
+  const contradict = (a, b) => reuse.modelNamesContradict(evidence.canonical('model', a), evidence.canonical('model', b));
+  // Same product named with more or less detail.
+  for (const [a, b] of [['Side Trunk', 'Side Trunk PM'], ['Speedy', 'Speedy Bandoulière 25'], ['Trunk', 'Side Trunk'], ['Neverfull MM', 'neverfull mm']]) {
+    assert.equal(contradict(a, b), false, `${a} / ${b}`);
+    assert.equal(contradict(b, a), false, `${b} / ${a}`);
+  }
+  // Different products, sizes or codes still veto.
+  for (const [a, b] of [['Side Trunk PM', 'Side Trunk MM'], ['Speedy 25', 'Speedy 30'], ['Neverfull', 'CarryAll'], ['M46197', 'M46234'], ['II5381-417', 'II5381-418']]) {
+    assert.equal(contradict(a, b), true, `${a} / ${b}`);
+  }
+  // A code and a name are different kinds of reference: neither supports nor contradicts.
+  for (const [a, b] of [['M14526', 'Trunkie'], ['FP-1977706', 'Side Trunk'], ['Speedy 25', 'M41113']]) assert.equal(contradict(a, b), false, `${a} / ${b}`);
+
+  // Through the strict check: a naming-detail difference no longer vetoes; a real one still does.
+  const withModels = (source, candidate) => ({ ...comparison(.95), source: { ...comparison(.95).source, model: { value: source, confidence: .9, basis: 'image' } },
+    candidate: { ...comparison(.95).candidate, model: { value: candidate, confidence: .9, basis: 'metadata' } } });
+  assert.equal(reuse.strictVisualOutcome(withModels('Side Trunk', 'Side Trunk PM')), 'confirmed');
+  assert.equal(reuse.strictVisualOutcome(withModels('Side Trunk MM', 'Side Trunk PM')), 'contradiction_model');
+  assert.equal(reuse.strictVisualOutcome(withModels('CarryAll', 'Neverfull MM')), 'contradiction_model');
+  assert.equal(reuse.criticalContradictionKey(withModels('Side Trunk', 'FP-1977706')), null);
+  // Other attributes keep the shared, stricter rule.
+  const colours = comparison(.95);
+  colours.source = { ...colours.source, color: { value: 'white', confidence: .95, basis: 'image' } };
+  colours.candidate = { ...colours.candidate, color: { value: 'black', confidence: .95, basis: 'image' } };
+  assert.equal(reuse.strictVisualOutcome(colours), 'contradiction_color');
+});
