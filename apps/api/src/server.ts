@@ -31,7 +31,7 @@ import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerc
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, parseVerifiedProductMappings, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { backfillLegacyAdminCanonicalMappings, consolidateCanonicalProducts, durableCanonicalCandidates, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
-import { confirmHeadToHead, probableRosterCandidates } from './same-video-verified-reuse.js';
+import { confirmHeadToHead, probableRosterCandidates, strictVisualOutcome } from './same-video-verified-reuse.js';
 import { eligibleSameVideoCanonicalCandidates, resolveSameVideoReuse, identityWithTrustedVpmObservations, rankSameVideoRosterCandidates, retrieveSameVideoRosterCandidates, unresolvedRosterCandidateKeys, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, preferredCanonicalReference, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
@@ -2585,7 +2585,8 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
               similarity: comparison?.similarity ?? null,
               confidence: comparison?.confidence ?? null,
               details: comparison?.matching_details?.length ?? 0,
-              ...(round ? { round_similarity: round.similarity, round_confidence: round.confidence } : {}),
+              strict: strictVisualOutcome(comparison),
+              ...(round ? { round_similarity: round.similarity, round_confidence: round.confidence, round_strict: strictVisualOutcome(round) } : {}),
             };
           }) } : {}),
           ...(sameVideoVisualCheck.head_to_head ? { head_to_head: { rivals: sameVideoVisualCheck.head_to_head.rivals, outcome: sameVideoVisualCheck.head_to_head.outcome } } : {}),
@@ -2867,7 +2868,8 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
               similarity: comparison?.similarity ?? null,
               confidence: comparison?.confidence ?? null,
               details: comparison?.matching_details?.length ?? 0,
-              ...(round ? { round_similarity: round.similarity, round_confidence: round.confidence } : {}),
+              strict: strictVisualOutcome(comparison),
+              ...(round ? { round_similarity: round.similarity, round_confidence: round.confidence, round_strict: strictVisualOutcome(round) } : {}),
             };
           }) } : {}),
           ...(sameVideoVisualCheck.head_to_head ? { head_to_head: { rivals: sameVideoVisualCheck.head_to_head.rivals, outcome: sameVideoVisualCheck.head_to_head.outcome } } : {}),

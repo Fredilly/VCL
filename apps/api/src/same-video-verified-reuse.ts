@@ -267,6 +267,26 @@ export function confirmSameVideoVisual(
 }
 
 
+/**
+ * Why one comparison did or did not pass the strict visual check, as a fixed
+ * code. Diagnostics only (benchmark replays); it decides nothing.
+ */
+export function strictVisualOutcome(comparison: ImageComparison | null | undefined): string {
+  if (!comparison || ![comparison.similarity, comparison.confidence].every(value => Number.isFinite(value) && value >= 0 && value <= 1)) return 'no_comparison';
+  for (const key of ['subtype', 'color', 'sleeve', 'brand', 'model', 'material'] as const) {
+    const source = comparison.source[key];
+    const candidate = comparison.candidate[key];
+    const a = canonical(key, source?.value);
+    const b = canonical(key, candidate?.value);
+    if (!a || !b || !source || !candidate) continue;
+    if (source.confidence >= 0.8 && candidate.confidence >= 0.8 && !compatible(key, a, b)) return `contradiction_${key}`;
+  }
+  if (comparison.similarity < 0.90) return 'below_similarity';
+  if (comparison.confidence < 0.90) return 'below_confidence';
+  if (!(comparison.matching_details ?? []).some(detail => distinctiveWords([detail]).length >= 2)) return 'no_specific_detail';
+  return 'confirmed';
+}
+
 export type SameVideoCanonicalCandidate = {
   mapping: VerifiedProductMapping;
   identity: CanonicalProductIdentity;

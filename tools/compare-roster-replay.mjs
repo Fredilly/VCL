@@ -119,7 +119,7 @@ export function rankingDiagnostics(replay, roster = []) {
       n: index + 1, t_s: typeof t === 'number' ? Math.round(t / 1000) : null,
       window_section: inWindow.length === 1 ? inWindow[0] : null,
       scored: scored.length, unscored: (row.current?.scores ?? []).length - scored.length,
-      top: scored.slice(0, 6).map(score => `${shortId(score.id)} ${score.similarity.toFixed(2)}/${(score.confidence ?? 0).toFixed(2)}/${score.details}`),
+      top: scored.slice(0, 6).map(score => `${shortId(score.id)} ${score.similarity.toFixed(2)}/${(score.confidence ?? 0).toFixed(2)}/${score.details}${score.strict && score.strict !== 'below_similarity' ? ` ${score.strict}` : ''}`),
       top_section: scored.length ? familyOf(scored[0].id) : null,
       top3_sections: [...new Set(scored.slice(0, 3).map(score => familyOf(score.id)))],
       window_rank: inWindow.length === 1 ? (() => { const at = scored.findIndex(score => familyOf(score.id) === inWindow[0]); return at < 0 ? null : at + 1; })() : null,
@@ -128,7 +128,7 @@ export function rankingDiagnostics(replay, roster = []) {
       result_in_window_family: inWindow.length === 1 && rosterBacked(row.current?.top_identity)
         ? familyOfHandle(handle(row.current.top_identity)) === inWindow[0] : null,
       round: (row.current?.scores ?? []).filter(score => typeof score.round_similarity === 'number')
-        .map(score => `${shortId(score.id)} ${score.round_similarity.toFixed(2)}/${(score.round_confidence ?? 0).toFixed(2)}`),
+        .map(score => `${shortId(score.id)} ${score.round_similarity.toFixed(2)}/${(score.round_confidence ?? 0).toFixed(2)}${score.round_strict && score.round_strict !== 'below_similarity' ? ` ${score.round_strict}` : ''}`),
       head_to_head: row.current?.head_to_head?.outcome ?? null,
       latency_ms: row.current?.latency_ms ?? null,
       margin: scored.length > 1 ? Number((scored[0].similarity - scored[1].similarity).toFixed(2)) : null,

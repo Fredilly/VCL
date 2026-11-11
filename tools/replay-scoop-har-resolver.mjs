@@ -40,7 +40,9 @@ function summarize(response) {
         similarity: typeof score?.similarity === 'number' ? score.similarity : null,
         confidence: typeof score?.confidence === 'number' ? score.confidence : null,
         details: Number.isInteger(score?.details) ? score.details : 0,
-        ...(typeof score?.round_similarity === 'number' ? { round_similarity: score.round_similarity, round_confidence: typeof score?.round_confidence === 'number' ? score.round_confidence : null } : {}),
+        strict: typeof score?.strict === 'string' && /^[a-z_]{1,40}$/.test(score.strict) ? score.strict : null,
+        ...(typeof score?.round_similarity === 'number' ? { round_similarity: score.round_similarity, round_confidence: typeof score?.round_confidence === 'number' ? score.round_confidence : null,
+          round_strict: typeof score?.round_strict === 'string' && /^[a-z_]{1,40}$/.test(score.round_strict) ? score.round_strict : null } : {}),
       })) : null,
     head_to_head: response?.verified_mapping?.head_to_head && typeof response.verified_mapping.head_to_head === 'object'
       ? { rivals: Number.isInteger(response.verified_mapping.head_to_head.rivals) ? response.verified_mapping.head_to_head.rivals : null,
