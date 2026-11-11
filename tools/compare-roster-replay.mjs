@@ -124,7 +124,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     out.replay_with_intake_roster = replayMetrics(replay, roster);
     out.accuracy = accuracy(replay, labels);
     // Per case, handles only. The timestamp is the moment the reviewer clicked.
-    out.cases = (replay.rows ?? []).map((row, index) => ({ n: index + 1, t_s: typeof row.video_timestamp_ms === 'number' ? Math.round(row.video_timestamp_ms / 1000) : null, class: row.current?.top_class ?? null, identity: row.current?.top_identity ?? null, reason: row.current?.mapping_reason ?? null, unresolved: row.current?.roster_unresolved ?? null }));
+    out.cases = (replay.rows ?? []).map((row, index) => ({ n: index + 1, t_s: typeof row.video_timestamp_ms === 'number' ? Math.round(row.video_timestamp_ms / 1000) : null, class: row.current?.top_class ?? null, identity: row.current?.top_identity ?? null, reason: row.current?.mapping_reason ?? null, retrieved: row.current?.roster_retrieved ?? null, unresolved: row.current?.roster_unresolved ?? null, compared: row.current?.compared ?? null, failures: row.current?.visual_failure_reasons ?? null }));
   }
   if (baselineReplay && existsSync(baselineReplay)) {
     const baseline = read(baselineReplay);

@@ -301,6 +301,10 @@ jobs:
           JS
           start_worker roster || exit 1
           node tools/replay-scoop-har-resolver.mjs "$RUNNER_TEMP/private-scoop.har" "$RUNNER_TEMP/pr-replay-report.json" "$SCOOP_REPLAY_HAR_ENDPOINT" || status=1
+          # Why comparisons did not complete, as the worker itself logged it. Reason
+          # codes and counts only.
+          echo '== Verifier failure states logged by the local worker (roster run) =='
+          grep -hoiE "(reason|stage|failure)[a-z_]*: *'?[a-z0-9_ ]{3,60}" "$RUNNER_TEMP/wrangler-dev-roster.log" | tr 'A-Z' 'a-z' | sort | uniq -c | sort -rn | head -30 || true
           echo '== Roster intake evaluation (counts and identity handles only) =='
           node tools/compare-roster-replay.mjs "$RUNNER_TEMP/intake" "$RUNNER_TEMP/pr-replay-report.json" "$RUNNER_TEMP/pr-replay-baseline.json"
           exit $status
