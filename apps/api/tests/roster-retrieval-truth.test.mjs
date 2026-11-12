@@ -310,11 +310,14 @@ test('an unexamined candidate blocks even a clear winner; too many close rivals 
   assert.equal(two.mapping, null);
 });
 
-test('the original strictest path is untouched: every candidate confidently settled resolves directly', () => {
+test('fully settled roster still requires independent head-to-head confirmation', () => {
   const candidates = roster(['A', 'B']);
   const settled = live(candidates, new Map([['A', comparison(.97)], ['B', comparison(.2)]]));
-  assert.equal(settled.reason, 'visual_confirmed');
-  assert.equal(settled.canonical_key, 'A');
+  assert.equal(settled.reason, 'head_to_head_required');
+  assert.equal(settled.canonical_key, null);
+  const second = reuse.confirmHeadToHead({ decision: settled, comparisons: new Map([['A', comparison(.97)], ['B', comparison(.2)]]) });
+  assert.equal(second.reason, 'visual_confirmed');
+  assert.equal(second.canonical_key, 'A');
 });
 
 test('probable roster candidates: strongly alike, specific, uncontradicted; best first, at most three', () => {
@@ -342,7 +345,9 @@ test('a deferred different category can be ruled out by independent pixels, neve
   b.identity.object_type = 'watch'; b.mapping.object_type = 'watch';
   const input = { description: description({ subcategory: 'watch' }), candidates: [a, b], require_complete_comparisons: true };
   const pixels = comparison(.98);
-  assert.equal(reuse.resolveSameVideoReuse({ ...input, comparisons: new Map([['A', pixels]]) }).canonical_key, 'A');
+  const first = reuse.resolveSameVideoReuse({ ...input, comparisons: new Map([['A', pixels]]) });
+  assert.equal(first.reason, 'head_to_head_required');
+  assert.equal(reuse.confirmHeadToHead({ decision: first, comparisons: new Map([['A', pixels]]) }).canonical_key, 'A');
   pixels.source.subtype.basis = 'description';
   assert.equal(reuse.resolveSameVideoReuse({ ...input, comparisons: new Map([['A', pixels]]) }).mapping, null);
 });
