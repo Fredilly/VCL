@@ -611,3 +611,69 @@ test('an unusable source block reports why it was rejected', () => {
     .map((key) => [key, { value: null, confidence: 0.2, basis: 'image' }]));
   assert.equal(code({ source: emptySource, candidates: [row] }), 'source_no_value');
 });
+
+test('pixel-only rounds ask OpenRouter for schema-enforced output with an image-only source block; other rounds are unchanged', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  const bodies = [];
+  const { compareCandidateImages, VERIFIER_JSON_SCHEMA } = loadModule(filename, { fetch: async (url, options) => {
+    if (String(url).includes('openrouter.ai')) {
+      bodies.push(JSON.parse(options.body));
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ source: comparison.source, candidates: [{ index: 0, attributes: comparison.candidate, ...comparison }] }) } }], usage: {} });
+    }
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+  } });
+  const result = await compareCandidateImages('k', 'some/model', image, description, [candidate], undefined, undefined, { provider: 'openrouter', pixelOnlySource: true, headToHead: true });
+  assert.equal(result.compared, 1);
+  const format = bodies[0].response_format;
+  assert.equal(format.type, 'json_schema');
+  assert.equal(format.json_schema.strict, true);
+  // The crop is pixels only: the provider cannot label its own source observations "metadata",
+  // which used to get the whole batch of comparisons discarded.
+  assert.equal(JSON.stringify(format.json_schema.schema.properties.source.properties.brand.properties.basis.enum), JSON.stringify(['image']));
+  assert.equal(JSON.stringify(format.json_schema.schema.properties.candidates.items.properties.attributes.properties.brand.properties.basis.enum), JSON.stringify(['image', 'metadata']));
+  assert.equal(JSON.stringify(format.json_schema.schema), JSON.stringify(VERIFIER_JSON_SCHEMA));
+  // Head-to-head rounds use the same contract plus one paragraph; ordinary rounds do not carry it.
+  assert.match(bodies[0].messages[0].content, /close alternatives/);
+  // Open-web verification (description supplied, no pixelOnlySource) keeps its original request.
+  await compareCandidateImages('k', 'some/model', image, description, [candidate], undefined, undefined, { provider: 'openrouter' });
+  assert.doesNotMatch(bodies[1].messages[0].content, /close alternatives/);
+  assert.equal(JSON.stringify(bodies[1].response_format), JSON.stringify({ type: 'json_object' }));
+  // The comparison switch: pixel-only input, plain JSON mode.
+  await compareCandidateImages('k', 'some/model', image, description, [candidate], undefined, undefined, { provider: 'openrouter', pixelOnlySource: true, structuredOutput: false });
+  assert.equal(bodies[2].response_format.type, 'json_object');
+});
+
+test('pixel-only rounds constrain the Gemini source block to image basis; other rounds keep both values', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  const schemas = [];
+  const { compareCandidateImages } = loadModule(filename, { fetch: async (url, options) => {
+    if (String(url).includes('generativelanguage')) {
+      schemas.push(JSON.parse(options.body).generationConfig.responseSchema);
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: comparison.source, candidates: [{ index: 0, attributes: comparison.candidate, ...comparison }] }) }] } }] });
+    }
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+  } });
+  await compareCandidateImages('k', 'm', image, description, [candidate]);
+  await compareCandidateImages('k', 'm', image, description, [candidate], undefined, undefined, { pixelOnlySource: true });
+  assert.equal(JSON.stringify(schemas[0].properties.source.properties.brand.properties.basis.enum), JSON.stringify(['image', 'metadata']));
+  assert.equal(JSON.stringify(schemas[1].properties.source.properties.brand.properties.basis.enum), JSON.stringify(['image']));
+  assert.equal(JSON.stringify(schemas[1].properties.candidates), JSON.stringify(schemas[0].properties.candidates));
+});
+
+test('an endpoint that refuses the schema falls back to plain JSON mode once, without costing the batch an attempt', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  const formats = [];
+  const { compareCandidateImages } = loadModule(filename, { fetch: async (url, options) => {
+    if (String(url).includes('openrouter.ai')) {
+      const body = JSON.parse(options.body);
+      formats.push(body.response_format.type);
+      if (body.response_format.type === 'json_schema') return new Response('{"error":"unsupported"}', { status: 400 });
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ source: comparison.source, candidates: [{ index: 0, attributes: comparison.candidate, ...comparison }] }) } }], usage: {} });
+    }
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+  } });
+  const result = await compareCandidateImages('k', 'some/model', image, description, [candidate], undefined, undefined, { provider: 'openrouter', pixelOnlySource: true, maxAttempts: 1 });
+  assert.equal(result.compared, 1);
+  assert.equal(JSON.stringify(formats), JSON.stringify(['json_schema', 'json_object']));
+  assert.equal(result.failure_reasons.structured_output_unsupported, 1);
+});

@@ -1,6 +1,7 @@
 import type { ProductCandidate } from './commerce.js';
 import type { ObjectDescription } from './types.js';
 import { brandsCompatible } from './brand-gate.js';
+import { isGroupVariantId, videoLocalIdBelongsTo } from './roster-outline.js';
 
 export type VerifiedProductProvenance = 'creator_verified' | 'brand_verified' | 'admin_verified' | 'test_fixture';
 
@@ -51,6 +52,22 @@ export type VerifiedProductMapping = {
    * these rows explicitly instead of silently skipping them.
    */
   reference_image_status?: 'pending_partner_image' | null;
+  /**
+   * 'video_local': a candidate identity that exists only for this content. It is
+   * a variant the partner named and listed without any manufacturer code, so
+   * `product_id` / `variant_id` hold a roster handle (VR-<video>-...), never a
+   * manufacturer SKU. Such a row is never resolved from text, never searched or
+   * shown as a model number, never reused in another video, and still has to
+   * win the same-video visual verifier like any other roster candidate.
+   */
+  identity_scope?: 'video_local' | null;
+  /**
+   * product_ids of earlier roster rows for this same content that this row
+   * replaces. The named rows stop being active candidates while this row is
+   * active; they are not deleted, so the lineage stays readable and removing
+   * this row brings them back.
+   */
+  supersedes?: string[] | null;
   price?: string | null;
   currency?: string | null;
   provider?: string | null;
@@ -126,6 +143,12 @@ export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProd
     const end = typeof record.timestamp_end_ms === 'number' && Number.isFinite(record.timestamp_end_ms) ? record.timestamp_end_ms : undefined;
     if (record.scope === 'time_window' && (start === undefined || end === undefined || start < 0 || end < start)) return [];
     try { new URL(record.destination as string); } catch { return []; }
+    // A video-local handle must be declared as one and must belong to this
+    // content. Anything else is dropped rather than read as a manufacturer SKU.
+    const handle = [record.product_id, record.variant_id].find((value) => typeof value === 'string' && isGroupVariantId(value)) as string | undefined;
+    const videoLocal = record.identity_scope === 'video_local';
+    if (Boolean(handle) !== videoLocal) return [];
+    if (videoLocal && !videoLocalIdBelongsTo(handle, record.content_ref as string)) return [];
     return [{
       platform: (record.platform as string).trim(),
       content_ref: (record.content_ref as string).trim(),
@@ -152,6 +175,10 @@ export function parseVerifiedProductMappings(rawRegistry?: string): VerifiedProd
         : {}),
       ...(record.reference_image_status === 'pending_partner_image'
         ? { reference_image_status: 'pending_partner_image' as const }
+        : {}),
+      ...(videoLocal ? { identity_scope: 'video_local' as const } : {}),
+      ...(Array.isArray(record.supersedes)
+        ? { supersedes: (record.supersedes as unknown[]).filter((id): id is string => typeof id === 'string' && Boolean(id.trim())).map(id => id.trim().slice(0, 160)).slice(0, 20) }
         : {}),
       price: typeof record.price === 'string' && record.price.trim() ? record.price.trim() : null,
       currency: typeof record.currency === 'string' && record.currency.trim() ? record.currency.trim().toUpperCase().slice(0, 8) : null,
@@ -251,6 +278,9 @@ export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProduc
     // verified. Never let text evidence promote it to Exact.
     if (mapping.reference_image_status === 'pending_partner_image') return false;
     if (pendingSkus.has(normalize(mapping.product_id))) return false;
+    // A video-local handle is not a product anyone can name. Text can never
+    // resolve it; only the same-video visual verifier can.
+    if (mapping.identity_scope === 'video_local' || isGroupVariantId(mapping.product_id)) return false;
     const timestampMatches = mapping.scope === 'entire_video'
       || (typeof input.timestampMs === 'number'
         && typeof mapping.timestamp_start_ms === 'number'
@@ -308,6 +338,30 @@ export function lookupVerifiedProductMapping(input: LookupInput): VerifiedProduc
 }
 
 export function verifiedMappingProduct(mapping: VerifiedProductMapping): ProductCandidate {
+  if (mapping.identity_scope === 'video_local') {
+    // No model number, no "verified SKU" wording: this is the partner's own
+    // variant for this video, matched by pixels.
+    return {
+      id: `video-local:${mapping.platform}:${mapping.content_ref}:${mapping.product_id}`,
+      title: mapping.title,
+      brand: mapping.brand,
+      model: null,
+      category: mapping.object_type,
+      image_reference: mapping.image_reference ?? null,
+      provenance: mapping.provenance,
+      destination: mapping.destination,
+      price: mapping.price ?? null,
+      currency: mapping.currency ?? null,
+      result_class: 'EXACT',
+      relationship: 'EXACT',
+      metadata: { brand: mapping.brand, category: mapping.object_type },
+      verification_status: 'metadata_only',
+      verification_score: 100,
+      verification_reasons: ['partner-listed variant for this video; no manufacturer SKU on record'],
+      ...(mapping.provider ? { provider: mapping.provider } : {}),
+      identity_key: `video-local:${mapping.product_id}`,
+    };
+  }
   return {
     id: `verified:${mapping.platform}:${mapping.content_ref}:${mapping.product_id}`,
     title: mapping.title,

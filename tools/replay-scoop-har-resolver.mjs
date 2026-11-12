@@ -33,10 +33,25 @@ function summarize(response) {
     top_class: typeof top?.result_class === 'string' ? top.result_class : null,
     count: Array.isArray(response?.products) ? response.products.length : null,
     mapping_reason: typeof response?.verified_mapping?.reason === 'string' ? response.verified_mapping.reason : null,
+    // Present only when the worker runs in benchmark mode. Roster handles and numbers.
+    scores: Array.isArray(response?.verified_mapping?.roster_comparison_scores)
+      ? response.verified_mapping.roster_comparison_scores.slice(0, 60).map(score => ({
+        id: typeof score?.id === 'string' ? score.id.slice(0, 160) : null,
+        similarity: typeof score?.similarity === 'number' ? score.similarity : null,
+        confidence: typeof score?.confidence === 'number' ? score.confidence : null,
+        details: Number.isInteger(score?.details) ? score.details : 0,
+        strict: typeof score?.strict === 'string' && /^[a-z_]{1,40}$/.test(score.strict) ? score.strict : null,
+        ...(typeof score?.round_similarity === 'number' ? { round_similarity: score.round_similarity, round_confidence: typeof score?.round_confidence === 'number' ? score.round_confidence : null,
+          round_strict: typeof score?.round_strict === 'string' && /^[a-z_]{1,40}$/.test(score.round_strict) ? score.round_strict : null } : {}),
+      })) : null,
+    head_to_head: response?.verified_mapping?.head_to_head && typeof response.verified_mapping.head_to_head === 'object'
+      ? { rivals: Number.isInteger(response.verified_mapping.head_to_head.rivals) ? response.verified_mapping.head_to_head.rivals : null,
+        outcome: typeof response.verified_mapping.head_to_head.outcome === 'string' ? response.verified_mapping.head_to_head.outcome.slice(0, 40) : null }
+      : null,
     roster_retrieved: Array.isArray(response?.verified_mapping?.roster_retrieval?.retrieved_keys) ? response.verified_mapping.roster_retrieval.retrieved_keys.length : null,
     roster_unresolved: Array.isArray(response?.verified_mapping?.roster_retrieval?.unresolved_keys) ? response.verified_mapping.roster_retrieval.unresolved_keys.length : null,
     roster_sources: response?.verified_mapping?.roster_sources && typeof response.verified_mapping.roster_sources === 'object'
-      ? Object.fromEntries(['configured','alpha_seed','durable','canonical_candidates']
+      ? Object.fromEntries(['configured','alpha_seed','superseded_seed','durable','canonical_candidates']
         .filter(key => Number.isSafeInteger(response.verified_mapping.roster_sources[key])
           && response.verified_mapping.roster_sources[key] >= 0)
         .map(key => [key, response.verified_mapping.roster_sources[key]])) : null,

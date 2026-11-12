@@ -18,6 +18,7 @@
     "secrets:check": "node tools/secrets.mjs check",
     "dev:auto": "node tools/dev-auto-sync.mjs",
     "setup:dev-auto": "bash tools/install-scoop-autosync-macos.sh",
+    "roster:intake": "pnpm --filter @vcl/api build && node tools/roster-intake.mjs",
     "benchmark:outliers": "node tests/benchmark/roster-outliers/run.mjs",
     "benchmark:outliers:replay": "node tests/benchmark/roster-outliers/replay.mjs",
     "benchmark:outliers:chaos": "node tests/benchmark/roster-outliers/chaos-replay.mjs",

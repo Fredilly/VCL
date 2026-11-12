@@ -3,10 +3,11 @@ import { fetchCatalogImage, parseSourceImage, safeImageUrl, type CatalogImage } 
 import { fetchPartnerCatalogMetadata, type PartnerCatalogMetadata } from './partner-catalog.js';
 import { recoverVerifiedProductImage } from './verified-image-recovery.js';
 import { persistAdminVerifiedMapping, persistCanonicalProductIdentity, verifiedLedgerRequest, type VerifiedProductLedgerEnv } from './verified-product-ledger.js';
-import { resolveSameVideoReuse, type SameVideoCanonicalCandidate } from './same-video-verified-reuse.js';
+import { confirmHeadToHead, resolveSameVideoReuse, type SameVideoCanonicalCandidate } from './same-video-verified-reuse.js';
 import type { VerifiedProductMapping } from './verified-product-mapping.js';
 import type { ObjectDescription } from './types.js';
 import type { ImageComparison } from './verification-evidence.js';
+import { isGroupVariantId, videoLocalIdBelongsTo } from './roster-outline.js';
 
 export type RosterOfferInput = {
   destination: string;
@@ -23,6 +24,10 @@ export type RosterOfferInput = {
   merchant_item_id?: string;
   candidate_window_start_ms?: number;
   candidate_window_end_ms?: number;
+  /** 'video_local': variant_id is a roster handle for this video (VR-<video>-...), not a manufacturer SKU. */
+  identity_scope?: 'video_local';
+  /** product_ids of earlier roster rows for this content that this row replaces. */
+  supersedes?: string[];
 };
 export type LearningFixture = {
   id: string;
@@ -103,6 +108,11 @@ export async function preparePartnerRoster(
     }
     if (metadata.resolution === 'ambiguous') throw new Error(`Offer ${index + 1}: linked variant is ambiguous; provide its catalog fields and reference`);
     if (!variant || variant.length > 160 || !brand || !title || !objectType) throw new Error(`Offer ${index + 1}: explicit variant/SKU, brand, title and object type required when catalog metadata is incomplete`);
+    // A video-local handle has to be declared and has to belong to this video.
+    // It can never arrive disguised as a SKU, or be attached to other content.
+    const videoLocal = offer.identity_scope === 'video_local';
+    if (isGroupVariantId(variant) !== videoLocal || isGroupVariantId(offer.sku)) throw new Error(`Offer ${index + 1}: a video-local variant id must be sent as variant_id with identity_scope "video_local", never as a SKU`);
+    if (videoLocal && !videoLocalIdBelongsTo(variant, input.content_ref)) throw new Error(`Offer ${index + 1}: video-local variant id belongs to a different video`);
     const requestedVariant = offer.sku || offer.variant_id;
     if (!offer.image_reference && requestedVariant && metadata.sku && ![metadata.sku, metadata.variant_id].includes(requestedVariant.trim())) throw new Error(`Offer ${index + 1}: reference belongs to a different SKU`);
     if (!imageUrl) throw new Error(`Offer ${index + 1}: reference image missing`);
@@ -120,6 +130,9 @@ export async function preparePartnerRoster(
       title, destination: offer.destination, image_reference: reference,
       provider: new URL(offer.destination).hostname, provenance: 'admin_verified',
       ...(start != null ? { candidate_window_start_ms: start, candidate_window_end_ms: end } : {}),
+      ...(videoLocal ? { identity_scope: 'video_local' as const } : {}),
+      ...(Array.isArray(offer.supersedes) && offer.supersedes.length
+        ? { supersedes: offer.supersedes.filter(id => typeof id === 'string' && id.trim()).map(id => id.trim().slice(0, 160)).slice(0, 20) } : {}),
     };
     const identity = canonicalProductIdentity({ mapping, model: offer.model || metadata.model || null,
       merchantItemId: offer.merchant_item_id || null, color: offer.color || metadata.color || null, material: offer.material || metadata.material || null });
@@ -147,6 +160,8 @@ export function buildCorrectionBundle(input: {
   crop_asset: string; platform: string; content_ref: string; timestamp_ms: number;
   canonical_product: CanonicalProductIdentity; candidates: SameVideoCanonicalCandidate[];
   description: ObjectDescription; comparisons: Record<string, ImageComparison>;
+  /** Independent second-round comparisons, required before asserting a learned Exact. */
+  head_to_head_comparisons?: Record<string, ImageComparison>;
   before?: LearningFixture; newly_learned: boolean;
 }): CorrectionBundle {
   if (!input.event_id || !input.result_id || !input.reviewed_by || !/^[a-f0-9]{64}$/.test(input.crop_asset)
@@ -160,8 +175,11 @@ export function buildCorrectionBundle(input: {
     && normalizeIdentityText(identity.brand) === normalizeIdentityText(canonical.brand)
     && normalizeIdentityText(identity.object_type) === normalizeIdentityText(canonical.object_type)
     && (!family || !identity.family || normalizeIdentityText(identity.family) === family));
-  const replay = resolveSameVideoReuse({ description: input.description, candidates: input.candidates, comparisons: new Map(Object.entries(input.comparisons)), require_complete_comparisons: true });
-  if (replay.canonical_key !== canonical.canonical_key || !replay.mapping) throw new Error('Correction replay did not pass the production trust gate');
+  const firstPass = resolveSameVideoReuse({ description: input.description, candidates: input.candidates, comparisons: new Map(Object.entries(input.comparisons)), require_complete_comparisons: true });
+  const replay = firstPass.reason === 'head_to_head_required' && input.head_to_head_comparisons
+    ? confirmHeadToHead({ decision: firstPass, comparisons: new Map(Object.entries(input.head_to_head_comparisons)) })
+    : firstPass.reason === 'head_to_head_required' ? null : firstPass;
+  if (replay?.canonical_key !== canonical.canonical_key || !replay.mapping || replay.reason !== 'visual_confirmed') throw new Error('Correction replay did not pass the production trust gate');
   if (siblings.some(row => !input.comparisons[row.identity.canonical_key])) throw new Error('Missing sibling comparisons; correction remains unlearned');
   const prior = input.before ? resolveSameVideoReuse({ description: input.before.description, candidates: input.before.candidates, comparisons: new Map(Object.entries(input.before.comparisons)) }) : null;
   const id = `correction:${encodeURIComponent(input.event_id)}:${encodeURIComponent(input.result_id)}`;

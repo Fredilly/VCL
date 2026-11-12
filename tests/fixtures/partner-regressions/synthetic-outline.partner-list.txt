@@ -1,0 +1,19 @@
+# Synthetic training fixture: invented products and merchant URLs only.
+# All brands, items, ids, and links below are fictitious, NOT partner data.
+https://www.youtube.com/watch?v=syntheticfixture001
+
+1. ExampleWorks Atlas Tote
+Black variant
+https://shop.invalid/products/exampleworks-atlas-tote-black-10001
+https://market.invalid/listing/exampleworks-atlas-tote-black-20001
+Blue variant
+https://shop.invalid/products/exampleworks-atlas-tote-blue-10002
+
+2. ExampleWorks Comet Satchel
+Small variant
+https://shop.invalid/products/exampleworks-comet-satchel-small-10003
+Large variant
+https://shop.invalid/products/exampleworks-comet-satchel-large-10004
+
+3. ExampleWorks Luna Backpack
+Couldn't find it online.

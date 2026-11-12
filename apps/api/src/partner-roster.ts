@@ -13,6 +13,43 @@ function normalizeContentRef(platform: string | null | undefined, value: string 
   return raw.replace(/^youtube:/i, '').toLowerCase();
 }
 
+/**
+ * Roster supersession. A row that names earlier rows in `supersedes` replaces
+ * them as active candidates for the same content, so a hand-seeded family row
+ * and the variant roster that replaces it never compete for the same click.
+ *
+ * Safe by construction:
+ * - only rows of the same platform + content can supersede each other;
+ * - a row with no loadable reference pixels (pending) cannot retire anything,
+ *   because it could not be verified in the retired row's place;
+ * - nothing is deleted: the superseded rows keep their canonical keys and
+ *   provenance, and removing the replacement makes them active again.
+ */
+export function supersededProductIds(
+  replacements: VerifiedProductMapping[],
+  platform: string | null | undefined,
+  contentRef: string | null | undefined,
+): Set<string> {
+  const normalizedPlatform = (platform ?? '').trim().toLowerCase();
+  const normalizedRef = normalizeContentRef(platform, contentRef);
+  const ids = new Set<string>();
+  if (!normalizedPlatform || !normalizedRef) return ids;
+  for (const mapping of replacements) {
+    if (!mapping.supersedes?.length || mapping.reference_image_status === 'pending_partner_image') continue;
+    if (mapping.platform.trim().toLowerCase() !== normalizedPlatform) continue;
+    if (normalizeContentRef(mapping.platform, mapping.content_ref) !== normalizedRef) continue;
+    for (const id of mapping.supersedes) {
+      // A row cannot retire itself.
+      if (id.trim() && id.trim().toLowerCase() !== mapping.product_id.trim().toLowerCase()) ids.add(id.trim().toLowerCase());
+    }
+  }
+  return ids;
+}
+
+export function withoutSuperseded<T extends { mapping: VerifiedProductMapping }>(rows: T[], superseded: Set<string>): T[] {
+  return superseded.size ? rows.filter(row => !superseded.has(row.mapping.product_id.trim().toLowerCase())) : rows;
+}
+
 export type VerifiedRosterCanonicalRow = {
   mapping: VerifiedProductMapping;
   identity: CanonicalProductIdentity;

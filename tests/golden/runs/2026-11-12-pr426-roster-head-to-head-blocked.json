@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "suite": "golden",
+  "session_id": "2026-11-12-pr426-roster-head-to-head",
+  "run_date": "2026-11-12",
+  "run_timezone": "Asia/Shanghai",
+  "recorded_at": "2026-11-11T22:53:33.476823+00:00",
+  "source_parent_commit": "fcc372aaf7d67e065ad8091d37bd7d08f686ee89",
+  "status": "BLOCKED_BEFORE_EXECUTION",
+  "notes": "The Golden suite is a manual browser procedure and was not executed for PR #426: this workspace has no browser session with the extension, no provider credentials outside CI, and no complete set of saved Golden selections. No cases, clicks, expectations or thresholds were modified. This is not a Golden pass. Separate evidence for this PR is the private 22-selection video replay run in CI (pr-private-replay workflow), which exercises only the same-video roster path; it does not replace Golden. Open-web verification requests are unchanged by this PR (covered by candidate-images tests), but that is a unit-level claim, not live Golden evidence. AGENTS.md requires live Golden evidence before merge.",
+  "comparison": {
+    "previous_session": "2026-10-08-pr357-generic-roster",
+    "pass_rate_change": null,
+    "latency_change": null,
+    "reason": "No new live measurements; prior session was also blocked before execution."
+  },
+  "cases": [
+    {
+      "case_id": "golden-001-billions-tie",
+      "url_at_time": "https://youtu.be/T-bpMn0VMYk?t=157",
+      "target_object": "tie on the left",
+      "click_point": "tie knot",
+      "runs": [],
+      "required_runs": 3,
+      "blocked_reason": "MANUAL_BROWSER_PROCEDURE_NOT_AVAILABLE_IN_WORKSPACE"
+    },
+    {
+      "case_id": "golden-002-casio-f91w",
+      "url_at_time": "https://youtu.be/CT0mvnFbOYQ?t=2",
+      "target_object": "Casio watch",
+      "click_point": "center of watch face",
+      "runs": [],
+      "required_runs": 3,
+      "blocked_reason": "MANUAL_BROWSER_PROCEDURE_NOT_AVAILABLE_IN_WORKSPACE"
+    },
+    {
+      "case_id": "golden-003-hugo-boss-bottled",
+      "url_at_time": "https://youtu.be/jndGRB5Il3k?t=7",
+      "target_object": "perfume bottle",
+      "click_point": "center/body of perfume bottle",
+      "runs": [],
+      "required_runs": 3,
+      "blocked_reason": "MANUAL_BROWSER_PROCEDURE_NOT_AVAILABLE_IN_WORKSPACE"
+    },
+    {
+      "case_id": "golden-004-white-denim-jacket",
+      "url_at_time": "https://youtu.be/Fr8xhEDNhfU?t=121",
+      "target_object": "white denim jacket",
+      "click_point": "side of jacket",
+      "runs": [],
+      "required_runs": 3,
+      "blocked_reason": "MANUAL_BROWSER_PROCEDURE_NOT_AVAILABLE_IN_WORKSPACE"
+    },
+    {
+      "case_id": "golden-005-dior-book-tote",
+      "url_at_time": "https://youtu.be/4Gmrv8KEuTo?t=504",
+      "target_object": "handbag",
+      "click_point": "bag surface",
+      "runs": [],
+      "required_runs": 3,
+      "blocked_reason": "MANUAL_BROWSER_PROCEDURE_NOT_AVAILABLE_IN_WORKSPACE"
+    }
+  ]
+}

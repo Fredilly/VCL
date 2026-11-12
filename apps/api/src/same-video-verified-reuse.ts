@@ -2,7 +2,7 @@ import type { ObjectDescription } from './types.js';
 import type { CanonicalProductIdentity } from './canonical-product-memory.js';
 import type { VerifiedProductMapping } from './verified-product-mapping.js';
 import { normalizeIdentityText } from './canonical-product-memory.js';
-import { canonical, compatible, type ImageComparison } from './verification-evidence.js';
+import { canonical, compatible, phrase, type ImageComparison } from './verification-evidence.js';
 
 export type SameVideoReuseReason =
   | 'model_exact'
@@ -18,6 +18,7 @@ export type SameVideoReuseReason =
   | 'visual_rejected'
   | 'visual_unavailable'
   | 'incomplete_comparison'
+  | 'head_to_head_required'
   | 'no_candidate';
 
 export type SameVideoReuseDecision = {
@@ -28,7 +29,30 @@ export type SameVideoReuseDecision = {
   requires_visual?: boolean;
   visual_similarity?: number;
   visual_confidence?: number;
+  /**
+   * Reason 'head_to_head_required': the roster was fully examined and exactly
+   * one candidate passed the strict visual check, but not every rejection was
+   * itself high-confidence. That candidate is held here, NOT in `mapping`, so a
+   * caller that never runs the head-to-head round has no match to act on.
+   * It becomes an Exact only through confirmHeadToHead.
+   */
+  front_runner?: { mapping: VerifiedProductMapping; canonical_key: string; visual_similarity: number; visual_confidence: number };
+  /** Rivals for that round. Canonical keys, closest first. */
+  head_to_head_rivals?: string[];
+  /** Roster candidates that stayed too close to call. Canonical keys, closest first. */
+  rival_keys?: string[];
 };
+
+/**
+ * How far below the winner every other roster candidate must score before the
+ * winner can stand alone. Verifier scores come in steps of about 0.05, so this
+ * is three steps: a rival one or two steps away is "too close to call".
+ */
+export const ROSTER_RIVAL_MARGIN = 0.15;
+/** A rival exactly one margin below the winner is clear of it (scores are decimal steps; compare in hundredths). */
+const withinRivalMargin = (rival: number, winner: number) => Math.round(rival * 100) > Math.round(winner * 100) - Math.round(ROSTER_RIVAL_MARGIN * 100);
+/** Rivals taken into the head-to-head round with the winner. */
+export const HEAD_TO_HEAD_RIVALS = 3;
 
 const genericTokens = new Set([
   'black', 'white', 'shirt', 'shirts', 'tshirt', 'shirt', 'tee', 'tees', 'top', 'apparel',
@@ -183,6 +207,54 @@ export function chooseSameVideoVerifiedReuse(input: {
 }
 
 
+/** A model reference that is a code (M46197, II5381-417), as opposed to a name (Speedy 25). */
+// Readings arrive normalised ("fp 1977706", "ii5381 417"): a code has digits and no real word in it.
+const modelCode = (value: string) => /\d/.test(value) && !value.split(' ').some(token => /^\p{L}{3,}$/u.test(token));
+
+/**
+ * Do two model readings name different products?
+ *
+ * The verifier reports a model as free text: the roster's own wording for the
+ * candidate ("Side Trunk PM") and whatever it could read for the click ("Side
+ * Trunk"). Comparing those for string equality called every difference in
+ * naming detail a contradiction, and vetoed the correct candidate on most
+ * clicks. They contradict only when they cannot be the same thing:
+ * - two names where neither is a whole-word part of the other
+ *   ("Side Trunk" vs "Side Trunk PM" agree; "PM" vs "MM", "Speedy 25" vs
+ *   "Speedy 30", "Neverfull" vs "CarryAll" do not);
+ * - two codes that differ.
+ * A code and a name are different kinds of reference and say nothing about
+ * each other. This only ever removes a veto; it never counts as agreement.
+ */
+export function modelNamesContradict(a: string, b: string): boolean {
+  if (a === b) return false;
+  const [codeA, codeB] = [modelCode(a), modelCode(b)];
+  if (codeA !== codeB) return false;
+  if (codeA) return true;
+  return !(phrase(a, b) || phrase(b, a));
+}
+
+const CRITICAL_ATTRIBUTES = ['subtype', 'color', 'sleeve', 'brand', 'model', 'material'] as const;
+
+/**
+ * The first identity attribute on which firm readings of the click and of the
+ * candidate disagree, or null. Material is variant identity evidence, not
+ * merely commercial metadata: an independently observed contradiction vetoes
+ * an Exact even when overall similarity looks convincing.
+ */
+export function criticalContradictionKey(comparison: ImageComparison): (typeof CRITICAL_ATTRIBUTES)[number] | null {
+  for (const key of CRITICAL_ATTRIBUTES) {
+    const source = comparison.source[key];
+    const candidate = comparison.candidate[key];
+    const a = canonical(key, source?.value);
+    const b = canonical(key, candidate?.value);
+    if (!a || !b || !source || !candidate) continue;
+    if (source.confidence < 0.8 || candidate.confidence < 0.8) continue;
+    if (key === 'model' ? modelNamesContradict(a, b) : !compatible(key, a, b)) return key;
+  }
+  return null;
+}
+
 export function confirmSameVideoVisual(
   decision: SameVideoReuseDecision,
   comparison: ImageComparison | null | undefined,
@@ -192,27 +264,16 @@ export function confirmSameVideoVisual(
     return { ...decision, mapping: null, canonical_key: null, confidence: 0, reason: 'visual_unavailable' };
   }
 
-  // Material is variant identity evidence, not merely commercial metadata. An
-  // independently observed material contradiction must veto an Exact even when
-  // overall image similarity and the shared model family appear convincing.
-  const critical = ['subtype', 'color', 'sleeve', 'brand', 'model', 'material'] as const;
-  for (const key of critical) {
-    const source = comparison.source[key];
-    const candidate = comparison.candidate[key];
-    const a = canonical(key, source?.value);
-    const b = canonical(key, candidate?.value);
-    if (!a || !b || !source || !candidate) continue;
-    if (source.confidence >= 0.8 && candidate.confidence >= 0.8 && !compatible(key, a, b)) {
-      return {
-        ...decision,
-        mapping: null,
-        canonical_key: null,
-        confidence: 0,
-        reason: 'visual_rejected',
-        visual_similarity: comparison.similarity,
-        visual_confidence: comparison.confidence,
-      };
-    }
+  if (criticalContradictionKey(comparison)) {
+    return {
+      ...decision,
+      mapping: null,
+      canonical_key: null,
+      confidence: 0,
+      reason: 'visual_rejected',
+      visual_similarity: comparison.similarity,
+      visual_confidence: comparison.confidence,
+    };
   }
 
   const specificDetails = (comparison.matching_details ?? []).filter((detail) => {
@@ -242,6 +303,20 @@ export function confirmSameVideoVisual(
   };
 }
 
+
+/**
+ * Why one comparison did or did not pass the strict visual check, as a fixed
+ * code. Diagnostics only (benchmark replays); it decides nothing.
+ */
+export function strictVisualOutcome(comparison: ImageComparison | null | undefined): string {
+  if (!comparison || ![comparison.similarity, comparison.confidence].every(value => Number.isFinite(value) && value >= 0 && value <= 1)) return 'no_comparison';
+  const contradiction = criticalContradictionKey(comparison);
+  if (contradiction) return `contradiction_${contradiction}`;
+  if (comparison.similarity < 0.90) return 'below_similarity';
+  if (comparison.confidence < 0.90) return 'below_confidence';
+  if (!(comparison.matching_details ?? []).some(detail => distinctiveWords([detail]).length >= 2)) return 'no_specific_detail';
+  return 'confirmed';
+}
 
 export type SameVideoCanonicalCandidate = {
   mapping: VerifiedProductMapping;
@@ -450,6 +525,93 @@ export function unresolvedRosterCandidateKeys(input: {
   }).map(row => row.identity.canonical_key);
 }
 
+/**
+ * A roster candidate the verifier found strongly alike without it reaching the
+ * Exact bar. Shown as SIMILAR ("likely one of these from this video"), never
+ * as Exact. 0.8 is the level the Exact check already treats as a firm reading
+ * of a single attribute.
+ */
+export const PROBABLE_ROSTER_SIMILARITY = 0.8;
+export const PROBABLE_ROSTER_CONFIDENCE = 0.8;
+export const PROBABLE_ROSTER_LIMIT = 3;
+
+/**
+ * When the roster has no Exact for this click, the candidates worth showing
+ * anyway: strongly alike, with a specific shared detail, and nothing the
+ * verifier saw that contradicts them. Ordered best first. This never asserts
+ * identity; it is the honest answer when the crop cannot settle the variant.
+ */
+export function probableRosterCandidates(input: {
+  candidates: SameVideoCanonicalCandidate[];
+  comparisons: Map<string, ImageComparison>;
+}): Array<{ candidate: SameVideoCanonicalCandidate; similarity: number; confidence: number }> {
+  return input.candidates.flatMap((candidate) => {
+    const comparison = input.comparisons.get(candidate.identity.canonical_key);
+    if (!validComparison(comparison)) return [];
+    if (comparison.similarity < PROBABLE_ROSTER_SIMILARITY || comparison.confidence < PROBABLE_ROSTER_CONFIDENCE) return [];
+    if (!(comparison.matching_details ?? []).some(detail => distinctiveWords([detail]).length >= 2)) return [];
+    if (criticalContradictionKey(comparison)) return [];
+    return [{ candidate, similarity: comparison.similarity, confidence: comparison.confidence }];
+  }).sort((a, b) => b.similarity - a.similarity || b.confidence - a.confidence
+    || a.candidate.identity.canonical_key.localeCompare(b.candidate.identity.canonical_key))
+    .slice(0, PROBABLE_ROSTER_LIMIT);
+}
+
+function validComparison(comparison: ImageComparison | undefined): comparison is ImageComparison {
+  return Boolean(comparison) && [comparison!.similarity, comparison!.confidence]
+    .every(value => Number.isFinite(value) && value >= 0 && value <= 1);
+}
+
+/**
+ * Roster candidates the verifier never actually looked at: no usable comparison
+ * came back (failed batch, missing image), and no confident source-pixel
+ * attribute rules them out. One of these could be the true product, so their
+ * existence always blocks an Exact. A comparison the model was merely
+ * unenthusiastic about is NOT in this set: it was examined.
+ */
+export function unexaminedRosterCandidateKeys(input: {
+  candidates: SameVideoCanonicalCandidate[];
+  comparisons: Map<string, ImageComparison>;
+}): string[] {
+  const stillOpen = new Set(unresolvedRosterCandidateKeys(input));
+  return input.candidates
+    .filter(({ identity }) => stillOpen.has(identity.canonical_key) && !validComparison(input.comparisons.get(identity.canonical_key)))
+    .map(row => row.identity.canonical_key);
+}
+
+/**
+ * The head-to-head round. `comparisons` are from one verifier call that saw
+ * only the winner and its closest rivals. The winner stands only if it passes
+ * the same strict visual check again, on its own, and every rival in the round
+ * scores clearly below it. A rival missing from the round is not a win.
+ */
+export function confirmHeadToHead(input: {
+  decision: SameVideoReuseDecision;
+  comparisons: Map<string, ImageComparison>;
+}): SameVideoReuseDecision {
+  const front = input.decision.front_runner;
+  const rivals = input.decision.head_to_head_rivals ?? [];
+  const none = (reason: SameVideoReuseReason, rivalKeys: string[] = rivals): SameVideoReuseDecision => ({
+    mapping: null, canonical_key: null, confidence: 0, reason, ...(front ? { rival_keys: [front.canonical_key, ...rivalKeys] } : {}),
+  });
+  if (input.decision.reason !== 'head_to_head_required' || !front) return none('incomplete_comparison');
+  const winner = input.comparisons.get(front.canonical_key);
+  if (!validComparison(winner) || rivals.some(key => !validComparison(input.comparisons.get(key)))) return none('incomplete_comparison');
+  const again = confirmSameVideoVisual({
+    mapping: front.mapping, canonical_key: front.canonical_key, confidence: 0.7, reason: 'fingerprint_candidate', requires_visual: true,
+  }, winner);
+  if (!again.mapping || again.reason !== 'visual_confirmed') return none('ambiguous');
+  const close = rivals.filter(key => withinRivalMargin(input.comparisons.get(key)!.similarity, winner.similarity));
+  if (close.length) return none('ambiguous', close);
+  return {
+    ...again,
+    // Report the weaker of the two looks: an Exact is only as good as its worst round.
+    visual_similarity: Math.min(winner.similarity, front.visual_similarity),
+    visual_confidence: Math.min(winner.confidence, front.visual_confidence),
+    confidence: Math.min(0.99, Math.min(winner.similarity, front.visual_similarity)),
+  };
+}
+
 export function eligibleSameVideoCanonicalCandidates(input: {
   description: ObjectDescription;
   candidates: SameVideoCanonicalCandidate[];
@@ -632,12 +794,41 @@ export function resolveSameVideoReuse(input: {
     // A previously promoted track is evidence, not an exclusive answer set.
     // Compare every canonical roster candidate that survived structural validity;
     // the visual winner decides identity.
+    const comparisons = input.comparisons;
     const eligible = eligibleSameVideoCanonicalCandidates(input);
-    const decision = selectSameVideoVisualWinner({ candidates: eligible, comparisons: input.comparisons });
-    if (input.require_complete_comparisons && unresolvedRosterCandidateKeys({ candidates: eligible, comparisons: input.comparisons }).length) {
-      return { mapping: null, canonical_key: null, confidence: 0, reason: 'incomplete_comparison' };
+    const decision = selectSameVideoVisualWinner({ candidates: eligible, comparisons });
+    if (!input.require_complete_comparisons) return decision;
+    const coverage = { candidates: eligible, comparisons };
+    // Coverage only determines whether we can proceed to confirmation; it
+    // never grants EXACT. Even when every comparison is high confidence, the
+    // single winner must survive an independent head-to-head verification.
+    const incomplete: SameVideoReuseDecision = { mapping: null, canonical_key: null, confidence: 0, reason: 'incomplete_comparison' };
+    // Without a single strictly confirmed winner nothing below can produce one.
+    if (!decision.mapping || !decision.canonical_key || decision.reason !== 'visual_confirmed') return incomplete;
+    // A candidate nobody looked at could be the real product.
+    if (unexaminedRosterCandidateKeys(coverage).length) return incomplete;
+    // Everything was examined and exactly one candidate passed the strict check.
+    // What is left is that the model was not itself 0.9-sure of every rejection,
+    // which on a roster of lookalikes it never is. Demanding that made the
+    // resolver abstain on every click. The question that matters is whether any
+    // rival is close to the winner, and that is settled by a head-to-head round.
+    const winner = comparisons.get(decision.canonical_key)!;
+    const others = eligible
+      .filter(row => row.identity.canonical_key !== decision.canonical_key && validComparison(comparisons.get(row.identity.canonical_key)))
+      .map(row => ({ key: row.identity.canonical_key, similarity: comparisons.get(row.identity.canonical_key)!.similarity }))
+      .sort((a, b) => b.similarity - a.similarity || a.key.localeCompare(b.key));
+    const close = others.filter(other => withinRivalMargin(other.similarity, winner.similarity));
+    // More close rivals than one round can hold: too crowded to call.
+    if (close.length > HEAD_TO_HEAD_RIVALS) {
+      return { mapping: null, canonical_key: null, confidence: 0, reason: 'ambiguous', rival_keys: [decision.canonical_key, ...close.map(other => other.key)] };
     }
-    return decision;
+    // A lone candidate has no rival to be confused with, but it still gets a
+    // second, independent look before it can be called Exact.
+    return {
+      mapping: null, canonical_key: null, confidence: 0, reason: 'head_to_head_required',
+      front_runner: { mapping: decision.mapping, canonical_key: decision.canonical_key, visual_similarity: winner.similarity, visual_confidence: winner.confidence },
+      head_to_head_rivals: others.slice(0, HEAD_TO_HEAD_RIVALS).map(other => other.key),
+    };
   }
   const model = exactModelSameVideoReuse(input);
   if (model.mapping) return model;
