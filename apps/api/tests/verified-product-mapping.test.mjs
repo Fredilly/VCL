@@ -480,8 +480,9 @@ test('production resolver never promotes a legacy timestamp-window hit to EXACT 
       context: { platform: 'youtube', content_ref: 'WINDOW_ONLY_VIDEO', timestamp_ms: 100000 },
     }),
   }), { VERIFIED_PRODUCT_MAPPINGS_JSON: JSON.stringify([mapping]) });
-  assert.equal(response.status, 200);
+  // With no commerce provider or visual verifier configured, production must
+  // fail closed rather than returning the old timestamp-bound item as EXACT.
+  assert.equal(response.status, 503);
   const result = await response.json();
-  assert.equal(result.verified_mapping?.hit, false);
   assert.ok(!result.products?.some(product => product.result_class === 'EXACT'));
 });
