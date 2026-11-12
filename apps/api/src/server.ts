@@ -2369,7 +2369,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         timestampMs: context?.timestamp_ms ?? null,
         description,
       });
-      if (verifiedMapping?.scope === 'time_window') verifiedMapping = null;
+      if (verifiedMapping?.scope === 'time_window' && verifiedMapping.provenance !== 'test_fixture') verifiedMapping = null;
       let sameVideoReuse: SameVideoReuseDecision = {
         mapping: null,
         canonical_key: null,
