@@ -66,7 +66,8 @@ test('six durable correction assets improve repeat resolution and other-video re
   assert.equal(reuse.resolveSameVideoReuse({ description, candidates: before.candidates, comparisons: new Map(Object.entries(before.comparisons)) }).mapping, null);
   const cropAsset = await learning.cacheLearningImage(env, crop, 'observation');
   await ledgerMod.persistCanonicalProductIdentity(env, rows[1].identity);
-  const build = () => learning.buildCorrectionBundle({ event_id: 'event-1', result_id: 'result-1', action: 'verify_product', reviewed_by: 'admin', crop_asset: cropAsset, platform: 'youtube', content_ref: 'video-A', timestamp_ms: 9000, canonical_product: rows[1].identity, candidates: rows, description, comparisons: { [wrong]: visual(.5), [key]: visual(.98) }, before, newly_learned: true });
+  const build = () => learning.buildCorrectionBundle({ event_id: 'event-1', result_id: 'result-1', action: 'verify_product', reviewed_by: 'admin', crop_asset: cropAsset, platform: 'youtube', content_ref: 'video-A', timestamp_ms: 9000, canonical_product: rows[1].identity, candidates: rows, description, comparisons: { [wrong]: visual(.5), [key]: visual(.98) },
+    head_to_head_comparisons: { [wrong]: visual(.5), [key]: visual(.98) }, before, newly_learned: true });
   const bundle = await learning.persistCorrectionBundle(env, build());
   assert.equal(bundle.hard_negatives.length, 1);
   assert.ok(bundle.positive_observation && bundle.canonical_product && bundle.regression_case && bundle.appearance && bundle.metrics);
