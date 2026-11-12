@@ -2253,6 +2253,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
               action: action as 'hard_negative' | 'verify_product', reviewed_by: authorized.admin_id,
               crop_asset: cropAsset, platform: item.platform, content_ref: item.content_ref, timestamp_ms: item.timestamp_ms,
               canonical_product: saved, candidates: rows, description, comparisons: check.comparisons ?? {},
+              head_to_head_comparisons: check.head_to_head?.comparisons,
               before: { id: 'before', scenario: 'reviewed_correction', timestamp_ms: item.timestamp_ms, candidates: rosterRows, description,
                 comparisons: check.comparisons ?? {}, expected_class: canonicalKey, truth: 'IN_ROSTER' }, newly_learned: !wasKnown });
             learned = await persistCorrectionBundle(env, bundle);
