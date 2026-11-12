@@ -475,6 +475,27 @@ test('a transient verifier 429 is retried with backoff and then succeeds', async
   assert.equal(result.usage.cost_usd, 0.0001);
 });
 
+test('OpenRouter verification enforces no data collection and ZDR for every retry', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  const requests = [];
+  const { compareCandidateImages } = loadModule(filename, { fetch: async (url, options) => {
+    if (!String(url).includes('openrouter.ai')) {
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+    }
+    const body = JSON.parse(options.body);
+    requests.push(body);
+    if (requests.length === 1) return new Response('rate limited', { status: 429 });
+    return Response.json({ choices: [{ message: { content: JSON.stringify({
+      source: comparison.source, candidates: [{ index: 0, attributes: comparison.candidate, ...comparison }],
+    }) } }] });
+  } });
+  const result = await compareCandidateImages('key', 'model', image, description, [candidate], undefined, undefined,
+    { provider: 'openrouter', maxAttempts: 2, backoffMs: 0 });
+  assert.equal(requests.length, 2);
+  for (const body of requests) assert.deepEqual(body.provider, { data_collection: 'deny', zdr: true });
+  assert.equal(result.compared, 1);
+});
+
 test('a hard verifier rate limit stops later batches and returns their reserved budget', async () => {
   const { candidate, description } = example(apparelCases[0]);
   let modelCalls = 0, imageCalls = 0;
