@@ -454,3 +454,34 @@ test('multi-product partner catalog resolves when the exact SKU is explicitly gr
 
   assert.equal(hit?.product_id, 'N40952');
 });
+
+test('production resolver never promotes a legacy timestamp-window hit to EXACT without pixels', async () => {
+  const server = loadModule(resolve(here, '../src/server.ts'), {
+    fetch: async () => { throw new Error('No remote call should be required by this test'); },
+  });
+  const mapping = {
+    platform: 'youtube',
+    content_ref: 'WINDOW_ONLY_VIDEO',
+    scope: 'time_window',
+    timestamp_start_ms: 90000,
+    timestamp_end_ms: 110000,
+    object_type: 'button-down shirt',
+    brand: 'Nike',
+    product_id: 'SAVED-WINDOW-SKU',
+    title: 'Old saved shirt',
+    destination: 'https://www.nike.com/',
+    provenance: 'admin_verified',
+  };
+  const response = await server.default.fetch(new Request('https://api.scoop.shop/resolve-products', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      description: { ...shirt, brand_candidate: 'Nike', model_candidate: null },
+      context: { platform: 'youtube', content_ref: 'WINDOW_ONLY_VIDEO', timestamp_ms: 100000 },
+    }),
+  }), { VERIFIED_PRODUCT_MAPPINGS_JSON: JSON.stringify([mapping]) });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.verified_mapping?.hit, false);
+  assert.ok(!result.products?.some(product => product.result_class === 'EXACT'));
+});
