@@ -517,6 +517,8 @@ export async function compareCandidateImages(
                       ? { type: 'text', text: part.text }
                       : { type: 'image_url', image_url: { url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` } }) },
                   ],
+                  // Match recognition's no-training / zero-retention routing for every verifier attempt.
+                  provider: { data_collection: 'deny', zdr: true },
                   response_format: structured
                     ? { type: 'json_schema', json_schema: { name: 'candidate_comparison', strict: true, schema: VERIFIER_JSON_SCHEMA } }
                     : { type: 'json_object' },
