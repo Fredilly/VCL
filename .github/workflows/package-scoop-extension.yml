@@ -1,0 +1,48 @@
+name: Package Scoop extension
+
+on:
+  push:
+    branches:
+      - build/scoop-extension-download
+      - main
+    paths:
+      - 'apps/extension/**'
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+      - '.github/workflows/package-scoop-extension.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-extension:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build Chrome extension
+        run: pnpm --filter @vcl/extension build
+      - name: Verify loadable manifest
+        run: test -f apps/extension/.output/chrome-mv3/manifest.json
+      - name: Package extension
+        run: |
+          cd apps/extension/.output/chrome-mv3
+          zip -qr "$GITHUB_WORKSPACE/scoop-extension-chrome.zip" .
+      - name: Upload ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: scoop-extension-chrome
+          path: scoop-extension-chrome.zip
+          retention-days: 30
+          if-no-files-found: error
