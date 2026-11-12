@@ -1,0 +1,74 @@
+name: Chrome Web Store package
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/chrome-web-store-package.yml'
+      - 'apps/extension/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build and inspect Scoop ZIP
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare extension types
+        run: pnpm --filter @vcl/extension exec wxt prepare
+
+      - name: Typecheck extension
+        run: pnpm --filter @vcl/extension check
+
+      - name: Build Chrome Web Store ZIP
+        run: pnpm --filter @vcl/extension exec wxt zip -b chrome
+
+      - name: Validate release ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t zips < <(find apps/extension/.output -maxdepth 1 -type f -name '*chrome*.zip' | sort)
+          if [[ ${#zips[@]} -ne 1 ]]; then
+            echo "Expected exactly one Chrome ZIP; found ${#zips[@]}"
+            exit 1
+          fi
+          ZIP="${zips[0]}"
+          unzip -t "$ZIP"
+          unzip -Z1 "$ZIP" | grep -qx 'manifest.json'
+          unzip -p "$ZIP" manifest.json | node -e '
+            let raw=""; process.stdin.on("data", c=>raw+=c).on("end", ()=>{
+              const m=JSON.parse(raw);
+              if(m.manifest_version !== 3 || m.name !== "Scoop") process.exit(1);
+              if(!Array.isArray(m.permissions) || !m.permissions.includes("activeTab")) process.exit(1);
+              console.log("Validated",m.name,"version",m.version,"MV",m.manifest_version);
+            });'
+          mkdir -p release
+          cp "$ZIP" release/scoop-chrome-web-store.zip
+          sha256sum release/scoop-chrome-web-store.zip
+
+      - name: Upload release package
+        uses: actions/upload-artifact@v4
+        with:
+          name: scoop-chrome-web-store
+          path: release/scoop-chrome-web-store.zip
+          if-no-files-found: error
+          retention-days: 30
