@@ -1,6 +1,8 @@
 name: Package Scoop extension
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches:
       - build/scoop-extension-download
