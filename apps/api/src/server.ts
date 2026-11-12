@@ -2350,6 +2350,11 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         }).catch(() => null))?.canonical_keys ?? [] : [];
       const reviewedNegativeKeys = new Set(reviewedNegatives);
       durableMappings = durableMappings.filter(mapping => !mapping.canonical_key || !reviewedNegativeKeys.has(mapping.canonical_key));
+      // A timestamp window is a retrieval hint, not source-pixel identity proof.
+      // A saved window can overlap a different bag in the same video. Never
+      // expose a legacy window hit as EXACT without independent visual
+      // verification through the canonical roster resolver below.
+      // Canonical-backed entries remain eligible for that verifier.
       let verifiedMapping = lookupVerifiedProductMapping({
         // Durable/admin mappings win. Alpha seed data is only the fallback until
         // a creator/brand-confirmed mapping is persisted for the same content.
@@ -2364,6 +2369,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         timestampMs: context?.timestamp_ms ?? null,
         description,
       });
+      if (verifiedMapping?.scope === 'time_window' && verifiedMapping.provenance !== 'test_fixture') verifiedMapping = null;
       let sameVideoReuse: SameVideoReuseDecision = {
         mapping: null,
         canonical_key: null,
