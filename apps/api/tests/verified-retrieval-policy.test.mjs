@@ -188,7 +188,7 @@ test('verifier outage stops commerce expansion and hides metadata-only shopping 
       image_reference: 'https://merchant.example/noisy.jpg',
       price: null, currency: null, result_class: 'RELATED', provenance: 'commerce',
     }];
-  } }];
+  } }}];
   const queries = [
     { query: 'blue shirt', category: 'apparel', subcategory: 'shirt', brand: null, model: null, attributes: [] },
     { query: 'other blue shirt', category: 'apparel', subcategory: 'shirt', brand: null, model: null, attributes: [] },
