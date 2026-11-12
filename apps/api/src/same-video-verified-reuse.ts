@@ -799,8 +799,9 @@ export function resolveSameVideoReuse(input: {
     const decision = selectSameVideoVisualWinner({ candidates: eligible, comparisons });
     if (!input.require_complete_comparisons) return decision;
     const coverage = { candidates: eligible, comparisons };
-    // Every candidate confidently settled: the original, strictest path.
-    if (!unresolvedRosterCandidateKeys(coverage).length) return decision;
+    // Coverage only determines whether we can proceed to confirmation; it
+    // never grants EXACT. Even when every comparison is high confidence, the
+    // single winner must survive an independent head-to-head verification.
     const incomplete: SameVideoReuseDecision = { mapping: null, canonical_key: null, confidence: 0, reason: 'incomplete_comparison' };
     // Without a single strictly confirmed winner nothing below can produce one.
     if (!decision.mapping || !decision.canonical_key || decision.reason !== 'visual_confirmed') return incomplete;
