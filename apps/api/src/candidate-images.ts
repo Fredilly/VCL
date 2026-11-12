@@ -377,6 +377,11 @@ export async function compareCandidateImages(
   // endpoint refuses the schema, the rest of this interaction uses plain JSON
   // mode, exactly as before.
   let structuredOutput = verificationProvider === 'openrouter' && options.pixelOnlySource === true && options.structuredOutput !== false;
+  // OpenRouter may have no endpoint for the configured model under the required
+  // zero-retention policy. Give one other vision-capable ZDR-routed model a
+  // chance, without ever relaxing the request's privacy restrictions.
+  const privacyFallbackModel = 'qwen/qwen3.8-27b';
+  let activeModel = model;
   // Pacing is shared across concurrent batches so the aggregate call rate is
   // bounded, not just each batch's. Retries go through the same gate.
   let nextSlotAt = 0;
@@ -510,7 +515,7 @@ export async function compareCandidateImages(
                 },
                 signal: AbortSignal.timeout(12000),
                 body: JSON.stringify({
-                  model,
+                  model: activeModel,
                   messages: [
                     { role: 'system', content: system },
                     { role: 'user', content: parts.map((part) => 'text' in part
@@ -596,10 +601,21 @@ export async function compareCandidateImages(
           }
           if (!result.ok) {
             reason = `model_http_${result.status}`;
+            if (result.status === 404 && verificationProvider === 'openrouter'
+              && activeModel !== privacyFallbackModel) {
+              // 404 may mean that none of this model's endpoints satisfy ZDR.
+              // Reserve the extra model call; fail closed if there is no budget.
+              if (!reserve(batchBudget)) { reason = 'image_budget'; break; }
+              activeModel = privacyFallbackModel;
+              usage.model = `${model} -> ${privacyFallbackModel}`;
+              failure('model_privacy_reroute');
+              attempt--; // this is routing recovery, not a malformed response retry
+              continue;
+            }
             if (![429, 500, 502, 503, 504].includes(result.status)) {
               // Auth failures never heal by retrying, and later batches must not
               // spend their own calls discovering the same thing.
-              if (result.status === 401 || result.status === 403) providerUnavailableReason = reason;
+              if ([401, 403, 404].includes(result.status)) providerUnavailableReason = reason;
               break;
             }
             // A hard rate limit that survives recovery means the provider is

@@ -176,3 +176,32 @@ test('verified commerce mapping hydrates its thumbnail and collapses same-SKU se
   assert.deepEqual(Array.from(result.providers_used), ['ebay']);
   assert.equal(result.commerce_calls.ebay, 2);
 });
+
+test('verifier outage stops commerce expansion and hides metadata-only shopping noise', async () => {
+  const { resolveProducts } = loadModule(serverFile, { console: { error() {}, warn() {} } });
+  let searches = 0;
+  const providers = [{ name: 'ebay', tier: 'primary', provider: { search: async () => {
+    searches++;
+    return [{
+      id: 'noisy', title: 'Generic blue shirt', brand: 'Brand', category: 'shirt',
+      destination: 'https://merchant.example/noisy',
+      image_reference: 'https://merchant.example/noisy.jpg',
+      price: null, currency: null, result_class: 'RELATED', provenance: 'commerce',
+    }];
+  } }}];
+  const queries = [
+    { query: 'blue shirt', category: 'apparel', subcategory: 'shirt', brand: null, model: null, attributes: [] },
+    { query: 'other blue shirt', category: 'apparel', subcategory: 'shirt', brand: null, model: null, attributes: [] },
+  ];
+  const mockVerifier = async () => ({
+    compared: 0, failures: 1, provider_unavailable: 'model_http_404',
+    failure_reasons: { model_http_404: 1 }, comparisons: new Map(),
+  });
+  const result = await resolveProducts(providers, queries, description,
+    { VISION_PROVIDER: 'openrouter', OPENROUTER_API_KEY: 'test-key' },
+    undefined, { mimeType: 'image/png', data: btoa('crop') }, mockVerifier);
+  assert.equal(searches, 1, 'do not waste commerce calls after verifier outage');
+  assert.equal(result.state, 'TEMPORARILY_UNAVAILABLE');
+  assert.equal(result.products.length, 0, 'unverified shopping hits must not look like successful matches');
+  assert.equal(result.verification.image_failure_reasons.model_http_404, 1);
+});

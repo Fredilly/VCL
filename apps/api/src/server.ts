@@ -1361,6 +1361,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
   let attempts = 0;
   let sawProviderFailure = false;
   let completedProviderAttempt = false;
+  let verifierUnavailable: string | null = null;
   let activeProviders = [...providers];
   const providersUsed = new Set<string>();
   const accepted: ProductCandidate[] = [];
@@ -1412,7 +1413,14 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
         serpapiTelemetry.skip_reason = 'quota_exhausted';
       }
     }
-    const state = accepted.length
+    // When every model endpoint is unavailable, metadata-only shopping hits
+    // are not evidence of a product match. Do not display them as successes.
+    const visible = verifierUnavailable && sourceImage
+      ? accepted.filter(product => product.verification_status === 'multimodal')
+      : accepted;
+    const state = verifierUnavailable && !visible.length
+      ? 'TEMPORARILY_UNAVAILABLE' as const
+      : visible.length
       ? 'RESULTS' as const
       : completedProviderAttempt
         ? 'NO_RESULTS' as const
@@ -1421,7 +1429,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
           : 'NO_RESULTS' as const;
     return {
       query,
-      products: dedupeProducts(rankVerified(accepted)),
+      products: dedupeProducts(rankVerified(visible)),
       state,
       providers_configured: providers.map((p) => p.name),
       providers_used: [...providersUsed],
@@ -1467,6 +1475,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
         imageBudget,
         { provider: useOpenRouterVerification ? 'openrouter' : 'gemini' },
       );
+      if (images.provider_unavailable) verifierUnavailable = images.provider_unavailable;
       verification.compared += images.compared;
       verification.image_failures += images.failures;
       verificationUsage.requests += images.usage?.requests ?? 0;
@@ -1539,6 +1548,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       });
       if (failedProviders.size) activeProviders = activeProviders.filter(({ name }) => !failedProviders.has(name));
       await verifyFresh(products);
+      if (verifierUnavailable) return respond(query);
     }
 
     if (accepted.length >= SUFFICIENT_CANDIDATE_THRESHOLD) {
@@ -1574,6 +1584,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
         }
       } finally { timing.provider_retrieval_ms += Date.now() - retrievalStarted; }
       if (result) await verifyFresh(result);
+      if (verifierUnavailable) return respond(query);
     } else if (!braveProvider && !braveTelemetry.skip_reason) {
       braveTelemetry.skipped = true;
       braveTelemetry.skip_reason = 'not_configured';
@@ -1616,6 +1627,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
         }
       } finally { timing.provider_retrieval_ms += Date.now() - retrievalStarted; }
       if (result) await verifyFresh(result);
+      if (verifierUnavailable) return respond(query);
     } else if (!serpapiProvider && !serpapiTelemetry.skip_reason) {
       serpapiTelemetry.skipped = true;
       serpapiTelemetry.skip_reason = 'not_configured';

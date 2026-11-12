@@ -496,6 +496,51 @@ test('OpenRouter verification enforces no data collection and ZDR for every retr
   assert.equal(result.compared, 1);
 });
 
+test('OpenRouter 404 reroutes to a vision-capable model without weakening ZDR', async () => {
+  const { candidate, description, comparison } = example(apparelCases[0]);
+  const models = [];
+  const { compareCandidateImages } = loadModule(filename, { fetch: async (url, options) => {
+    if (!String(url).includes('openrouter.ai')) {
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+    }
+    const body = JSON.parse(options.body);
+    models.push(body.model);
+    assert.deepEqual(body.provider, { data_collection: 'deny', zdr: true });
+    if (body.model === 'unavailable-model') return new Response('not available under privacy policy', { status: 404 });
+    return Response.json({ choices: [{ message: { content: JSON.stringify({
+      source: comparison.source, candidates: [{ index: 0, attributes: comparison.candidate, ...comparison }],
+    }) } }] });
+  } });
+  const result = await compareCandidateImages('key', 'unavailable-model', image, description, [candidate],
+    undefined, undefined, { provider: 'openrouter', maxAttempts: 1 });
+  assert.deepEqual(models, ['unavailable-model', 'qwen/qwen3.8-27b']);
+  assert.equal(result.compared, 1);
+  assert.equal(result.provider_unavailable, undefined);
+  assert.equal(result.failure_reasons.model_privacy_reroute, 1);
+});
+
+test('OpenRouter fallback 404 stops additional batches rather than searching blindly', async () => {
+  const { candidate, description } = example(apparelCases[0]);
+  let modelCalls = 0;
+  const { compareCandidateImages } = loadModule(filename, { fetch: async (url, options) => {
+    if (!String(url).includes('openrouter.ai')) {
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+    }
+    modelCalls++;
+    const body = JSON.parse(options.body);
+    assert.deepEqual(body.provider, { data_collection: 'deny', zdr: true });
+    return new Response('unavailable', { status: 404 });
+  } });
+  const products = Array.from({ length: 18 }, (_, i) => ({
+    ...candidate, id: '404-' + i, image_reference: `https://cdn.shopify.com/404-${i}.png`,
+  }));
+  const result = await compareCandidateImages('key', 'unavailable-model', image, description, products,
+    undefined, undefined, { provider: 'openrouter', concurrency: 1, maxAttempts: 1 });
+  assert.equal(modelCalls, 2, 'primary and one fallback, no further requests');
+  assert.equal(result.provider_unavailable, 'model_http_404');
+  assert.equal(result.compared, 0);
+});
+
 test('a hard verifier rate limit stops later batches and returns their reserved budget', async () => {
   const { candidate, description } = example(apparelCases[0]);
   let modelCalls = 0, imageCalls = 0;
