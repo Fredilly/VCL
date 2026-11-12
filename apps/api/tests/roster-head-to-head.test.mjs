@@ -109,6 +109,20 @@ test('a clear winner on a roster of lookalikes becomes Exact after winning the h
   }
 });
 
+// Complete/high-confidence first-pass coverage is not independent confirmation.
+// Previously this returned EXACT immediately, silently skipping head-to-head.
+test('complete roster comparisons still require a second head-to-head confirmation', async () => {
+  const clearFirstPass = name => name === 'Speedy Red 20' ? [.95, .95] : [.2, .95];
+  const { result, calls } = await resolve({
+    stage: clearFirstPass,
+    round: name => name === 'Speedy Red 20' ? [.7, .95] : [.2, .95],
+  });
+  assert.equal(calls.round, 1, 'all first-pass comparisons being confident must not skip the second round');
+  assert.equal(result.verified_mapping.hit, false);
+  assert.ok(!result.products.some(product => product.result_class === 'EXACT'));
+  assert.deepEqual(result.verified_mapping.head_to_head, { rivals: 3, outcome: 'ambiguous' });
+});
+
 test('a rival that closes in during the round stops the Exact; the likely products are shown as SIMILAR instead', async () => {
   const { result, calls } = await resolve({ stage: realistic, round: name => name === 'Speedy Red 20' ? [.92, .92] : name === 'Speedy Red 40' ? [.85, .8] : [.3, .75] });
   assert.equal(result.verified_mapping.hit, false);
