@@ -3,7 +3,7 @@ import { fetchCatalogImage, parseSourceImage, safeImageUrl, type CatalogImage } 
 import { fetchPartnerCatalogMetadata, type PartnerCatalogMetadata } from './partner-catalog.js';
 import { recoverVerifiedProductImage } from './verified-image-recovery.js';
 import { persistAdminVerifiedMapping, persistCanonicalProductIdentity, verifiedLedgerRequest, type VerifiedProductLedgerEnv } from './verified-product-ledger.js';
-import { resolveSameVideoReuse, type SameVideoCanonicalCandidate } from './same-video-verified-reuse.js';
+import { confirmHeadToHead, resolveSameVideoReuse, type SameVideoCanonicalCandidate } from './same-video-verified-reuse.js';
 import type { VerifiedProductMapping } from './verified-product-mapping.js';
 import type { ObjectDescription } from './types.js';
 import type { ImageComparison } from './verification-evidence.js';
@@ -160,6 +160,8 @@ export function buildCorrectionBundle(input: {
   crop_asset: string; platform: string; content_ref: string; timestamp_ms: number;
   canonical_product: CanonicalProductIdentity; candidates: SameVideoCanonicalCandidate[];
   description: ObjectDescription; comparisons: Record<string, ImageComparison>;
+  /** Independent second-round comparisons, required before asserting a learned Exact. */
+  head_to_head_comparisons?: Record<string, ImageComparison>;
   before?: LearningFixture; newly_learned: boolean;
 }): CorrectionBundle {
   if (!input.event_id || !input.result_id || !input.reviewed_by || !/^[a-f0-9]{64}$/.test(input.crop_asset)
@@ -173,8 +175,11 @@ export function buildCorrectionBundle(input: {
     && normalizeIdentityText(identity.brand) === normalizeIdentityText(canonical.brand)
     && normalizeIdentityText(identity.object_type) === normalizeIdentityText(canonical.object_type)
     && (!family || !identity.family || normalizeIdentityText(identity.family) === family));
-  const replay = resolveSameVideoReuse({ description: input.description, candidates: input.candidates, comparisons: new Map(Object.entries(input.comparisons)), require_complete_comparisons: true });
-  if (replay.canonical_key !== canonical.canonical_key || !replay.mapping) throw new Error('Correction replay did not pass the production trust gate');
+  const firstPass = resolveSameVideoReuse({ description: input.description, candidates: input.candidates, comparisons: new Map(Object.entries(input.comparisons)), require_complete_comparisons: true });
+  const replay = firstPass.reason === 'head_to_head_required' && input.head_to_head_comparisons
+    ? confirmHeadToHead({ decision: firstPass, comparisons: new Map(Object.entries(input.head_to_head_comparisons)) })
+    : firstPass.reason === 'head_to_head_required' ? null : firstPass;
+  if (replay?.canonical_key !== canonical.canonical_key || !replay.mapping || replay.reason !== 'visual_confirmed') throw new Error('Correction replay did not pass the production trust gate');
   if (siblings.some(row => !input.comparisons[row.identity.canonical_key])) throw new Error('Missing sibling comparisons; correction remains unlearned');
   const prior = input.before ? resolveSameVideoReuse({ description: input.before.description, candidates: input.before.candidates, comparisons: new Map(Object.entries(input.before.comparisons)) }) : null;
   const id = `correction:${encodeURIComponent(input.event_id)}:${encodeURIComponent(input.result_id)}`;
