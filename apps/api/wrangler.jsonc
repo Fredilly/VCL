@@ -19,6 +19,7 @@
     "JEV_DECISION_ROUTER": "true",
     "BENCHMARK_MODE": "false",
     "VERIFIED_PRODUCT_TEST_MODE": "false",
+    "SCOOP_SIMILAR_ONLY": "true",
     "VISUAL_PRODUCT_INDEX": "false"
   },
   "ai": {
