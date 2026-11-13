@@ -778,6 +778,25 @@ export function canonicalVisualExactOfferIds(input: {
   return exact;
 }
 
+/**
+ * A visual front-runner can be a useful commerce retrieval hypothesis even
+ * before independent head-to-head identity proof. Never promote it to EXACT
+ * here. The former `Boolean(decision.mapping)` check mistakenly discarded all
+ * strong first-pass candidates because `mapping` remains null until round two.
+ */
+export function rosterCommerceHypothesisAllowed(input: {
+  description: ObjectDescription;
+  candidate: SameVideoCanonicalCandidate;
+  comparison?: ImageComparison | null;
+}): boolean {
+  if (!input.comparison || input.comparison.confidence < 0.90) return true;
+  const decision = resolveSameVideoReuse({
+    description: input.description, candidates: [input.candidate],
+    comparisons: new Map([[input.candidate.identity.canonical_key, input.comparison]]),
+  });
+  return decision.reason === 'head_to_head_required' || Boolean(decision.mapping);
+}
+
 /** Resolve recorded evidence in one place. Once image verification has been
  * attempted, text/model nomination cannot override rejection or missing images.
  * Omitted comparisons retain the evidence-only shortcut API for legacy callers.
