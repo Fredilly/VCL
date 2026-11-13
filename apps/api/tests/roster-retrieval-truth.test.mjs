@@ -387,3 +387,20 @@ test('model readings contradict only when they cannot be the same product; namin
   colours.candidate = { ...colours.candidate, color: { value: 'black', confidence: .95, basis: 'image' } };
   assert.equal(reuse.strictVisualOutcome(colours), 'contradiction_color');
 });
+
+test('strong roster commerce hypothesis survives an uncompleted head-to-head round', () => {
+  const candidate = rosterCandidate({ key: 'strong', title: 'Acme Orbit White Bag', family: 'Orbit', color: 'white' });
+  const pixels = comparison(.97);
+  // With one candidate the identity resolver correctly refuses EXACT without
+  // an independent second look, but that is not grounds to discard the query.
+  const first = reuse.resolveSameVideoReuse({ description: description(), candidates: [candidate],
+    comparisons: new Map([['strong', pixels]]) });
+  assert.equal(first.reason, 'head_to_head_required');
+  assert.equal(first.mapping, null);
+  assert.equal(reuse.rosterCommerceHypothesisAllowed({ description: description(), candidate, comparison: pixels }), true);
+
+  const contradiction = { ...pixels, source: { ...pixels.source,
+    color: { value: 'black', confidence: .99, basis: 'image' } },
+    candidate: { ...pixels.candidate, color: { value: 'white', confidence: .99, basis: 'image' } } };
+  assert.equal(reuse.rosterCommerceHypothesisAllowed({ description: description(), candidate, comparison: contradiction }), false);
+});
