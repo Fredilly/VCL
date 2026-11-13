@@ -205,3 +205,17 @@ test('verifier outage stops commerce expansion and hides metadata-only shopping 
   assert.equal(result.products.length, 0, 'unverified shopping hits must not look like successful matches');
   assert.equal(result.verification.image_failure_reasons.model_http_404, 1);
 });
+
+test('alpha SIMILAR-only display downgrades EXACT without promoting unrelated products', () => {
+  const { alphaPresentationProducts } = loadModule(serverFile);
+  const products = [
+    { id: 'matched', result_class: 'EXACT', relationship: 'EXACT', verification_reasons: [] },
+    { id: 'similar', result_class: 'SIMILAR', relationship: 'SIMILAR' },
+    { id: 'unrelated', result_class: 'RELATED', relationship: 'RELATED' },
+  ];
+  const result = alphaPresentationProducts(products, { SCOOP_SIMILAR_ONLY: 'true' });
+  assert.deepEqual(result.map(p => p.result_class), ['SIMILAR', 'SIMILAR', 'RELATED']);
+  assert.equal(result[0].relationship, 'SIMILAR');
+  assert.equal(products[0].result_class, 'EXACT', 'do not mutate canonical evidence');
+  assert.strictEqual(alphaPresentationProducts(products, { SCOOP_SIMILAR_ONLY: 'false' }), products);
+});
