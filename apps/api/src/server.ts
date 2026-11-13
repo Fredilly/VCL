@@ -32,7 +32,7 @@ import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, create
 import { lookupVerifiedProductMapping, parseVerifiedProductMappings, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { backfillLegacyAdminCanonicalMappings, consolidateCanonicalProducts, durableCanonicalCandidates, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
 import { confirmHeadToHead, probableRosterCandidates, strictVisualOutcome } from './same-video-verified-reuse.js';
-import { eligibleSameVideoCanonicalCandidates, resolveSameVideoReuse, identityWithTrustedVpmObservations, rankSameVideoRosterCandidates, retrieveSameVideoRosterCandidates, unresolvedRosterCandidateKeys, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
+import { eligibleSameVideoCanonicalCandidates, resolveSameVideoReuse, identityWithTrustedVpmObservations, rankSameVideoRosterCandidates, retrieveSameVideoRosterCandidates, unresolvedRosterCandidateKeys, rosterCommerceHypothesisAllowed, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, preferredCanonicalReference, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
 import { authorizeAdminSession, createAdminInvite, createBootstrapAdmin, redeemAdminInvite, auditAdminAction, type AdminAccessNamespaceLike } from './admin-access.js';
@@ -2718,9 +2718,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         // A rejected roster reference is not a useful commerce hypothesis.
         .filter(row => {
           const comparison = sameVideoVisualCheck.comparisons?.[row.identity.canonical_key];
-          if (!comparison || comparison.confidence < .9) return true;
-          return Boolean(resolveSameVideoReuse({ description, candidates: [row],
-            comparisons: new Map([[row.identity.canonical_key, comparison]]) }).mapping);
+          return rosterCommerceHypothesisAllowed({ description, candidate: row, comparison });
         });
       const rosterQueries = rankedRosterRows.slice(0, 4).map(row => ({
         ...baseQueries[0], query: row.identity.title, model: null,
