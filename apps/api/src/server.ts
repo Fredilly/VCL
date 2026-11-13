@@ -99,6 +99,8 @@ export interface Env {
   VERIFIER_MAX_ATTEMPTS?: string;
   /** 'false' turns off schema-enforced verifier output (OpenRouter). Default on. */
   VERIFIER_STRUCTURED_OUTPUT?: string;
+  /** Alpha display policy: never label an item EXACT until independently measured. */
+  SCOOP_SIMILAR_ONLY?: string;
 }
 
 /**
@@ -118,6 +120,18 @@ export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIE
     ...(Number.isInteger(attempts) && attempts >= 1 && attempts <= 3 ? { maxAttempts: attempts } : {}),
     ...(env.VERIFIER_STRUCTURED_OUTPUT === 'false' ? { structuredOutput: false } : {}),
   };
+}
+
+/** Presentation-only cap; evidence, identity and learning decisions are unchanged.
+ * RELATED is not silently promoted into SIMILAR; only verified EXACT is demoted. */
+export function alphaPresentationProducts<T extends ProductCandidate>(
+  products: T[], env: Pick<Env, 'SCOOP_SIMILAR_ONLY'>,
+): T[] {
+  if (env.SCOOP_SIMILAR_ONLY !== 'true') return products;
+  return products.map(product => product.result_class !== 'EXACT' ? product : {
+    ...product, result_class: 'SIMILAR' as const, relationship: 'SIMILAR' as const,
+    verification_reasons: [...(product.verification_reasons ?? []), 'Exact label withheld during alpha validation'],
+  });
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
@@ -2568,7 +2582,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             model: verifiedMapping.product_id || null,
             attributes: [],
           },
-          products: refreshed.products,
+          products: alphaPresentationProducts(refreshed.products, env),
           state: 'RESULTS',
           providers_configured: configuredProviders.map(({ name }) => name),
           providers_used: refreshed.providers_used,
@@ -2877,7 +2891,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
       return jsonResponse({
         ...resolved,
-        products: attributedProducts,
+        products: alphaPresentationProducts(attributedProducts, env),
         feedback_learning: feedbackLearning,
         verified_mapping: {
           hit: false,
