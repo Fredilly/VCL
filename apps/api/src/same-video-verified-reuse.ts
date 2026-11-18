@@ -461,14 +461,15 @@ export function verifiedProductMemoryCandidates(input: {
 }
 
 /**
- * Most roster candidates one click can compare. Workers Free allows 50
- * subrequests per invocation: each candidate costs one image fetch, each batch of
- * six costs one model call, and retrieval, offers and the head-to-head round need
- * roughly eight more. 32 keeps the whole click inside that budget with headroom.
- * A roster above this abstains (`roster_exceeds_visual_budget`) rather than
- * silently comparing a prefix and reporting the shortfall as a verifier problem.
+ * Most roster candidates one click can compare. The platform allows 50
+ * subrequests per invocation and the resolver needs about eight for retrieval,
+ * offers and the head-to-head round. Worst case is: one image attempt per
+ * candidate, up to eight fallback attempts when a primary image is dead (32
+ * attempts total, capped in candidate-images), four model calls for 24
+ * candidates, and three redirect hops — 47, inside the limit. A larger roster
+ * cannot be covered honestly and abstains (`roster_exceeds_visual_budget`).
  */
-export const ROSTER_VISUAL_CANDIDATE_LIMIT = 32;
+export const ROSTER_VISUAL_CANDIDATE_LIMIT = 24;
 
 /**
  * One roster row per variant of one product family (Side Trunk, Neverfull, ...).

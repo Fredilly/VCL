@@ -78,17 +78,17 @@ test('thumbnail redirects are followed only to validated public hosts', async ()
   assert.equal(calls, 1); assert.equal(result.failure_reasons.image_redirect, 1);
 });
 
-test('image subrequest budget is shared across broadening and leaves room for retrieval', async () => {
+test('image fetch attempts are capped across broadening and leave room for retrieval', async () => {
   const { candidate, description, comparison } = example(apparelCases[0]);
-  let requests = 0, modelCalls = 0;
-  const { compareCandidateImages, imageRequestBudget } = loadModule(filename, { fetch: async (url, options) => {
-    requests++;
+  let imageRequests = 0, modelCalls = 0;
+  const { compareCandidateImages, imageRequestBudget, MAX_IMAGE_FETCHES_PER_INVOCATION } = loadModule(filename, { fetch: async (url, options) => {
     if (String(url).includes('generativelanguage')) {
       modelCalls++;
       const count = JSON.parse(options.body).contents[0].parts.filter((p) => p.inlineData).length - 1;
       return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: comparison.source,
         candidates: Array.from({ length: count }, (_, index) => ({ index, attributes: comparison.candidate, ...comparison })) }) }] } }] });
     }
+    imageRequests++;
     return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
   } });
   const budget = imageRequestBudget();
@@ -96,9 +96,14 @@ test('image subrequest budget is shared across broadening and leaves room for re
   const first = await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
   const second = await compareCandidateImages('key', 'model', image, description, products.slice(0, 12), undefined, budget);
   const third = await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
-  assert.equal(first.compared, 24); assert.equal(second.compared, 12);
-  assert.equal(third.compared, 0); assert.equal(third.failure_reasons.image_budget, 24);
-  assert.equal(requests, 42); assert.equal(modelCalls, 6); assert.equal(budget.remaining, 0);
+  assert.equal(first.compared, 24);
+  // The invocation allowance is 32 attempts, so broadening can spend the
+  // remaining eight and no more.
+  assert.equal(imageRequests, MAX_IMAGE_FETCHES_PER_INVOCATION);
+  assert.equal(second.compared + (second.failure_reasons.image_budget ?? 0), 12);
+  assert.equal(third.compared, 0);
+  assert.equal(third.failure_reasons.image_budget, 24);
+  assert.ok(modelCalls >= 4);
 });
 
 test('verification batches run up to two concurrently for faster processing', async () => {
@@ -189,7 +194,7 @@ test('deterministic budget: budget partially sufficient for second batch verifie
   assert.equal(budget.remaining, 0);
 });
 
-test('deterministic budget: redirect headroom is preserved without exceeding the shared budget', async () => {
+test('deterministic budget: redirect hops are charged to the invocation allowance, not the image pool', async () => {
   const { candidate, description, comparison } = example(apparelCases[0]);
   let imageFetches = 0, modelCalls = 0;
   const { compareCandidateImages, imageRequestBudget } = loadModule(filename, { fetch: async (url) => {
@@ -205,13 +210,17 @@ test('deterministic budget: redirect headroom is preserved without exceeding the
     return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
   } });
   const budget = imageRequestBudget();
-  budget.remaining = 4; // 1 model + initial fetch + 2 redirects
+  budget.remaining = 4; // 1 model + initial fetch + 2 reserved hop slots
+  const hopsBefore = budget.redirects.remaining;
   const products = [{ ...candidate, id: '0' }];
   const result = await compareCandidateImages('key', 'model', image, description, products, undefined, budget);
   assert.equal(result.compared, 1);
   assert.equal(modelCalls, 1);
   assert.equal(imageFetches, 3);
-  assert.equal(budget.remaining, 0);
+  // Two hops came out of the invocation allowance rather than the image pool:
+  // the pool's own accounting is no longer what bounds redirects.
+  assert.equal(hopsBefore - budget.redirects.remaining, 2);
+  assert.ok(budget.remaining >= 0);
 });
 
 test('deterministic budget: partial allocation never creates more request capacity than reserved', async () => {

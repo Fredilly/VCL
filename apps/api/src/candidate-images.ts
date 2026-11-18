@@ -5,11 +5,38 @@ import { attributes, canonical, type Evidence, type ImageComparison } from './ve
 export type CatalogImage = { mimeType: string; data: string };
 type Image = CatalogImage;
 // Shared across query broadening. Leave eight subrequests for retrieval/OAuth on Workers Free.
-export type ImageRequestBudget = { remaining: number };
-export const imageRequestBudget = (): ImageRequestBudget => ({ remaining: 42 });
+/**
+ * Per-invocation request accounting. `remaining` counts image fetches and model
+ * calls; `redirects` counts hops separately, because a per-image redirect
+ * allowance multiplied the worst case by three and pushed a 32-row roster past
+ * the Workers Free subrequest limit. Bounding hops per invocation keeps the real
+ * worst case at `candidates + redirects + calls`, which is what the platform
+ * actually charges for.
+ */
+export type RedirectAllowance = { remaining: number };
+export type ImageRequestBudget = { remaining: number; redirects?: RedirectAllowance; fetches?: RedirectAllowance };
+export const MAX_IMAGE_REDIRECTS_PER_INVOCATION = 3;
+/**
+ * Hard ceiling on image fetch attempts per invocation, shared across every batch,
+ * fallback URL, retry and head-to-head round. Fallback URLs make the cost of a
+ * candidate variable, so the roster count alone cannot bound the subrequests the
+ * platform charges for.
+ */
+export const MAX_IMAGE_FETCHES_PER_INVOCATION = 32;
+export const imageRequestBudget = (): ImageRequestBudget => ({
+  remaining: 42,
+  redirects: { remaining: MAX_IMAGE_REDIRECTS_PER_INVOCATION },
+  fetches: { remaining: MAX_IMAGE_FETCHES_PER_INVOCATION },
+});
 function reserve(budget: ImageRequestBudget): boolean {
   if (budget.remaining <= 0) return false;
   budget.remaining--; return true;
+}
+function reserveRedirect(budget: ImageRequestBudget): boolean {
+  // Shared by reference across batches: the allowance is per invocation.
+  if (!budget.redirects) return true;
+  if (budget.redirects.remaining <= 0) return false;
+  budget.redirects.remaining--; return true;
 }
 export type GeminiVerificationUsage = {
   provider: 'gemini' | 'openrouter';
@@ -67,6 +94,10 @@ export function safeImageUrl(value: string): boolean {
 
 async function fetchImage(url: string, failure: (reason: string) => void, budget: ImageRequestBudget): Promise<Image | null> {
   if (!safeImageUrl(url)) { failure('image_url'); return null; }
+  if (budget.fetches) {
+    if (budget.fetches.remaining <= 0) { failure('image_budget'); return null; }
+    budget.fetches.remaining--;
+  }
   if (!reserve(budget)) { failure('image_budget'); return null; }
   try {
     // Handle redirects explicitly: different fetch runtimes/CDNs differ on redirect:error.
@@ -78,7 +109,7 @@ async function fetchImage(url: string, failure: (reason: string) => void, budget
       if (!location) { failure('image_redirect'); return null; }
       url = new URL(location, url).href;
       if (!safeImageUrl(url)) { failure('image_redirect'); return null; }
-      if (!reserve(budget)) { failure('image_budget'); return null; }
+      if (!reserveRedirect(budget)) { failure('image_redirect_budget'); return null; }
       response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(6000) });
     }
     const mimeType = response.headers.get('content-type')?.split(';')[0].trim() ?? '';
@@ -415,7 +446,7 @@ export async function compareCandidateImages(
   // returns unused budget it goes back to the shared pool for later batches, but
   // the reservation order is fixed so concurrent scheduling cannot change which
   // candidates get multimodal verification.
-  const batchBudgets: ImageRequestBudget[] = batches.map(() => ({ remaining: 0 }));
+  const batchBudgets: ImageRequestBudget[] = batches.map(() => ({ remaining: 0, redirects: budget.redirects, fetches: budget.fetches }));
   const imageCounts = batches.map((batch) => batch.reduce((sum, product) => sum + Math.max(1, candidateImageUrls(product).length), 0));
 
   // First reserve the minimum useful work in deterministic batch order:
@@ -434,6 +465,11 @@ export async function compareCandidateImages(
   // most two redirects, so each image can need two additional fetch slots.
   // Allocating this only after every batch gets its base share preserves
   // deterministic candidate priority without starving later batches.
+  //
+  // This is deliberate over-reservation of the application counter: when an
+  // invocation-wide redirect allowance is present, hops are charged to that
+  // allowance instead, so the real worst-case subrequest count is
+  // `images + allowance + model calls`, not three slots per image.
   for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
     if (batchBudgets[batchIndex].remaining <= 0) continue;
     for (let i = 0; i < imageCounts[batchIndex] * 2; i++) {

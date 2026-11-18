@@ -1018,11 +1018,14 @@ async function confirmSameVideoReuseWithImage(
   };
 
   const budget = imageRequestBudget();
-  // Coverage is not free: every candidate needs one model slot per batch plus up
-  // to three fetch slots (initial request and two redirects). A fixed slot count
-  // silently cut a 41-row roster at 36 comparisons, which the coverage gate then
-  // reported as the verifier being incomplete. Size the capacity to the roster we
-  // actually decided to examine; the 60-candidate ceiling still bounds this.
+  // One slot per candidate image plus one model call per batch of six. Redirect
+  // hops are capped separately (MAX_IMAGE_REDIRECTS_PER_INVOCATION), so the real
+  // subrequest cost of a click is candidates + redirects + calls; a fixed slot
+  // count used to cut a roster at 36 comparisons and the coverage gate reported
+  // that as the verifier being incomplete.
+  // The reservation is deliberately conservative (three slots per image); the
+  // real subrequest cost is bounded by the invocation-wide redirect allowance in
+  // candidate-images, so this only keeps the local pool from starving a batch.
   const neededSlots = visualCandidates.length * 3 + Math.ceil(visualCandidates.length / 6);
   if (budget.remaining < neededSlots) budget.remaining = neededSlots;
   // The verifier compares pixels with pixels. It is told which kind of object
@@ -1147,6 +1150,24 @@ async function confirmSameVideoReuseWithImage(
   // Missing/blocked image evidence is candidate-local. Keep every successful
   // comparison and let the existing strict visual threshold decide among them.
   // Uncompared roster identities remain visible in retrieval telemetry.
+  // Dead primary URLs and fallbacks can exhaust the invocation's image budget
+  // before every roster row is compared. That is the same user-visible situation
+  // as an oversized roster, so it must not be reported as the verifier being
+  // merely incomplete.
+  const budgetFailures = (images.failure_reasons?.image_budget ?? 0) + (images.failure_reasons?.image_redirect_budget ?? 0);
+  if (budgetFailures && unresolvedRosterCandidateKeys({ candidates: eligible, comparisons }).length) {
+    return {
+      ...empty,
+      decision: { ...noDecision, reason: 'roster_exceeds_visual_budget' },
+      retrieval: { ...retrieval, truncated: true },
+      compared: images.compared,
+      failures: images.failures,
+      failure_reasons: images.failure_reasons ?? {},
+      usage: images.usage,
+      timing: images.timing,
+    };
+  }
+
   let decision = resolveSameVideoReuse({ description, candidates: eligible, comparisons, require_complete_comparisons: true });
 
   // Head-to-head round. One candidate passed the strict check and every roster
@@ -2703,7 +2724,17 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       const providers = commerceProviders(env);
       if (!providers.length) {
         recordFailureState('commerce', 'NO_CONFIGURED_PROVIDER', false);
-        return jsonResponse({ error: 'Shopping sources are temporarily unavailable', reason: 'NO_CONFIGURED_PROVIDER', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: false }, 503);
+        // The shopping layer being unconfigured must not hide why identification
+        // abstained: a caller that only sees NO_CONFIGURED_PROVIDER cannot tell a
+        // missing key from a roster too large to cover.
+        return jsonResponse({
+          error: 'Shopping sources are temporarily unavailable',
+          reason: 'NO_CONFIGURED_PROVIDER',
+          failure_state: 'TEMPORARILY_UNAVAILABLE',
+          retryable: false,
+          identification_reason: sameVideoReuse.reason,
+          roster_retrieval: sameVideoVisualCheck.retrieval,
+        }, 503);
       }
       const creatorId = creatorForContent(env.ALPHA_CREATOR_CONTENT_MAP, contentRef);
       const affiliateClickRef = env.ALPHA_ATTRIBUTION_SECRET && creatorId && contentRef && alphaTelemetry

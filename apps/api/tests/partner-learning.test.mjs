@@ -255,6 +255,33 @@ test('HTTP resolver abstains with a named budget reason instead of silently comp
   assert.ok(!result.products.some(row => row.result_class === 'EXACT'));
 });
 
+test('an unusable roster keeps its own reason even when commerce is unconfigured', async () => {
+  const { env } = environment();
+  const rows = await learning.preparePartnerRoster(env, 'https://api.scoop.shop', input(
+    Array.from({ length: reuse.ROSTER_VISUAL_CANDIDATE_LIMIT + 1 }, (_, i) => offer('Orbit', `SKU-${i}`))), deps);
+  await learning.ingestPartnerRoster(env, rows);
+  env.GEMINI_API_KEY = 'test-only';
+  // No commerce provider is configured: the shopping layer is unavailable.
+  let server;
+  server = loadModule(new URL('../src/server.ts', import.meta.url).pathname, { console: { error() {}, warn() {} },
+    fetch: async (url, options) => {
+      const host = new URL(String(url)).hostname;
+      if (host === 'api.scoop.shop') return server.default.fetch(new Request(url, options), env);
+      throw Error(`Unexpected fetch ${host}`);
+    } });
+  const response = await server.default.fetch(new Request('https://api.scoop.shop/resolve-products', { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, source_image: `data:${crop.mimeType};base64,${crop.data}`,
+      context: { platform: 'youtube', content_ref: 'video-A', timestamp_ms: 9000 } }),
+  }), env);
+  const result = await response.json();
+  assert.equal(response.status, 503);
+  assert.equal(result.reason, 'NO_CONFIGURED_PROVIDER');
+  // The shopping layer being down must not hide why identification abstained.
+  assert.equal(result.identification_reason, 'roster_exceeds_visual_budget');
+  assert.equal(result.roster_retrieval.truncated, true);
+  assert.equal(result.roster_retrieval.roster_count, reuse.ROSTER_VISUAL_CANDIDATE_LIMIT + 1);
+});
+
 test('HTTP resolver compares every variant of a roster at the ceiling before deciding', async () => {
   const { env } = environment();
   const rosterSize = reuse.ROSTER_VISUAL_CANDIDATE_LIMIT;
