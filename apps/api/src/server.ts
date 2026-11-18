@@ -816,7 +816,7 @@ export async function refreshVerifiedOffers(
 }
 
 type SameVideoVisualCheck = {
-  retrieval?: { roster_count: number; retrieved_keys: string[]; verified_keys: string[]; unresolved_keys: string[] };
+  retrieval?: { roster_count: number; retrieved_keys: string[]; verified_keys: string[]; unresolved_keys: string[]; truncated?: boolean };
   comparisons?: Record<string, ImageComparison>;
   /** The head-to-head round, when one ran: how many rivals, and how it ended. */
   head_to_head?: { rivals: number; outcome: SameVideoReuseDecision['reason']; comparisons: Record<string, ImageComparison> };
@@ -872,9 +872,18 @@ async function confirmSameVideoReuseWithImage(
     description,
     candidates: eligible,
   });
+  // Retrieval is not allowed to be a silent shortlist: a roster larger than the
+  // comparison budget cannot be examined in full, and the coverage gate would
+  // otherwise abstain on every click while the log blamed the verifier. Abstain
+  // here, once, with a reason that names the real cause.
+  const truncated = eligible.length > visualCandidates.length;
   const retrieval = { roster_count: eligible.length, retrieved_keys: visualCandidates.map(row => row.identity.canonical_key),
-    verified_keys: [] as string[], unresolved_keys: eligible.map(row => row.identity.canonical_key) };
+    verified_keys: [] as string[], unresolved_keys: eligible.map(row => row.identity.canonical_key),
+    ...(truncated ? { truncated: true } : {}) };
   const empty = { decision: noDecision, compared: 0, failures: 0, failure_reasons: {}, retrieval };
+  if (truncated) {
+    return { ...empty, decision: { ...noDecision, reason: 'roster_exceeds_visual_budget' } };
+  }
   if (!visualCandidates.length || !sourceImage) {
     return { ...empty, decision: { ...noDecision, reason: visualCandidates.length ? 'visual_unavailable' : 'no_candidate' } };
   }
@@ -1009,11 +1018,20 @@ async function confirmSameVideoReuseWithImage(
   };
 
   const budget = imageRequestBudget();
+  // Coverage is not free: every candidate needs one model slot per batch plus up
+  // to three fetch slots (initial request and two redirects). A fixed slot count
+  // silently cut a 41-row roster at 36 comparisons, which the coverage gate then
+  // reported as the verifier being incomplete. Size the capacity to the roster we
+  // actually decided to examine; the 60-candidate ceiling still bounds this.
+  const neededSlots = visualCandidates.length * 3 + Math.ceil(visualCandidates.length / 6);
+  if (budget.remaining < neededSlots) budget.remaining = neededSlots;
   // The verifier compares pixels with pixels. It is told which kind of object
   // to look at and nothing the upstream model guessed about it, and no page
   // title: it repeats those back as its own reading of the click, and that
   // reading then vetoes correctly matched roster products.
   const seen = rosterVerifierDescription(description);
+  const verifierConfig = { ...verifierOptions(env, useOpenRouter), pixelOnlySource: true };
+
   const images = await compareCandidateImages(
     key,
     model,
@@ -1022,7 +1040,7 @@ async function confirmSameVideoReuseWithImage(
     rows.map((row) => row.product),
     undefined,
     budget,
-    { ...verifierOptions(env, useOpenRouter), pixelOnlySource: true },
+    verifierConfig,
   ).catch(() => null);
 
   if (!images) {
@@ -2490,7 +2508,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
       // Unresolved roster evidence is not an open-set miss. A different memory
       // candidate must not acquire Exact while roster rivals remain unchecked.
-      if (!verifiedMapping && !['incomplete_comparison', 'ambiguous', 'visual_unavailable'].includes(sameVideoReuse.reason)) {
+      if (!verifiedMapping && !['incomplete_comparison', 'ambiguous', 'visual_unavailable', 'roster_exceeds_visual_budget'].includes(sameVideoReuse.reason)) {
         const sameVideoCanonicalKeys = new Set(
           [...reviewedNegativeKeys, ...canonicalRows.map(row => row.identity.canonical_key),
             ...durableMappings.map((mapping) => mapping.canonical_key).filter((key): key is string => Boolean(key))],
@@ -2706,7 +2724,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       // offer ahead of the unverified roster candidates. Keep physical evidence,
       // but suppress unsupported model names until the comparison is complete.
       const retrievalDescription = canonicalRows.length
-        ? (['incomplete_comparison', 'ambiguous', 'visual_unavailable'].includes(sameVideoReuse.reason)
+        ? (['incomplete_comparison', 'ambiguous', 'visual_unavailable', 'roster_exceeds_visual_budget'].includes(sameVideoReuse.reason)
           ? fallbackDescription
           : rosterFallbackRetrievalDescription(description))
         : description;

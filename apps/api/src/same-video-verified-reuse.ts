@@ -19,6 +19,7 @@ export type SameVideoReuseReason =
   | 'visual_unavailable'
   | 'incomplete_comparison'
   | 'head_to_head_required'
+  | 'roster_exceeds_visual_budget'
   | 'no_candidate';
 
 export type SameVideoReuseDecision = {
@@ -459,7 +460,30 @@ export function verifiedProductMemoryCandidates(input: {
   return [...unique.values()];
 }
 
-export const ROSTER_VISUAL_CANDIDATE_LIMIT = 24;
+/**
+ * Most roster candidates one click can compare. Workers Free allows 50
+ * subrequests per invocation: each candidate costs one image fetch, each batch of
+ * six costs one model call, and retrieval, offers and the head-to-head round need
+ * roughly eight more. 32 keeps the whole click inside that budget with headroom.
+ * A roster above this abstains (`roster_exceeds_visual_budget`) rather than
+ * silently comparing a prefix and reporting the shortfall as a verifier problem.
+ */
+export const ROSTER_VISUAL_CANDIDATE_LIMIT = 32;
+
+/**
+ * One roster row per variant of one product family (Side Trunk, Neverfull, ...).
+ * Variants of a family are siblings that genuinely compete for the same click;
+ * rows from different families almost never do. Retrieval uses this grouping to
+ * spend a bounded comparison budget on breadth first, so a cut costs siblings of
+ * a family already seen rather than an entire family nobody looked at.
+ */
+export function rosterFamilyKey(identity: CanonicalProductIdentity): string {
+  const family = normalizeIdentityText(identity.family ?? '');
+  if (family) return family;
+  const model = normalizeIdentityText(identity.model ?? '');
+  if (model) return model;
+  return distinctiveWords([identity.title]).slice(0, 3).join(' ') || normalizeIdentityText(identity.title);
+}
 
 /** Two independent retrieval views prevent a guessed model/brand from consuming
  * every slot. Scores order work only; all unexamined identities remain visible
@@ -467,6 +491,8 @@ export const ROSTER_VISUAL_CANDIDATE_LIMIT = 24;
 export function retrieveSameVideoRosterCandidates(input: {
   description: ObjectDescription;
   candidates: SameVideoCanonicalCandidate[];
+  /** Explicit budget, for tests and callers that need a smaller shortlist. */
+  limit?: number;
 }): SameVideoCanonicalCandidate[] {
   const candidates = eligibleSameVideoCanonicalCandidates(input);
   const hypotheses = rankSameVideoRosterCandidates({ ...input, candidates });
@@ -480,14 +506,36 @@ export function retrieveSameVideoRosterCandidates(input: {
     ...input.description, brand_candidate: null, model_candidate: null,
     visible_text: [], contextual_text: [], logos_markings: [], search_terms: [],
   } });
-  const selected = new Map<string, SameVideoCanonicalCandidate>();
-  for (let i = 0; i < candidates.length && selected.size < ROSTER_VISUAL_CANDIDATE_LIMIT; i++) {
+  const ordered = new Map<string, SameVideoCanonicalCandidate>();
+  for (let i = 0; i < candidates.length; i++) {
     for (const row of [hypotheses[i], observations[i], structural[i]]) {
-      if (selected.size >= ROSTER_VISUAL_CANDIDATE_LIMIT) break;
-      if (row) selected.set(row.identity.canonical_key, row);
+      if (row && !ordered.has(row.identity.canonical_key)) ordered.set(row.identity.canonical_key, row);
     }
   }
-  return [...selected.values()];
+  if (ordered.size <= (input.limit ?? ROSTER_VISUAL_CANDIDATE_LIMIT)) return [...ordered.values()];
+
+  // Family round-robin: each family's best candidate is taken before any family
+  // contributes a second. Order is deterministic for a given rank order.
+  const byFamily = new Map<string, SameVideoCanonicalCandidate[]>();
+  for (const row of ordered.values()) {
+    const key = rosterFamilyKey(row.identity);
+    const bucket = byFamily.get(key);
+    if (bucket) bucket.push(row); else byFamily.set(key, [row]);
+  }
+  const limit = Math.max(0, input.limit ?? ROSTER_VISUAL_CANDIDATE_LIMIT);
+  const selected: SameVideoCanonicalCandidate[] = [];
+  for (let round = 0; selected.length < limit; round++) {
+    let added = false;
+    for (const bucket of byFamily.values()) {
+      const row = bucket[round];
+      if (!row) continue;
+      selected.push(row);
+      added = true;
+      if (selected.length >= limit) break;
+    }
+    if (!added) break;
+  }
+  return selected;
 }
 
 /** Missing comparison is uncertainty, not a negative. Only consistent, strong
