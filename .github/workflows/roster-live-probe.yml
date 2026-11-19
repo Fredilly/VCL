@@ -108,6 +108,11 @@ jobs:
           pkill -f workerd 2>/dev/null || true
           exit $status
 
+      - name: Vision failures logged by the worker
+        if: always()
+        run: |
+          grep -iE "vision|provider|model|402|429|401" "$RUNNER_TEMP/wrangler-dev.log" 2>/dev/null | tail -25 || true
+
       - name: Verifier failure reasons logged by the worker
         if: always()
         run: |

@@ -88,7 +88,11 @@ for (const offer of probes) {
       context: { platform: manifest.platform, content_ref: manifest.content_ref, timestamp_ms: timestamp },
     });
     if (analysed.status !== 200 || !analysed.body.description) {
-      rows.push({ handle: offer.variant_id, stage: 'analyze', status: analysed.status, failure: analysed.body.error ?? analysed.body.reason ?? 'no description' });
+      rows.push({
+        handle: offer.variant_id, stage: 'analyze', status: analysed.status,
+        failure: analysed.body.error ?? 'no description', reason: analysed.body.reason ?? null,
+        vision_routing: analysed.body.vision_routing ?? null,
+      });
       continue;
     }
     const resolved = await post('/resolve-products', {
