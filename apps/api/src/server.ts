@@ -1101,6 +1101,7 @@ async function confirmSameVideoReuseWithImage(
   if (budget.remaining < neededSlots) budget.remaining = neededSlots;
 
   const rows: Array<{ candidate: SameVideoCanonicalCandidate; identity: CanonicalProductIdentity; product: ProductCandidate }> = [];
+  const skipReasons: Record<string, number> = {};
   for (const candidate of shortlisted) {
     let identity = candidate.identity;
     // Trust SKU-bound visual memory ahead of volatile shopping-offer imagery.
@@ -1173,7 +1174,12 @@ async function confirmSameVideoReuseWithImage(
         merchantRef = recoveredRef;
       }
     }
-    if (!merchantRef?.image_reference) continue;
+    if (!merchantRef?.image_reference) {
+      // Observable, not silent: a row that never gets an image cannot be compared,
+      // and the reason has to reach the response.
+      skipReasons.no_reference = (skipReasons.no_reference ?? 0) + 1;
+      continue;
+    }
 
     // Roster-curated same-variant reference images are fallback evidence, never
     // primary identity evidence. They must not outrank the merchant/partner
@@ -1223,7 +1229,7 @@ async function confirmSameVideoReuseWithImage(
     // of platform budget, say so instead of blaming a missing reference.
     decision: { ...noDecision, reason: ledger.exhausted() ? 'roster_exceeds_visual_budget' : 'visual_unavailable' },
     retrieval: { ...retrieval, ...(ledger.exhausted() ? { truncated: true } : {}) },
-    failures: 1, failure_reasons: { missing_sku_image_reference: 1 },
+    failures: 1, failure_reasons: { ...skipReasons, missing_sku_image_reference: 1 },
   };
 
   const images = await compareCandidateImages(
@@ -1314,7 +1320,7 @@ async function confirmSameVideoReuseWithImage(
   }
 
   const retryFailures = retryVerification?.failure_reasons ?? {};
-  const failureReasons = { ...(images.failure_reasons ?? {}) };
+  const failureReasons = { ...skipReasons, ...(images.failure_reasons ?? {}) };
   for (const [reason, count] of Object.entries(retryFailures)) {
     failureReasons[reason] = (failureReasons[reason] ?? 0) + count;
   }
@@ -1354,7 +1360,7 @@ async function confirmSameVideoReuseWithImage(
       retrieval: { ...retrieval, truncated: true },
       compared: images.compared,
       failures: images.failures,
-      failure_reasons: images.failure_reasons ?? {},
+      failure_reasons: { ...skipReasons, ...(images.failure_reasons ?? {}) },
       usage: images.usage,
       timing: images.timing,
     };
