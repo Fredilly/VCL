@@ -133,6 +133,7 @@ jobs:
             --manifest "$RUNNER_TEMP/intake/manifest.json" \
             --limit "${{ inputs.probe_limit || '6' }}" \
             --import \
+            --diagnose \
             --out "$RUNNER_TEMP/live-probe.json" || status=1
           kill "$(cat "$RUNNER_TEMP/wrangler.pid")" 2>/dev/null || true
           pkill -f workerd 2>/dev/null || true

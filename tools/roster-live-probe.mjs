@@ -77,12 +77,14 @@ const scrub = (text, offer) => {
   return value.slice(0, 160);
 };
 
+let sessionToken = null;
 // Preferred path: ingest through the same endpoint production uses, so the
 // worker stores the reference images the family round needs.
 if (args.includes('--import')) {
   const credential = process.env.ADMIN_CREDENTIAL || 'roster-live-probe';
   const auth = await post('/admin/auth', { credential, label: 'roster-live-probe' });
   const session = auth.body.session_token ?? auth.body.token ?? auth.body.session?.token ?? null;
+  sessionToken = session;
   if (auth.status !== 200 || !session) {
     console.error(`admin auth failed: ${auth.status} ${auth.body.error ?? ''}`);
     process.exit(2);
@@ -95,6 +97,21 @@ if (args.includes('--import')) {
   const body = await imported.json().catch(() => ({}));
   console.log(JSON.stringify({ import: { status: imported.status, ...body } }));
   if (imported.status !== 200) process.exit(2);
+}
+
+// Diagnostic: what the ledger actually kept. Counts and key names only.
+if (args.includes('--diagnose') && sessionToken) {
+  const exported = await fetch(new URL('/learning-export', endpoint), { headers: { 'x-scoop-admin-session': sessionToken } });
+  const body = await exported.json().catch(() => ({}));
+  const list = body.rows ?? body.mappings ?? body.items ?? [];
+  const first = list[0] ?? {};
+  console.log(JSON.stringify({
+    ledger_rows: list.length,
+    keys: Object.keys(first).slice(0, 20),
+    with_image_reference: list.filter((row) => row.image_reference || row.mapping?.image_reference).length,
+    with_merchant_image: list.filter((row) => (row.merchant_refs ?? row.identity?.merchant_refs ?? []).some((ref) => ref.image_reference)).length,
+    identity_keys: first.identity ? Object.keys(first.identity).slice(0, 20) : null,
+  }));
 }
 
 const rows = [];
