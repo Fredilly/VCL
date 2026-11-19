@@ -1020,6 +1020,9 @@ async function confirmSameVideoReuseWithImage(
       // were compared and label it a partial, SIMILAR-only result rather than
       // returning nothing: a useful near-miss beats an empty panel.
       familyStage = { families: familyMap.size, compared: familyCall?.compared ?? 0, advancing: [] };
+      (familyStage as Record<string, unknown>).representatives = representatives.length;
+      (familyStage as Record<string, unknown>).rows_with_image = eligible.filter((row) => Boolean(storedImage(row))).length;
+      (familyStage as Record<string, unknown>).sample_image = storedImage(eligible.find((row) => Boolean(storedImage(row))) ?? eligible[0])?.slice(0, 40) ?? null;
       if (familyError) (familyStage as Record<string, unknown>).error = familyError;
       shortlistCost = familyCall?.compared ?? 0;
       if (shortlisted.length > ROSTER_VISUAL_CANDIDATE_LIMIT && familyComparisons.size) {
