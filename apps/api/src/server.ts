@@ -583,6 +583,7 @@ export async function refreshVerifiedOffers(
   };
 
   const batches = await Promise.all(providers.map(async ({ name, provider }) => {
+    if (ledger && !ledger.reserve('commerce')) return [];
     providersUsed.push(name);
     commerceCalls[name] = (commerceCalls[name] ?? 0) + 1;
     try {
@@ -642,7 +643,7 @@ export async function refreshVerifiedOffers(
         visual.description,
         needsVisual.slice(0, 8),
         visual.context,
-        imageRequestBudget(),
+        ledger ? { ...imageRequestBudget(), ledger } : imageRequestBudget(),
         verifierOptions(visual.env, useOpenRouter),
       ).catch(() => null);
 
@@ -751,6 +752,7 @@ export async function refreshVerifiedOffers(
         if (provider !== 'ebay') return product;
         const itemId = ebayItemIdForLiveLookup(product.id, product.destination);
         if (!itemId) return product;
+        if (ledger && !ledger.reserve('commerce')) return product;
         commerceCalls.ebay = (commerceCalls.ebay ?? 0) + 1;
         if (!providersUsed.includes('ebay')) providersUsed.push('ebay');
         const live = await getItemById(itemId, query).catch(() => null);
@@ -1009,8 +1011,20 @@ async function confirmSameVideoReuseWithImage(
         ...eliminatedReps.map(({ candidate }) => candidate),
       ];
     } else {
+      // No family passed the strict check, so nothing can be eliminated. If the
+      // roster cannot be covered in full, answer from the representatives that
+      // were compared and label it a partial, SIMILAR-only result rather than
+      // returning nothing: a useful near-miss beats an empty panel.
       familyStage = { families: familyMap.size, compared: familyCall?.compared ?? 0, advancing: [] };
       shortlistCost = familyCall?.compared ?? 0;
+      if (shortlisted.length > ROSTER_VISUAL_CANDIDATE_LIMIT && familyComparisons.size) {
+        shortlisted = [...representatives]
+          .sort((a, b) => (familyComparisons.get(b.candidate.identity.canonical_key)?.similarity ?? 0)
+            - (familyComparisons.get(a.candidate.identity.canonical_key)?.similarity ?? 0))
+          .slice(0, 8)
+          .map(({ candidate }) => candidate);
+        retrieval.truncated = true;
+      }
     }
   }
   if (familyStage) retrieval.family_stage = familyStage;
@@ -1541,7 +1555,7 @@ function crossVideoMapping(
   };
 }
 
-export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages, routing?: { commerce_action: 'SKIP' | 'SEARCH_NORMAL' | 'SEARCH_BROAD'; verification_action: 'LIGHT' | 'FULL'; telemetry: JevRouterTelemetry; broad_search_on_miss?: boolean }, useMarkingEvidence = false) {
+export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages, routing?: { commerce_action: 'SKIP' | 'SEARCH_NORMAL' | 'SEARCH_BROAD'; verification_action: 'LIGHT' | 'FULL'; telemetry: JevRouterTelemetry; broad_search_on_miss?: boolean }, useMarkingEvidence = false, ledger?: SubrequestLedger) {
   const routingActive = Boolean(routing && !routing.telemetry.failed);
   let attempts = 0;
   let sawProviderFailure = false;
@@ -1553,6 +1567,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
   const seen = new Set<string>();
   const imageEvidence = new Map<string, ImageComparison>();
   const imageBudget = imageRequestBudget();
+  if (ledger) imageBudget.ledger = ledger;
   const verification = { retrieved: 0, metadata_prefiltered: 0, light_escalations: 0, compared: 0, image_failures: 0, image_failure_reasons: {} as Record<string, number>, rejected: 0, contradictions: {} as Record<string, number> };
   const timing = {
     provider_retrieval_ms: 0,
@@ -1712,7 +1727,10 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
 
     if (activePrimary.length) {
       const retrievalStarted = Date.now();
-      const settled = await Promise.allSettled(activePrimary.map(async ({ name, provider }) => { providersUsed.add(name); noteCommerceCall(name); return provider.search(query); }));
+      const settled = await Promise.allSettled(activePrimary.map(async ({ name, provider }) => {
+        if (ledger && !ledger.reserve('commerce')) return [] as ProductCandidate[];
+        providersUsed.add(name); noteCommerceCall(name); return provider.search(query);
+      }));
       timing.provider_retrieval_ms += Date.now() - retrievalStarted;
       const products: ProductCandidate[] = [];
       const failedProviders = new Set<string>();
@@ -1754,7 +1772,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       try {
         providersUsed.add('brave');
         noteCommerceCall('brave');
-        result = await braveProvider.provider.search(query);
+        result = ledger && !ledger.reserve('commerce') ? [] : await braveProvider.provider.search(query);
         completedProviderAttempt = true;
         braveTelemetry.success = true;
       } catch (error) {
@@ -1788,7 +1806,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       try {
         providersUsed.add('serpapi');
         noteCommerceCall('serpapi');
-        result = await serpapiProvider.provider.search(query);
+        result = ledger && !ledger.reserve('commerce') ? [] : await serpapiProvider.provider.search(query);
         completedProviderAttempt = true;
         serpapiTelemetry.success = true;
       } catch (error) {
@@ -2929,9 +2947,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           : queries;
       const started = Date.now();
       const markingVerifyV1 = record.benchmark_marking_verify_v1 === true;
-      // The fallback fan-out costs one search per provider; charge it before it runs.
-      const fallbackAffordable = routedProviders.every(() => ledger.reserve('commerce'));
-      const resolved = await resolveProducts(fallbackAffordable ? routedProviders : [], routedQueries, fallbackDescription, env, context, sourceImage, compareCandidateImages, routing, markingVerifyV1);
+      const resolved = await resolveProducts(routedProviders, routedQueries, fallbackDescription, env, context, sourceImage, compareCandidateImages, routing, markingVerifyV1, ledger);
       if (sameVideoVisualCheck.usage) {
         const usage = resolved.cost_usage.verification_usage;
         usage.requests += sameVideoVisualCheck.usage.requests ?? 0;

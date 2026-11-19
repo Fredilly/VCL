@@ -22,6 +22,11 @@ name: Golden identity (local worker)
 # Manual only: it spends paid resolver calls. It never deploys.
 
 on:
+  # A label on a pull request is the pre-merge path: workflow_dispatch requires the
+  # workflow to exist on the default branch, and merging to get a test run is not
+  # an acceptable trade. Applying the label is a deliberate, paid action.
+  pull_request:
+    types: [labeled]
   workflow_dispatch:
     inputs:
       confirm:
@@ -44,7 +49,7 @@ concurrency:
 
 jobs:
   golden:
-    if: inputs.confirm == 'RUN_GOLDEN'
+    if: (github.event_name == 'pull_request' && github.event.label.name == 'run-golden') || inputs.confirm == 'RUN_GOLDEN'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -132,7 +137,7 @@ jobs:
           node tools/golden-identity.mjs \
             --endpoint "$GOLDEN_ENDPOINT" \
             --frames tests/golden/frames \
-            --limit "${{ inputs.case_limit }}" \
+            --limit "${{ inputs.case_limit || '5' }}" \
             --out "$RUNNER_TEMP/golden-identity.json"
 
       - name: Stop the local worker
