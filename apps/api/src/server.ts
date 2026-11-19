@@ -180,7 +180,9 @@ const visionFailureReason = new Map<VisionProviderName, string>();
 function visionCooldownMs(error: unknown): number {
   const reason = error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR';
   if (reason === 'QUOTA_EXHAUSTED' || reason === 'PROVIDER_AUTH') return 15 * 60_000;
-  if (reason === 'RATE_LIMITED') return 60_000;
+  // A 429 is usually a burst, not a broken account: shed load briefly and let the
+  // next click try again. Quota exhaustion and auth still get a long cooldown.
+  if (reason === 'RATE_LIMITED') return 15_000;
   if (reason === 'PROVIDER_5XX' || reason === 'PROVIDER_TIMEOUT') return 15_000;
   return 10_000;
 }
