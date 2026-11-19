@@ -1091,7 +1091,10 @@ async function confirmSameVideoReuseWithImage(
   // evidence already gathered, keep what the ledger can pay for, and mark the
   // result partial so no Exact can come from an uncompared row.
   if (shortlisted.length > 4 && familyStage) {
-    const affordable = Math.max(4, Math.min(ROSTER_VISUAL_CANDIDATE_LIMIT, ledger.remaining() - 6));
+    // One candidate can cost two image fetches (primary and fallback) plus a
+    // sixth of a model call, so a naive one-per-row estimate overruns the ledger
+    // and ends in image_budget, which reads as an oversized roster.
+    const affordable = Math.max(4, Math.min(ROSTER_VISUAL_CANDIDATE_LIMIT, Math.floor((ledger.remaining() - 6) * 6 / 13)));
     if (shortlisted.length > affordable) {
       const advancingFamilies = new Set(familyStage.advancing);
       const ranked = [...shortlisted].sort((a, b) =>

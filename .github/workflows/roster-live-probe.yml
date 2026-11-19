@@ -119,6 +119,9 @@ jobs:
           [ -n "${BRAVE_SEARCH_API_KEY:-}" ] && printf 'BRAVE_SEARCH_API_KEY=%s\n' "$BRAVE_SEARCH_API_KEY" >> apps/api/.dev.vars
           printf 'REFERENCE_ORIGIN=http://127.0.0.1:8787\n' >> apps/api/.dev.vars
           printf 'BENCHMARK_MODE=true\n' >> apps/api/.dev.vars
+          # The gateway throttles a burst; pace the verifier and let a 429 recover.
+          printf 'VERIFIER_PACING_MS=1200\n' >> apps/api/.dev.vars
+          printf 'VERIFIER_MAX_ATTEMPTS=3\n' >> apps/api/.dev.vars
           printf 'ALPHA_FEEDBACK_ADMIN_TOKEN=%s\n' "${ADMIN_CREDENTIAL:-roster-live-probe}" >> apps/api/.dev.vars
           echo 'Worker configured for a local admin import'
           pnpm --filter @vcl/api exec wrangler dev --port 8787 --local --ip 127.0.0.1 > "$RUNNER_TEMP/wrangler-dev.log" 2>&1 &
