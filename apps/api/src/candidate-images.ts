@@ -187,11 +187,13 @@ function blockedImageHost(url: string): boolean {
   } catch { return false; }
 }
 
-export function candidateImageUrls(product: ProductCandidate): string[] {
+export function candidateImageUrls(product: ProductCandidate, budget?: ImageRequestBudget): string[] {
+  const fetchable = (url: string | null | undefined): url is string =>
+    Boolean(url && (safeImageUrl(url) || (budget ? isLocalReference(url, budget) : false)));
   const urls = [...new Set([
     product.image_reference,
     ...(product.image_references ?? []),
-  ].filter((url): url is string => Boolean(url && safeImageUrl(url))))];
+  ].filter(fetchable))];
   // Stable partition: fetchable hosts keep their relative order, blocked hosts
   // move to the end. No URL is ever dropped.
   return [...urls.filter((url) => !blockedImageHost(url)), ...urls.filter(blockedImageHost)];
@@ -202,7 +204,7 @@ async function fetchCandidateImage(
   failure: (reason: string) => void,
   budget: ImageRequestBudget,
 ): Promise<Image | null> {
-  const urls = candidateImageUrls(product);
+  const urls = candidateImageUrls(product, budget);
   if (!urls.length) {
     failure('image_missing');
     return null;
