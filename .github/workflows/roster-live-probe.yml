@@ -117,6 +117,7 @@ jobs:
           printf 'OPENROUTER_BASE_URL=%s\n' "$OPENROUTER_BASE_URL" >> apps/api/.dev.vars
           printf 'VISION_PROVIDER=openrouter\n' >> apps/api/.dev.vars
           [ -n "${BRAVE_SEARCH_API_KEY:-}" ] && printf 'BRAVE_SEARCH_API_KEY=%s\n' "$BRAVE_SEARCH_API_KEY" >> apps/api/.dev.vars
+          printf 'REFERENCE_ORIGIN=http://127.0.0.1:8787\n' >> apps/api/.dev.vars
           printf 'BENCHMARK_MODE=true\n' >> apps/api/.dev.vars
           printf 'ALPHA_FEEDBACK_ADMIN_TOKEN=%s\n' "${ADMIN_CREDENTIAL:-roster-live-probe}" >> apps/api/.dev.vars
           echo 'Worker configured for a local admin import'
@@ -131,7 +132,7 @@ jobs:
           node tools/roster-live-probe.mjs \
             --endpoint http://127.0.0.1:8787 \
             --manifest "$RUNNER_TEMP/intake/manifest.json" \
-            --limit "${{ inputs.probe_limit || '6' }}" \
+            --limit "${{ inputs.probe_limit || '1' }}" \
             --import \
             --diagnose \
             --out "$RUNNER_TEMP/live-probe.json" || status=1

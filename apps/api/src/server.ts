@@ -57,6 +57,7 @@ export interface Env {
   GROQ_API_KEY?: string;
   VISION_PROVIDER?: string;
   OPENROUTER_BASE_URL?: string;
+  REFERENCE_ORIGIN?: string;
   GEMINI_MODEL?: string;
   OPENROUTER_API_KEY?: string;
   OPENROUTER_MODEL?: string;
@@ -111,12 +112,13 @@ export interface Env {
  * clamped in compareCandidateImages; an absent or invalid value falls back to
  * the built-in default rather than failing the request.
  */
-export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIER_PACING_MS' | 'VERIFIER_MAX_ATTEMPTS' | 'VERIFIER_STRUCTURED_OUTPUT'>, useOpenRouter: boolean): VerifierOptions {
+export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIER_PACING_MS' | 'VERIFIER_MAX_ATTEMPTS' | 'VERIFIER_STRUCTURED_OUTPUT'> & { OPENROUTER_BASE_URL?: string }, useOpenRouter: boolean): VerifierOptions {
   const concurrency = Number(env.VERIFIER_CONCURRENCY);
   const pacing = Number(env.VERIFIER_PACING_MS);
   const attempts = Number(env.VERIFIER_MAX_ATTEMPTS);
   return {
     provider: useOpenRouter ? 'openrouter' : 'gemini',
+    ...(env.OPENROUTER_BASE_URL ? { endpoint: env.OPENROUTER_BASE_URL } : {}),
     ...(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 4 ? { concurrency } : {}),
     ...(Number.isFinite(pacing) && pacing >= 0 && pacing <= 5000 ? { pacingMs: pacing } : {}),
     ...(Number.isInteger(attempts) && attempts >= 1 && attempts <= 3 ? { maxAttempts: attempts } : {}),
@@ -2399,7 +2401,11 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       try {
         if (path === '/learning-export') return jsonResponse(await verifiedLedgerRequest(env, '/learning/export', {}));
         const input = await request.json() as { platform: string; content_ref: string; offers: Array<RosterOfferInput | string> };
-        const rows = await preparePartnerRoster(env, new URL(request.url).origin, input, undefined, env.BRAVE_SEARCH_API_KEY);
+        // Reference images are served by this worker, so the origin baked into the
+        // roster must be one this worker answers for. A deployment whose public
+        // origin differs from the request URL (local dev, CI, preview) sets it
+        // explicitly; production keeps using the request origin.
+        const rows = await preparePartnerRoster(env, env.REFERENCE_ORIGIN || new URL(request.url).origin, input, undefined, env.BRAVE_SEARCH_API_KEY);
         await ingestPartnerRoster(env, rows);
         await auditAdminAction(env, authorized.admin_id, 'partner_roster_ingested', { identities: rows.length, offers: input.offers.length, content_ref: input.content_ref });
         return jsonResponse({ accepted: true, distinct_variants: rows.length, merchant_offers: input.offers.length, reference_ready: rows.length });
