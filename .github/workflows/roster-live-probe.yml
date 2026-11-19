@@ -54,6 +54,18 @@ jobs:
           test -n "${BRAVE_SEARCH_API_KEY:-}" || { echo 'BRAVE_SEARCH_API_KEY secret is not available to this run'; exit 1; }
           echo 'Provider credentials present'
 
+      - name: Provider reachability
+        run: |
+          set -uo pipefail
+          code=$(curl -s -o "$RUNNER_TEMP/key.json" -w '%{http_code}' https://openrouter.ai/api/v1/key -H "Authorization: Bearer $OPENROUTER_API_KEY")
+          echo "openrouter key endpoint: $code"
+          node -e 'const k=require(process.env.RUNNER_TEMP+"/key.json").data||{};console.log(JSON.stringify({label:k.label,limit:k.limit,usage:k.usage,free_tier:k.is_free_tier}))' 2>/dev/null || true
+          body=$(curl -s -o "$RUNNER_TEMP/lite.json" -w '%{http_code}' https://openrouter.ai/api/v1/chat/completions -H "Authorization: Bearer $OPENROUTER_API_KEY" -H 'content-type: application/json' -d '{"model":"google/gemini-2.5-flash-lite","messages":[{"role":"user","content":"reply with ok"}]}')
+          echo "openrouter vision model probe: $body"
+          head -c 300 "$RUNNER_TEMP/lite.json" 2>/dev/null; echo
+          brave=$(curl -s -o /dev/null -w '%{http_code}' 'https://api.search.brave.com/res/v1/web/search?q=test' -H "X-Subscription-Token: $BRAVE_SEARCH_API_KEY")
+          echo "brave: $brave"
+
       - name: Write the partner roster from the secret
         run: |
           set -euo pipefail
