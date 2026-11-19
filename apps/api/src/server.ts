@@ -136,6 +136,12 @@ export function alphaPresentationProducts<T extends ProductCandidate>(
   });
 }
 
+/** Reference-store rows were written before https was enforced; the store is https. */
+function normaliseReferenceUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return url.startsWith('http://') && url.includes('/product-reference/') ? url.replace('http://', 'https://') : url;
+}
+
 /**
  * An Exact from a narrowed roster is not an Exact. The family round compares
  * representatives, so the clicked variant may never have been examined; the
@@ -936,18 +942,11 @@ async function confirmSameVideoReuseWithImage(
   // Mirrors the row builder's preference order so the representative compared in
   // the family round is the same product that would be compared later.
   const storedImages = (candidate: SameVideoCanonicalCandidate): string[] => {
-    // Reference rows written before https was enforced still say http; the store
-    // is https, and an http URL is rejected outright, so normalise the scheme.
-    const normalise = (url: string | null | undefined): string | null => {
-      if (!url) return null;
-      if (url.startsWith('http://') && url.includes('/product-reference/')) return url.replace('http://', 'https://');
-      return url;
-    };
     const candidates = [
-      normalise(preferredCanonicalReference(candidate.identity)),
-      normalise(candidate.mapping.image_reference),
+      normaliseReferenceUrl(preferredCanonicalReference(candidate.identity)),
+      normaliseReferenceUrl(candidate.mapping.image_reference),
       ...(candidate.identity.visual_references ?? []).map((ref) => ref.image_url),
-      ...candidate.identity.merchant_refs.map((ref) => normalise(ref.image_reference)),
+      ...candidate.identity.merchant_refs.map((ref) => normaliseReferenceUrl(ref.image_reference)),
       ...(candidate.mapping.reference_images ?? []),
     ].filter((url): url is string => Boolean(url && (safeImageUrl(url) || url.includes('/product-reference/'))));
     // Our own reference store first: merchant CDNs block datacenter egress and
@@ -1145,7 +1144,7 @@ async function confirmSameVideoReuseWithImage(
       .filter((url) => safeImageUrl(url));
     const imageReferences = [...new Set([
       preferredImage,
-      normalise(candidate.mapping.image_reference),
+      normaliseReferenceUrl(candidate.mapping.image_reference),
       ...(identity.visual_references ?? []).map((ref) => ref.image_url),
       ...identity.merchant_refs.map((ref) => ref.image_reference),
       ...curatedReferences,
