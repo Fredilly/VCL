@@ -138,10 +138,17 @@ export function alphaPresentationProducts<T extends ProductCandidate>(
   });
 }
 
+/** A reference image this worker can actually read: a public https URL or our own store. */
+function isUsableReferenceUrl(url: string | null | undefined): url is string {
+  return Boolean(url && (safeImageUrl(url) || url.includes('/product-reference/')));
+}
+
 /** Reference-store rows were written before https was enforced; the store is https. */
 function normaliseReferenceUrl(url: string | null | undefined): string | null {
   if (!url) return null;
-  return url.startsWith('http://') && url.includes('/product-reference/') ? url.replace('http://', 'https://') : url;
+  if (!url.startsWith('http://') || !url.includes('/product-reference/')) return url;
+  // A loopback worker serves that store over http; upgrading it would break it.
+  return /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(url) ? url : url.replace('http://', 'https://');
 }
 
 /**
@@ -159,6 +166,10 @@ export function narrowedRosterProducts<T extends ProductCandidate>(products: T[]
 }
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
+/** Provider attempts per click, retries included: an outage must not multiply cost. */
+const VISION_ATTEMPTS_PER_REQUEST = 3;
+const VISION_RETRY_BACKOFF_MS = 250;
+
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type,x-scoop-install-id,x-scoop-admin-session,x-scoop-alpha-token', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
 
 type VisionProviderName = 'openrouter' | 'gemini' | 'groq-3.8' | 'groq-3.6' | 'cloudflare';
@@ -1065,9 +1076,20 @@ async function confirmSameVideoReuseWithImage(
     }
   }
   if (familyStage) retrieval.family_stage = familyStage;
-  // Coverage has to be affordable. If the candidates still in play exceed what one
-  // click can compare, abstain with the real reason instead of comparing a prefix
-  // and letting the coverage gate report a verifier failure.
+  // Coverage has to be affordable, not merely capped: one image per candidate plus
+  // a model call per six is what a comparison really costs. Rank by the family
+  // evidence already gathered, keep what the ledger can pay for, and mark the
+  // result partial so no Exact can come from an uncompared row.
+  if (shortlisted.length > 4 && familyStage) {
+    const affordable = Math.max(4, Math.min(ROSTER_VISUAL_CANDIDATE_LIMIT, ledger.remaining() - 6));
+    if (shortlisted.length > affordable) {
+      const advancingFamilies = new Set(familyStage.advancing);
+      const ranked = [...shortlisted].sort((a, b) =>
+        Number(advancingFamilies.has(rosterFamilyKey(b.identity))) - Number(advancingFamilies.has(rosterFamilyKey(a.identity))));
+      shortlisted = ranked.slice(0, affordable);
+      retrieval.truncated = true;
+    }
+  }
   if (shortlisted.length > ROSTER_VISUAL_CANDIDATE_LIMIT) {
     return {
       ...empty,
@@ -1166,7 +1188,7 @@ async function confirmSameVideoReuseWithImage(
       ...(identity.visual_references ?? []).map((ref) => ref.image_url),
       ...identity.merchant_refs.map((ref) => ref.image_reference),
       ...curatedReferences,
-    ].filter((url): url is string => Boolean(url && safeImageUrl(url))))];
+    ].filter(isUsableReferenceUrl))];
 
     rows.push({
       candidate,
@@ -2244,13 +2266,20 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       const tryVision = async <T>(operation: (provider: ActiveVisionProvider) => Promise<T>) => {
         let lastError: unknown;
         let attempted = 0;
+        // One click spends at most this many provider attempts, retries included.
+        let visionAttempts = 0;
         for (const { name, provider } of visionProviders) {
           if (visionCircuitOpen(name)) {
             visionRouting.push({ provider: name, status: 'SKIPPED', reason: visionFailureReason.get(name) ?? 'COOLDOWN' });
             continue;
           }
-          const maxAttempts = name === 'cloudflare' ? 2 : 1;
+          // A transient 5xx, a timeout or a rate-limit is an outage, not a
+          // matching failure: retry it once with backoff before moving on. Auth
+          // and schema refusals are not retried — they will fail the same way.
+          const maxAttempts = name === 'cloudflare' ? 2 : 2;
           for (let providerAttempt = 1; providerAttempt <= maxAttempts; providerAttempt++) {
+            if (visionAttempts >= VISION_ATTEMPTS_PER_REQUEST) break;
+            visionAttempts++;
             attempted++;
             try {
               const value = await operation(provider);
@@ -2262,8 +2291,11 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
               const reason = error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR';
               visionRouting.push({ provider: name, status: 'FAILED', reason });
               logSafeError(error);
-              const shouldRetryScout = name === 'cloudflare' && providerAttempt === 1 && reason === 'PROVIDER_ERROR';
-              if (shouldRetryScout) continue;
+              const retryable = reason === 'PROVIDER_5XX' || reason === 'RATE_LIMITED' || reason === 'PROVIDER_ERROR';
+              if (retryable && providerAttempt < maxAttempts && visionAttempts < VISION_ATTEMPTS_PER_REQUEST) {
+                await new Promise((resolve) => setTimeout(resolve, VISION_RETRY_BACKOFF_MS * providerAttempt));
+                continue;
+              }
               markVisionFailure(name, error);
               break;
             }
