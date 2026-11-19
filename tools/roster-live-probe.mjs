@@ -119,6 +119,8 @@ for (const offer of probes) {
       decision: resolved.body.verified_mapping?.same_video_reason ?? resolved.body.failure_state ?? null,
       hit: resolved.body.verified_mapping?.hit ?? null,
       retrieved: resolved.body.verified_mapping?.roster_retrieval?.retrieved_keys?.length ?? null,
+      roster_count: resolved.body.verified_mapping?.roster_retrieval?.roster_count ?? null,
+      family_stage: resolved.body.verified_mapping?.roster_retrieval?.family_stage ?? null,
       unexamined: resolved.body.verified_mapping?.roster_retrieval?.unresolved_keys?.length ?? null,
       subrequests: resolved.body.verified_mapping?.subrequests?.total ?? null,
       evidence: (top?.evidence ?? top?.matching_details ?? top?.verification_reasons ?? [])
