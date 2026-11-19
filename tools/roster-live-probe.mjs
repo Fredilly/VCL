@@ -141,6 +141,7 @@ for (const offer of probes) {
       retrieved: resolved.body.verified_mapping?.roster_retrieval?.retrieved_keys?.length ?? null,
       roster_count: resolved.body.verified_mapping?.roster_retrieval?.roster_count ?? null,
       family_stage: resolved.body.verified_mapping?.roster_retrieval?.family_stage ?? null,
+      visual_failure_reasons: resolved.body.verified_mapping?.visual_failure_reasons ?? null,
       unexamined: resolved.body.verified_mapping?.roster_retrieval?.unresolved_keys?.length ?? null,
       subrequests: resolved.body.verified_mapping?.subrequests?.total ?? null,
       evidence: (top?.evidence ?? top?.matching_details ?? top?.verification_reasons ?? [])

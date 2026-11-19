@@ -971,9 +971,10 @@ async function confirmSameVideoReuseWithImage(
       relationship: 'RELATED' as const,
       metadata: { category: candidate.identity.object_type },
     }));
+    let familyError: string | null = null;
     const familyCall = stageProducts.length ? await compareCandidateImages(
       key, model, sourceImage, seen, stageProducts, undefined, budget, verifierConfig,
-    ).catch(() => null) : null;
+    ).catch((error) => { familyError = error instanceof Error ? error.message.slice(0, 140) : String(error).slice(0, 140); return null; }) : null;
     const familyComparisons = new Map<string, ImageComparison>();
     if (familyCall) {
       representatives.forEach(({ candidate }, index) => {
@@ -1017,6 +1018,7 @@ async function confirmSameVideoReuseWithImage(
       // were compared and label it a partial, SIMILAR-only result rather than
       // returning nothing: a useful near-miss beats an empty panel.
       familyStage = { families: familyMap.size, compared: familyCall?.compared ?? 0, advancing: [] };
+      if (familyError) (familyStage as Record<string, unknown>).error = familyError;
       shortlistCost = familyCall?.compared ?? 0;
       if (shortlisted.length > ROSTER_VISUAL_CANDIDATE_LIMIT && familyComparisons.size) {
         shortlisted = [...representatives]
