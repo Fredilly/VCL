@@ -623,12 +623,35 @@ export const PROBABLE_ROSTER_LIMIT = 3;
 export function probableRosterCandidates(input: {
   candidates: SameVideoCanonicalCandidate[];
   comparisons: Map<string, ImageComparison>;
+  /** What the crop itself showed. A matching detail that shares nothing with it
+   * is the model's own guess, not evidence about this object. */
+  description?: ObjectDescription;
 }): Array<{ candidate: SameVideoCanonicalCandidate; similarity: number; confidence: number }> {
+  // The vocabulary the click itself supports. Title overlap is deliberately
+  // absent: a shared word in a listing title neither qualifies a candidate nor
+  // disqualifies one. What counts is a visual detail the comparison claims AND
+  // the crop can corroborate.
+  const source = input.description ? new Set(distinctiveWords([
+    input.description.subcategory,
+    input.description.brand_candidate,
+    input.description.model_candidate,
+    input.description.color,
+    input.description.material,
+    input.description.shape_silhouette,
+    input.description.hardware_details,
+    input.description.logos_markings,
+    ...(input.description.distinctive_features ?? []),
+    ...(input.description.visible_text ?? []),
+    ...(input.description.style_attributes ?? []),
+  ].flatMap((value) => Array.isArray(value) ? value : [value]))) : null;
   return input.candidates.flatMap((candidate) => {
     const comparison = input.comparisons.get(candidate.identity.canonical_key);
     if (!validComparison(comparison)) return [];
     if (comparison.similarity < PROBABLE_ROSTER_SIMILARITY || comparison.confidence < PROBABLE_ROSTER_CONFIDENCE) return [];
-    if (!(comparison.matching_details ?? []).some(detail => distinctiveWords([detail]).length >= 2)) return [];
+    const details = (comparison.matching_details ?? []).filter((detail) => distinctiveWords([detail]).length >= 2);
+    if (!details.length) return [];
+    // Positive evidence has to connect the two objects, not just be specific.
+    if (source && source.size && !details.some((detail) => distinctiveWords([detail]).some((word) => source.has(word)))) return [];
     if (criticalContradictionKey(comparison)) return [];
     return [{ candidate, similarity: comparison.similarity, confidence: comparison.confidence }];
   }).sort((a, b) => b.similarity - a.similarity || b.confidence - a.confidence

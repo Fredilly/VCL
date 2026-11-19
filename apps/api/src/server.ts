@@ -858,7 +858,13 @@ export async function refreshVerifiedOffers(
 }
 
 type SameVideoVisualCheck = {
-  retrieval?: { roster_count: number; retrieved_keys: string[]; verified_keys: string[]; unresolved_keys: string[]; truncated?: boolean; family_stage?: { families: number; compared: number; advancing: string[] } };
+  retrieval?: {
+    roster_count: number; retrieved_keys: string[]; verified_keys: string[]; unresolved_keys: string[];
+    truncated?: boolean;
+    family_stage?: { families: number; compared: number; advancing: string[] };
+    /** Why rows in play did not reach the verifier. Counts only. */
+    coverage?: { shortlisted: number; comparable_rows: number; compared: number; skipped: Record<string, number> };
+  };
   comparisons?: Record<string, ImageComparison>;
   /** The head-to-head round, when one ran: how many rivals, and how it ended. */
   head_to_head?: { rivals: number; outcome: SameVideoReuseDecision['reason']; comparisons: Record<string, ImageComparison> };
@@ -919,7 +925,7 @@ async function confirmSameVideoReuseWithImage(
   // The comparison ceiling is applied after the family round, to the candidates
   // that are actually compared. A roster larger than the ceiling is not a
   // retrieval failure: retrieval never drops a candidate on its own.
-  const retrieval: { roster_count: number; retrieved_keys: string[]; verified_keys: string[]; unresolved_keys: string[]; truncated?: boolean; family_stage?: { families: number; compared: number; advancing: string[] } } = {
+  const retrieval: NonNullable<SameVideoVisualCheck['retrieval']> = {
     roster_count: eligible.length, retrieved_keys: visualCandidates.map(row => row.identity.canonical_key),
     verified_keys: [], unresolved_keys: eligible.map(row => row.identity.canonical_key) };
   const empty = { decision: noDecision, compared: 0, failures: 0, failure_reasons: {}, retrieval };
@@ -1424,6 +1430,7 @@ async function confirmSameVideoReuseWithImage(
     decision,
     retrieval: { ...retrieval, verified_keys: [...comparisons.keys()],
       unresolved_keys: unresolvedRosterCandidateKeys({ candidates: shortlisted, comparisons }),
+      coverage: { shortlisted: shortlisted.length, comparable_rows: rows.length, compared: images.compared, skipped: { ...skipReasons } },
       ...(familyStage ? { family_stage: familyStage } : {}) },
     comparisons: Object.fromEntries(comparisons),
     ...(headToHead ? { head_to_head: headToHead } : {}),
@@ -3057,6 +3064,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       const rosterSuggestions: ProductCandidate[] = probableRosterCandidates({
         candidates: canonicalRows,
         comparisons: new Map(Object.entries(sameVideoVisualCheck.comparisons ?? {})),
+        description,
       }).map(({ candidate, similarity, confidence }) => {
         const base = verifiedMappingProduct(candidate.mapping);
         return {

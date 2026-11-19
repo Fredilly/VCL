@@ -47,7 +47,9 @@ for (const offer of offers) {
   const family = String(offer.family ?? offer.title ?? offer.variant_id);
   if (!byFamily.has(family)) byFamily.set(family, offer);
 }
-const probes = [...byFamily.values()].slice(0, limit);
+// Deterministic selection: families sorted by key, one probe each, same set on
+// every run so two runs are comparable.
+const probes = [...byFamily.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, offer]) => offer).slice(0, limit);
 
 const normalize = (value) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const tokens = (value) => new Set(normalize(value).split(' ').filter((token) => token.length > 2));
@@ -120,10 +122,11 @@ for (const offer of probes) {
   const started = Date.now();
   // Space the probes: a burst trips the provider's rate limit and reads as an
   // outage, which hides the matching signal this run exists to measure.
-  if (!firstProbe) await new Promise((resolve) => setTimeout(resolve, 1500));
+  if (!firstProbe) await new Promise((resolve) => setTimeout(resolve, 3000));
   firstProbe = false;
   try {
     const crop = await dataUrlFor(offer.image_reference);
+    const analyzeStarted = Date.now();
     const analysed = await post('/analyze-selection', {
       dataUrl: crop,
       timestamp,
@@ -173,6 +176,8 @@ for (const offer of probes) {
       retrieved: resolved.body.verified_mapping?.roster_retrieval?.retrieved_keys?.length ?? null,
       roster_count: resolved.body.verified_mapping?.roster_retrieval?.roster_count ?? null,
       family_stage: resolved.body.verified_mapping?.roster_retrieval?.family_stage ?? null,
+      coverage: resolved.body.verified_mapping?.roster_retrieval?.coverage ?? null,
+      analyze_ms: Date.now() - analyzeStarted,
       visual_failure_reasons: resolved.body.verified_mapping?.visual_failure_reasons ?? null,
       unexamined: resolved.body.verified_mapping?.roster_retrieval?.unresolved_keys?.length ?? null,
       subrequests: resolved.body.verified_mapping?.subrequests?.total ?? null,
@@ -202,7 +207,9 @@ const summary = {
   latency_ms: rows.length ? Math.round(rows.reduce((sum, row) => sum + (row.ms ?? 0), 0) / rows.length) : null,
   cost_usd: Number(rows.reduce((sum, row) => sum + (row.cost_usd ?? 0), 0).toFixed(4)),
   model_similarity: rows.filter((row) => row.returned).map((row) => row.returned.class),
-  failures: rows.filter((row) => !row.useful).map((row) => ({ handle: row.handle, decision: row.decision ?? row.failure ?? null, stage: row.stage ?? 'resolve', retrieved: row.retrieved ?? null, unexamined: row.unexamined ?? null })),
+  provider_failures: rows.filter((row) => row.stage === 'analyze').length,
+  matching_failures: rows.filter((row) => row.stage !== 'analyze' && !row.useful).length,
+  failures: rows.filter((row) => !row.useful).map((row) => ({ handle: row.handle, decision: row.decision ?? row.failure ?? null, stage: row.stage ?? 'resolve', retrieved: row.retrieved ?? null, unexamined: row.unexamined ?? null, coverage: row.coverage ?? null })),
 };
 
 console.log(JSON.stringify({ summary, cases: rows }, null, 1));
