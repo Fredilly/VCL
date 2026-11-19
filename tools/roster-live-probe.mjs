@@ -87,7 +87,10 @@ for (const offer of probes) {
       timestamp,
       context: { platform: manifest.platform, content_ref: manifest.content_ref, timestamp_ms: timestamp },
     });
-    if (analysed.status !== 200 || !analysed.body.description) {
+    // The endpoint returns the description fields at the top level, not under a
+    // `description` key.
+    const description = analysed.body.description ?? (analysed.body.category || analysed.body.search_terms ? analysed.body : null);
+    if (analysed.status !== 200 || !description) {
       rows.push({
         handle: offer.variant_id, stage: 'analyze', status: analysed.status,
         failure: analysed.body.error ?? 'no description', reason: analysed.body.reason ?? null,
@@ -96,7 +99,7 @@ for (const offer of probes) {
       continue;
     }
     const resolved = await post('/resolve-products', {
-      description: analysed.body.description,
+      description,
       source_image: crop,
       context: { platform: manifest.platform, content_ref: manifest.content_ref, timestamp_ms: timestamp },
     });
