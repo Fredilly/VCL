@@ -30,7 +30,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      # The OpenRouter secret currently answers 401; the AI gateway key answers
+      # 200 for the same model, and this provider speaks the same API.
+      OPENROUTER_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+      OPENROUTER_BASE_URL: https://ai-gateway.vercel.sh/v1/chat/completions
+      VISION_PROVIDER: openrouter
       BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
       AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
       VERCEL_AI_GATEWAY_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
@@ -51,7 +55,7 @@ jobs:
       - name: Check provider credentials are present
         run: |
           set -euo pipefail
-          test -n "${OPENROUTER_API_KEY:-}" || { echo 'OPENROUTER_API_KEY secret is not available to this run'; exit 1; }
+          test -n "${OPENROUTER_API_KEY:-}" || { echo 'no vision key is available to this run'; exit 1; }
           test -n "${BRAVE_SEARCH_API_KEY:-}" || { echo 'BRAVE_SEARCH_API_KEY secret is not available to this run'; exit 1; }
           echo 'Provider credentials present'
 
@@ -106,6 +110,12 @@ jobs:
       - name: Load the roster into a local worker and probe it
         run: |
           set -uo pipefail
+          : > apps/api/.dev.vars
+          printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY" >> apps/api/.dev.vars
+          printf 'OPENROUTER_BASE_URL=%s\n' "$OPENROUTER_BASE_URL" >> apps/api/.dev.vars
+          printf 'VISION_PROVIDER=openrouter\n' >> apps/api/.dev.vars
+          [ -n "${BRAVE_SEARCH_API_KEY:-}" ] && printf 'BRAVE_SEARCH_API_KEY=%s\n' "$BRAVE_SEARCH_API_KEY" >> apps/api/.dev.vars
+          printf 'BENCHMARK_MODE=true\n' >> apps/api/.dev.vars
           node - "$RUNNER_TEMP/intake/evaluation-roster.json" <<'JS'
           const fs = require('fs');
           const rows = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));

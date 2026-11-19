@@ -56,6 +56,7 @@ export interface Env {
   GEMINI_API_KEY?: string;
   GROQ_API_KEY?: string;
   VISION_PROVIDER?: string;
+  OPENROUTER_BASE_URL?: string;
   GEMINI_MODEL?: string;
   OPENROUTER_API_KEY?: string;
   OPENROUTER_MODEL?: string;
@@ -2185,7 +2186,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
       type ActiveVisionProvider = OpenRouterVisionProvider | GeminiVisionProvider | GroqVisionProvider | CloudflareVisionProvider;
       type NamedVisionProvider = { name: VisionProviderName; provider: ActiveVisionProvider };
-      const openrouter = env.OPENROUTER_API_KEY ? { name: 'openrouter' as const, provider: new OpenRouterVisionProvider(env.OPENROUTER_API_KEY, env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) } : null;
+      const openrouter = env.OPENROUTER_API_KEY ? { name: 'openrouter' as const, provider: new OpenRouterVisionProvider(env.OPENROUTER_API_KEY, env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL, env.OPENROUTER_BASE_URL || undefined) } : null;
       const gemini = env.GEMINI_API_KEY ? { name: 'gemini' as const, provider: new GeminiVisionProvider(env.GEMINI_API_KEY, env.GEMINI_MODEL) } : null;
       const groq38 = env.GROQ_API_KEY ? { name: 'groq-3.8' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY, 'qwen/qwen3.8-27b') } : null;
       const groq36 = env.GROQ_API_KEY ? { name: 'groq-3.6' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY, 'qwen/qwen3.6-27b') } : null;
