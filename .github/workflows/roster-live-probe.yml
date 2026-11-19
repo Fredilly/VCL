@@ -108,6 +108,8 @@ jobs:
           JS
 
       - name: Load the roster into a local worker and probe it
+        env:
+          ADMIN_CREDENTIAL: roster-live-probe
         run: |
           set -uo pipefail
           : > apps/api/.dev.vars
@@ -116,13 +118,8 @@ jobs:
           printf 'VISION_PROVIDER=openrouter\n' >> apps/api/.dev.vars
           [ -n "${BRAVE_SEARCH_API_KEY:-}" ] && printf 'BRAVE_SEARCH_API_KEY=%s\n' "$BRAVE_SEARCH_API_KEY" >> apps/api/.dev.vars
           printf 'BENCHMARK_MODE=true\n' >> apps/api/.dev.vars
-          node - "$RUNNER_TEMP/intake/evaluation-roster.json" <<'JS'
-          const fs = require('fs');
-          const rows = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-          const json = JSON.stringify(rows).replace(/'/g, '\\u0027');
-          fs.appendFileSync('apps/api/.dev.vars', `VERIFIED_PRODUCT_MAPPINGS_JSON='${json}'\n`);
-          console.log('Configured roster rows:', rows.length);
-          JS
+          printf 'ALPHA_FEEDBACK_ADMIN_TOKEN=%s\n' "${ADMIN_CREDENTIAL:-roster-live-probe}" >> apps/api/.dev.vars
+          echo 'Worker configured for a local admin import'
           pnpm --filter @vcl/api exec wrangler dev --port 8787 --local --ip 127.0.0.1 > "$RUNNER_TEMP/wrangler-dev.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/wrangler.pid"
           for i in $(seq 1 60); do
@@ -135,6 +132,7 @@ jobs:
             --endpoint http://127.0.0.1:8787 \
             --manifest "$RUNNER_TEMP/intake/manifest.json" \
             --limit "${{ inputs.probe_limit || '6' }}" \
+            --import \
             --out "$RUNNER_TEMP/live-probe.json" || status=1
           kill "$(cat "$RUNNER_TEMP/wrangler.pid")" 2>/dev/null || true
           pkill -f workerd 2>/dev/null || true

@@ -77,6 +77,26 @@ const scrub = (text, offer) => {
   return value.slice(0, 160);
 };
 
+// Preferred path: ingest through the same endpoint production uses, so the
+// worker stores the reference images the family round needs.
+if (args.includes('--import')) {
+  const credential = process.env.ADMIN_CREDENTIAL || 'roster-live-probe';
+  const auth = await post('/admin/auth', { credential, label: 'roster-live-probe' });
+  const session = auth.body.session_token ?? auth.body.token ?? auth.body.session?.token ?? null;
+  if (auth.status !== 200 || !session) {
+    console.error(`admin auth failed: ${auth.status} ${auth.body.error ?? ''}`);
+    process.exit(2);
+  }
+  const imported = await fetch(new URL('/partner-roster', endpoint), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-scoop-admin-session': session },
+    body: JSON.stringify(manifest),
+  });
+  const body = await imported.json().catch(() => ({}));
+  console.log(JSON.stringify({ import: { status: imported.status, ...body } }));
+  if (imported.status !== 200) process.exit(2);
+}
+
 const rows = [];
 for (const offer of probes) {
   const started = Date.now();
