@@ -320,6 +320,61 @@ test('HTTP resolver compares every variant of a roster at the ceiling before dec
   assert.ok(!result.products.some(row => row.result_class === 'EXACT'));
 });
 
+test('a 41-row roster across ten families resolves through the family round and stays inside the subrequest budget', async () => {
+  const { env } = environment();
+  const rows = await learning.preparePartnerRoster(env, 'https://api.scoop.shop', input(
+    Array.from({ length: 41 }, (_, i) => offer(`Family${i % 10}`, `SKU-${i}`))), deps);
+  await learning.ingestPartnerRoster(env, rows);
+  Object.assign(env, { GEMINI_API_KEY: 'test-only', BRAVE_SEARCH_API_KEY: 'test-only', BENCHMARK_MODE: 'true' });
+  let verified = 0, server;
+  server = loadModule(new URL('../src/server.ts', import.meta.url).pathname, { console: { error() {}, warn() {} },
+    fetch: async (url, options) => {
+      const host = new URL(String(url)).hostname;
+      if (host === 'api.scoop.shop') return server.default.fetch(new Request(url, options), env);
+      if (host === 'api.search.brave.com') return Response.json({ web: { results: [] } });
+      if (host === 'generativelanguage.googleapis.com') {
+        const request = JSON.parse(options.body);
+        const products = request.contents[0].parts.flatMap(part => {
+          try { const value = JSON.parse(part.text); return typeof value.index === 'number' ? [value] : []; } catch { return []; }
+        });
+        verified += products.length;
+        // A batch spanning several families is the family round; a batch of one
+        // family is the variant round (batches hold six candidates).
+        const familyRound = new Set(products.map(p => (/Family\d+/.exec(p.title) ?? [''])[0])).size > 1;
+        const score = title => familyRound
+          ? (/(^|\s)Family3\b/.test(title) ? .9 : .05)
+          : (/(^|\s)SKU-3(\s|$)/.test(title) ? .97 : .4);
+        return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: visual(.98).source,
+          candidates: products.map(row => ({ index: row.index, attributes: visual(.98).candidate, confidence: .98,
+            similarity: score(row.title), matching_details: ['distinctive panel stitching and clasp construction'] })) }) }] } }] });
+      }
+      throw Error(`Unexpected fetch ${host}`);
+    } });
+  const response = await server.default.fetch(new Request('https://api.scoop.shop/resolve-products', { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, source_image: `data:${crop.mimeType};base64,${crop.data}`,
+      context: { platform: 'youtube', content_ref: 'video-A', timestamp_ms: 9000 } }),
+  }), env);
+  const result = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(result).slice(0, 400));
+  console.error('DEBUG VM41', JSON.stringify({ keys: Object.keys(result.verified_mapping ?? {}), roster: result.verified_mapping?.roster_retrieval?.roster_count, reason: result.verified_mapping?.same_video_reason }));
+  const retrieval = result.verified_mapping.roster_retrieval;
+  assert.equal(retrieval.roster_count, 41);
+  assert.equal(retrieval.family_stage.families, 10);
+  assert.equal(retrieval.family_stage.advancing.join(','), 'family3');
+  assert.equal(result.verified_mapping.hit, true);
+  assert.equal(result.verified_mapping.track_diagnostics.decision_reason, 'visual_confirmed');
+  assert.equal(result.products.filter(row => row.result_class === 'EXACT').length, 1);
+  // Ten family representatives, four variants of the clicked family, one
+  // four-way head-to-head: 18 comparisons instead of 41, and the click is
+  // answered instead of abstaining on coverage.
+  assert.equal(verified, 18);
+  // The ledger reports what the platform would actually be charged.
+  const subrequests = result.verified_mapping.subrequests;
+  console.error('MEASURED', JSON.stringify({ subrequests, compared: result.verified_mapping.candidates_compared, verified, stage: retrieval.family_stage }));
+  assert.ok(subrequests.total <= subrequests.limit, JSON.stringify(subrequests));
+  assert.ok(subrequests.total < 44, JSON.stringify(subrequests));
+});
+
 test('SKU and retail URL can recover an unavailable product reference automatically', async () => {
   const { env } = environment();
   const record = {

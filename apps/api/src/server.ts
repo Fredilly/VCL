@@ -10,6 +10,7 @@ import { CommerceNoResultsError, buildProductQueryVariants, type CommerceProvide
 import { classifyCanonicalRelationship, highConfidenceMetadataContradiction, verifyCandidate, rankVerified } from './candidate-verification.js';
 import { canonical } from './verification-evidence.js';
 import { candidateKey, compareCandidateImages, parseSourceImage, imageRequestBudget, safeImageUrl, type VerifierOptions } from './candidate-images.js';
+import { createSubrequestLedger, ledgerFetch, type SubrequestLedger } from './subrequest-ledger.js';
 import type { ImageComparison } from './verification-evidence.js';
 import { EbayAuth } from './ebay-auth.js';
 import { EbayCommerceProvider, ebayItemIdForLiveLookup } from './ebay-commerce.js';
@@ -31,7 +32,7 @@ import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerc
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, parseVerifiedProductMappings, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { backfillLegacyAdminCanonicalMappings, consolidateCanonicalProducts, durableCanonicalCandidates, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
-import { confirmHeadToHead, probableRosterCandidates, strictVisualOutcome } from './same-video-verified-reuse.js';
+import { advancingRosterFamilies, confirmHeadToHead, probableRosterCandidates, rosterFamilyKey, ROSTER_VISUAL_CANDIDATE_LIMIT, strictVisualOutcome } from './same-video-verified-reuse.js';
 import { eligibleSameVideoCanonicalCandidates, resolveSameVideoReuse, identityWithTrustedVpmObservations, rankSameVideoRosterCandidates, retrieveSameVideoRosterCandidates, unresolvedRosterCandidateKeys, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, preferredCanonicalReference, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
@@ -382,13 +383,14 @@ function sourceImageFromHtml(html: string, base: URL): string | null {
   return null;
 }
 
-async function sourceImageForVerifiedMapping(mapping: VerifiedProductMapping): Promise<string | null> {
+async function sourceImageForVerifiedMapping(mapping: VerifiedProductMapping, ledger?: SubrequestLedger): Promise<string | null> {
   if (mapping.image_reference) return mapping.image_reference;
   const source = safeVerifiedSourceUrl(mapping.destination);
   if (!source) return null;
   const cached = verifiedSourceImageCache.get(source.toString());
   if (cached && cached.expires_at > Date.now()) return cached.image;
 
+  if (ledger && !ledger.reserve('page')) return null;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1800);
   try {
@@ -816,7 +818,7 @@ export async function refreshVerifiedOffers(
 }
 
 type SameVideoVisualCheck = {
-  retrieval?: { roster_count: number; retrieved_keys: string[]; verified_keys: string[]; unresolved_keys: string[]; truncated?: boolean };
+  retrieval?: { roster_count: number; retrieved_keys: string[]; verified_keys: string[]; unresolved_keys: string[]; truncated?: boolean; family_stage?: { families: number; compared: number; advancing: string[] } };
   comparisons?: Record<string, ImageComparison>;
   /** The head-to-head round, when one ran: how many rivals, and how it ended. */
   head_to_head?: { rivals: number; outcome: SameVideoReuseDecision['reason']; comparisons: Record<string, ImageComparison> };
@@ -855,6 +857,7 @@ async function confirmSameVideoReuseWithImage(
   context: ProductContext | undefined,
   sourceImage: ReturnType<typeof parseSourceImage>,
   candidates: SameVideoCanonicalCandidate[],
+  ledger: SubrequestLedger = createSubrequestLedger(),
 ): Promise<SameVideoVisualCheck> {
   const noDecision: SameVideoReuseDecision = {
     mapping: null,
@@ -872,18 +875,13 @@ async function confirmSameVideoReuseWithImage(
     description,
     candidates: eligible,
   });
-  // Retrieval is not allowed to be a silent shortlist: a roster larger than the
-  // comparison budget cannot be examined in full, and the coverage gate would
-  // otherwise abstain on every click while the log blamed the verifier. Abstain
-  // here, once, with a reason that names the real cause.
-  const truncated = eligible.length > visualCandidates.length;
-  const retrieval = { roster_count: eligible.length, retrieved_keys: visualCandidates.map(row => row.identity.canonical_key),
-    verified_keys: [] as string[], unresolved_keys: eligible.map(row => row.identity.canonical_key),
-    ...(truncated ? { truncated: true } : {}) };
+  // The comparison ceiling is applied after the family round, to the candidates
+  // that are actually compared. A roster larger than the ceiling is not a
+  // retrieval failure: retrieval never drops a candidate on its own.
+  const retrieval: { roster_count: number; retrieved_keys: string[]; verified_keys: string[]; unresolved_keys: string[]; truncated?: boolean; family_stage?: { families: number; compared: number; advancing: string[] } } = {
+    roster_count: eligible.length, retrieved_keys: visualCandidates.map(row => row.identity.canonical_key),
+    verified_keys: [], unresolved_keys: eligible.map(row => row.identity.canonical_key) };
   const empty = { decision: noDecision, compared: 0, failures: 0, failure_reasons: {}, retrieval };
-  if (truncated) {
-    return { ...empty, decision: { ...noDecision, reason: 'roster_exceeds_visual_budget' } };
-  }
   if (!visualCandidates.length || !sourceImage) {
     return { ...empty, decision: { ...noDecision, reason: visualCandidates.length ? 'visual_unavailable' : 'no_candidate' } };
   }
@@ -894,8 +892,95 @@ async function confirmSameVideoReuseWithImage(
   const model = useOpenRouter ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
 
   const providers = commerceProviders(env);
+  const budget = imageRequestBudget();
+  budget.ledger = ledger;
+  // The verifier compares pixels with pixels. It is told which kind of object to
+  // look at and nothing the upstream model guessed about it, and no page title:
+  // it repeats those back as its own reading of the click, and that reading then
+  // vetoes correctly matched roster products.
+  const seen = rosterVerifierDescription(description);
+  const verifierConfig = { ...verifierOptions(env, useOpenRouter), pixelOnlySource: true };
+
+  // Family round, before any page is fetched. One representative per family is
+  // compared using the image the roster already carries; only the families still
+  // in play get their rows resolved and their variants compared. This is what
+  // keeps a 41-variant roster inside the subrequest budget instead of resolving
+  // 41 merchant pages to answer one click.
+  const familyMap = new Map<string, SameVideoCanonicalCandidate[]>();
+  for (const candidate of eligible) {
+    const family = rosterFamilyKey(candidate.identity);
+    const bucket = familyMap.get(family);
+    if (bucket) bucket.push(candidate); else familyMap.set(family, [candidate]);
+  }
+  // The image the roster already carries, without fetching a page to find one.
+  // Mirrors the row builder's preference order so the representative compared in
+  // the family round is the same product that would be compared later.
+  const storedImages = (candidate: SameVideoCanonicalCandidate): string[] => [...new Set([
+    preferredCanonicalReference(candidate.identity),
+    candidate.mapping.image_reference,
+    ...(candidate.identity.visual_references ?? []).map((ref) => ref.image_url),
+    ...candidate.identity.merchant_refs.map((ref) => ref.image_reference),
+    ...(candidate.mapping.reference_images ?? []),
+  ].filter((url): url is string => Boolean(url && safeImageUrl(url))))];
+  const storedImage = (candidate: SameVideoCanonicalCandidate): string | null => storedImages(candidate)[0] ?? null;
+  // Without a family round the entire roster has to be compared, or none of it:
+  // a shortlist would leave the coverage gate unsatisfiable.
+  let shortlisted = eligible;
+  let familyStage: { families: number; compared: number; advancing: string[] } | null = null;
+  let shortlistCost = 0;
+  if (familyMap.size > 1 && eligible.length > ROSTER_VISUAL_CANDIDATE_LIMIT) {
+    const representatives = [...familyMap].map(([family, list]) => ({ family, candidate: list.find((row) => Boolean(storedImage(row))) ?? null }));
+    const comparable = representatives.filter((row): row is { family: string; candidate: SameVideoCanonicalCandidate } => Boolean(row.candidate));
+    const stageProducts = comparable.map(({ candidate }) => ({
+      id: candidate.identity.canonical_key,
+      title: candidate.identity.title,
+      brand: candidate.identity.brand,
+      model: candidate.identity.model,
+      category: candidate.identity.object_type,
+      image_reference: storedImage(candidate),
+      image_references: storedImages(candidate),
+      provenance: 'canonical_verified',
+      destination: candidate.mapping.destination,
+      price: null,
+      currency: null,
+      result_class: 'RELATED' as const,
+      relationship: 'RELATED' as const,
+      metadata: { category: candidate.identity.object_type },
+    }));
+    const familyCall = stageProducts.length ? await compareCandidateImages(
+      key, model, sourceImage, seen, stageProducts, undefined, budget, verifierConfig,
+    ).catch(() => null) : null;
+    const familyComparisons = new Map<string, ImageComparison>();
+    if (familyCall) {
+      comparable.forEach(({ candidate }, index) => {
+        const comparison = familyCall.comparisons.get(candidateKey(stageProducts[index]));
+        if (comparison) familyComparisons.set(candidate.identity.canonical_key, comparison);
+      });
+    }
+    const advancing = advancingRosterFamilies({ candidates: comparable.map(({ candidate }) => candidate), comparisons: familyComparisons });
+    // A family whose representative carries no comparable image might be the
+    // answer, so it stays in play.
+    const advancingSet = new Set([...advancing, ...representatives.filter((row) => !row.candidate).map((row) => row.family)]);
+    familyStage = { families: representatives.length, compared: familyCall?.compared ?? 0, advancing: [...advancingSet] };
+    shortlistCost = familyCall?.compared ?? 0;
+    shortlisted = eligible.filter((row) => advancingSet.has(rosterFamilyKey(row.identity)));
+  }
+  if (familyStage) retrieval.family_stage = familyStage;
+  // Coverage has to be affordable. If the candidates still in play exceed what one
+  // click can compare, abstain with the real reason instead of comparing a prefix
+  // and letting the coverage gate report a verifier failure.
+  if (shortlisted.length > ROSTER_VISUAL_CANDIDATE_LIMIT) {
+    return {
+      ...empty,
+      decision: { ...noDecision, reason: 'roster_exceeds_visual_budget' },
+      retrieval: { ...retrieval, truncated: true, ...(familyStage ? { family_stage: familyStage } : {}) },
+    };
+  }
+  const neededSlots = shortlisted.length * 3 + Math.ceil(shortlisted.length / 6);
+  if (budget.remaining < neededSlots) budget.remaining = neededSlots;
+
   const rows: Array<{ candidate: SameVideoCanonicalCandidate; identity: CanonicalProductIdentity; product: ProductCandidate }> = [];
-  for (const candidate of visualCandidates) {
+  for (const candidate of shortlisted) {
     let identity = candidate.identity;
     // Trust SKU-bound visual memory ahead of volatile shopping-offer imagery.
     // This is a candidate reference, never an automatic Exact decision.
@@ -919,7 +1004,7 @@ async function confirmSameVideoReuseWithImage(
     // This URL is attached to the saved mapping, not a visually similar search hit.
     // A recovered image is still only candidate evidence and must pass the visual gate.
     if (!merchantRef?.image_reference) {
-      const sourceImageUrl = await sourceImageForVerifiedMapping(candidate.mapping).catch(() => null);
+      const sourceImageUrl = await sourceImageForVerifiedMapping(candidate.mapping, ledger).catch(() => null);
       if (sourceImageUrl && safeImageUrl(sourceImageUrl)) {
         const sourceRef = {
           source: 'verified_roster_destination_page',
@@ -932,7 +1017,7 @@ async function confirmSameVideoReuseWithImage(
       }
     }
 
-    if (!merchantRef?.image_reference) {
+    if (!merchantRef?.image_reference && ledger.reserve('commerce')) {
       const refreshed = await refreshVerifiedOffers(providers, candidate.mapping).catch(() => null);
       const hydrated = refreshed?.products.find((product) => Boolean(product.image_reference && product.destination)) ?? null;
       const hydratedDestination = hydrated?.destination ?? null;
@@ -954,7 +1039,7 @@ async function confirmSameVideoReuseWithImage(
 
     if (!merchantRef?.image_reference && env.BRAVE_SEARCH_API_KEY) {
       const recovered = await recoverVerifiedProductImage(
-        env.BRAVE_SEARCH_API_KEY, { ...candidate.mapping, image_reference: null },
+        env.BRAVE_SEARCH_API_KEY, { ...candidate.mapping, image_reference: null }, ledgerFetch(ledger, 'commerce'),
       ).catch(() => null);
       if (recovered) {
         const recoveredRef = {
@@ -1016,24 +1101,6 @@ async function confirmSameVideoReuseWithImage(
     decision: { ...noDecision, reason: 'visual_unavailable' },
     failures: 1, failure_reasons: { missing_sku_image_reference: 1 },
   };
-
-  const budget = imageRequestBudget();
-  // One slot per candidate image plus one model call per batch of six. Redirect
-  // hops are capped separately (MAX_IMAGE_REDIRECTS_PER_INVOCATION), so the real
-  // subrequest cost of a click is candidates + redirects + calls; a fixed slot
-  // count used to cut a roster at 36 comparisons and the coverage gate reported
-  // that as the verifier being incomplete.
-  // The reservation is deliberately conservative (three slots per image); the
-  // real subrequest cost is bounded by the invocation-wide redirect allowance in
-  // candidate-images, so this only keeps the local pool from starving a batch.
-  const neededSlots = visualCandidates.length * 3 + Math.ceil(visualCandidates.length / 6);
-  if (budget.remaining < neededSlots) budget.remaining = neededSlots;
-  // The verifier compares pixels with pixels. It is told which kind of object
-  // to look at and nothing the upstream model guessed about it, and no page
-  // title: it repeats those back as its own reading of the click, and that
-  // reading then vetoes correctly matched roster products.
-  const seen = rosterVerifierDescription(description);
-  const verifierConfig = { ...verifierOptions(env, useOpenRouter), pixelOnlySource: true };
 
   const images = await compareCandidateImages(
     key,
@@ -1154,8 +1221,9 @@ async function confirmSameVideoReuseWithImage(
   // before every roster row is compared. That is the same user-visible situation
   // as an oversized roster, so it must not be reported as the verifier being
   // merely incomplete.
-  const budgetFailures = (images.failure_reasons?.image_budget ?? 0) + (images.failure_reasons?.image_redirect_budget ?? 0);
-  if (budgetFailures && unresolvedRosterCandidateKeys({ candidates: eligible, comparisons }).length) {
+  const budgetFailures = (images.failure_reasons?.image_budget ?? 0) + (images.failure_reasons?.image_redirect_budget ?? 0)
+    + (images.failure_reasons?.subrequest_budget ?? 0);
+  if (budgetFailures && unresolvedRosterCandidateKeys({ candidates: shortlisted, comparisons }).length) {
     return {
       ...empty,
       decision: { ...noDecision, reason: 'roster_exceeds_visual_budget' },
@@ -1168,7 +1236,10 @@ async function confirmSameVideoReuseWithImage(
     };
   }
 
-  let decision = resolveSameVideoReuse({ description, candidates: eligible, comparisons, require_complete_comparisons: true });
+  // Coverage is judged over the candidates this click put in play. A family that
+  // lost the family round was examined through its representative, and that
+  // elimination is reported in `family_stage`; its variants are not compared.
+  let decision = resolveSameVideoReuse({ description, candidates: shortlisted, comparisons, require_complete_comparisons: true });
 
   // Head-to-head round. One candidate passed the strict check and every roster
   // candidate was examined; it becomes Exact only if it wins again in a call
@@ -1210,10 +1281,11 @@ async function confirmSameVideoReuseWithImage(
   return {
     decision,
     retrieval: { ...retrieval, verified_keys: [...comparisons.keys()],
-      unresolved_keys: unresolvedRosterCandidateKeys({ candidates: eligible, comparisons }) },
+      unresolved_keys: unresolvedRosterCandidateKeys({ candidates: shortlisted, comparisons }),
+      ...(familyStage ? { family_stage: familyStage } : {}) },
     comparisons: Object.fromEntries(comparisons),
     ...(headToHead ? { head_to_head: headToHead } : {}),
-    compared: images.compared + (retryVerification?.compared ?? 0) + roundCompared,
+    compared: shortlistCost + images.compared + (retryVerification?.compared ?? 0) + roundCompared,
     failures: images.failures + (retryVerification?.failures ?? 0),
     failure_reasons: failureReasons,
     usage: roundUsage ? {
@@ -2404,6 +2476,10 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           ? routing.canonical_retrieval_action ?? 'HYBRID'
           : 'HYBRID';
 
+      // One ledger for this click: every outbound page, image, redirect, model
+      // and commerce request draws from it, so the roster cannot quietly cost more
+      // subrequests than the platform allows.
+      const ledger = createSubrequestLedger();
       const verifiedResolutionStarted = Date.now();
       let durableMappings = await durableVerifiedMappings(env, context?.platform ?? null, contentRef).catch(() => []);
       if (durableMappings.some((mapping) => mapping.provenance === 'admin_verified' && !mapping.canonical_key)) {
@@ -2497,6 +2573,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           context,
           sourceImage,
           canonicalRows,
+          ledger,
         );
         sameVideoReuse = sameVideoVisualCheck.decision;
         if (sameVideoReuse.mapping) {
@@ -2652,6 +2729,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           verified_mapping: {
             hit: true,
             roster_retrieval: sameVideoVisualCheck.retrieval,
+            subrequests: ledger.snapshot(),
           // Counts only: establish whether a replay is using imported variants
           // or falling back to alpha seeds, without disclosing catalog content.
           // Benchmark worker only: per-candidate verifier scores keyed by roster
@@ -2974,6 +3052,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           confidence: crossVideoReuse.reason !== 'no_candidate' ? crossVideoReuse.confidence : sameVideoReuse.confidence,
           reason: crossVideoReuse.reason !== 'no_candidate' ? crossVideoReuse.reason : sameVideoReuse.reason,
           same_video_reason: sameVideoReuse.reason,
+          subrequests: ledger.snapshot(),
           cross_video_reason: crossVideoReuse.reason,
           ...(typeof crossVideoReuse.visual_similarity === 'number'
             ? { visual_similarity: crossVideoReuse.visual_similarity }

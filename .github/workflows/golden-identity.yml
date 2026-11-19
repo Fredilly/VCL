@@ -1,0 +1,162 @@
+name: Golden identity (local worker)
+
+# Automated Golden identity run against a throwaway local `wrangler dev` worker.
+#
+# What this is: the frozen cases in tests/golden/cases.json, run headlessly, scored
+# on object identity from the resolver's own query terms, recorded as an immutable
+# run file and compared with the previous automated run.
+#
+# What this is NOT: a replacement for the manual three-run Golden PASS procedure.
+# Each case describes its click point in prose, so a machine cannot reproduce the
+# exact click without inventing coordinates; localisation is out of scope here.
+#
+# Frames are supplied, never fetched: YouTube refuses datacenter IPs ("confirm
+# you're not a bot") and the alternative, session cookies, is a credential this
+# workflow must not handle. Cases without a frame are recorded BLOCKED_NO_FRAME.
+#
+# Credentials: the same repository secrets the private replay uses.
+#   OPENROUTER_API_KEY (or GEMINI_API_KEY), BRAVE_SEARCH_API_KEY (or SERPAPI_API_KEY)
+# Nothing is printed, echoed or uploaded: the run file contains counts, timings and
+# query terms only.
+#
+# Manual only: it spends paid resolver calls. It never deploys.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type RUN_GOLDEN to confirm a paid local Golden run'
+        required: true
+        default: ''
+      case_limit:
+        description: 'Maximum cases to run (1-5)'
+        required: false
+        default: '5'
+        type: choice
+        options: ['1', '3', '5']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: golden-identity
+  cancel-in-progress: false
+
+jobs:
+  golden:
+    if: inputs.confirm == 'RUN_GOLDEN'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+      GOLDEN_ENDPOINT: http://127.0.0.1:8787/resolve-products
+      VERIFIER_CONCURRENCY: '1'
+      VERIFIER_PACING_MS: '2500'
+      VERIFIER_MAX_ATTEMPTS: '3'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Refuse a non-local endpoint or a deploy step
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GOLDEN_ENDPOINT" in
+            http://127.0.0.1:8787/resolve-products) ;;
+            *) echo 'Refusing a non-local Golden endpoint'; exit 1 ;;
+          esac
+          if grep -nE '^ *run: *(pnpm .*)?wrangler deploy' .github/workflows/golden-identity.yml; then
+            echo 'This workflow must never deploy'; exit 1
+          fi
+
+      - name: Check provider credentials are configured
+        shell: bash
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+          SERPAPI_API_KEY: ${{ secrets.SERPAPI_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OPENROUTER_API_KEY}${GEMINI_API_KEY}" ]; then
+            echo 'Missing vision credential: configure OPENROUTER_API_KEY or GEMINI_API_KEY'
+            exit 1
+          fi
+          if [ -z "${BRAVE_SEARCH_API_KEY}${SERPAPI_API_KEY}" ]; then
+            echo 'Missing commerce credential: configure BRAVE_SEARCH_API_KEY or SERPAPI_API_KEY'
+            exit 1
+          fi
+
+      - name: Build the API
+        run: pnpm --filter @vcl/api build
+
+      - name: Start the local worker
+        shell: bash
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+          SERPAPI_API_KEY: ${{ secrets.SERPAPI_API_KEY }}
+        run: |
+          set -euo pipefail
+          pnpm --filter @vcl/api exec wrangler dev --port 8787 --local --ip 127.0.0.1 \
+            > "$RUNNER_TEMP/wrangler-dev.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/wrangler.pid"
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8787/health > /dev/null 2>&1; then
+              echo 'Local worker is healthy'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'Local worker did not become healthy'
+          tail -40 "$RUNNER_TEMP/wrangler-dev.log" || true
+          exit 1
+
+      - name: Run the frozen cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/golden-identity.mjs \
+            --endpoint "$GOLDEN_ENDPOINT" \
+            --frames tests/golden/frames \
+            --limit "${{ inputs.case_limit }}" \
+            --out "$RUNNER_TEMP/golden-identity.json"
+
+      - name: Stop the local worker
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/wrangler.pid" ]; then kill "$(cat "$RUNNER_TEMP/wrangler.pid")" 2>/dev/null || true; fi
+
+      - name: Upload the immutable run record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-identity-${{ github.run_id }}
+          path: ${{ runner.temp }}/golden-identity.json
+          if-no-files-found: warn
+          retention-days: 365
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f "$RUNNER_TEMP/golden-identity.json" ]; then
+            node -e 'const r=require(process.env.RUNNER_TEMP+"/golden-identity.json"); console.log(JSON.stringify({summary:r.summary, comparison:r.comparison}, null, 2))'
+          else
+            echo 'No run record was produced'
+          fi

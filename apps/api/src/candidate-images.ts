@@ -1,5 +1,6 @@
 import type { ProductCandidate, ProductContext } from './commerce.js';
 import type { ObjectDescription } from './types.js';
+import type { SubrequestLedger } from './subrequest-ledger.js';
 import { attributes, canonical, type Evidence, type ImageComparison } from './verification-evidence.js';
 
 export type CatalogImage = { mimeType: string; data: string };
@@ -14,7 +15,13 @@ type Image = CatalogImage;
  * actually charges for.
  */
 export type RedirectAllowance = { remaining: number };
-export type ImageRequestBudget = { remaining: number; redirects?: RedirectAllowance; fetches?: RedirectAllowance };
+export type ImageRequestBudget = {
+  remaining: number;
+  redirects?: RedirectAllowance;
+  fetches?: RedirectAllowance;
+  /** Invocation-wide ledger: the real platform bound this pool only approximates. */
+  ledger?: SubrequestLedger;
+};
 export const MAX_IMAGE_REDIRECTS_PER_INVOCATION = 3;
 /**
  * Hard ceiling on image fetch attempts per invocation, shared across every batch,
@@ -94,6 +101,7 @@ export function safeImageUrl(value: string): boolean {
 
 async function fetchImage(url: string, failure: (reason: string) => void, budget: ImageRequestBudget): Promise<Image | null> {
   if (!safeImageUrl(url)) { failure('image_url'); return null; }
+  if (budget.ledger && !budget.ledger.reserve('image')) { failure('subrequest_budget'); return null; }
   if (budget.fetches) {
     if (budget.fetches.remaining <= 0) { failure('image_budget'); return null; }
     budget.fetches.remaining--;
@@ -446,7 +454,9 @@ export async function compareCandidateImages(
   // returns unused budget it goes back to the shared pool for later batches, but
   // the reservation order is fixed so concurrent scheduling cannot change which
   // candidates get multimodal verification.
-  const batchBudgets: ImageRequestBudget[] = batches.map(() => ({ remaining: 0, redirects: budget.redirects, fetches: budget.fetches }));
+  const batchBudgets: ImageRequestBudget[] = batches.map(() => ({
+    remaining: 0, redirects: budget.redirects, fetches: budget.fetches, ledger: budget.ledger,
+  }));
   const imageCounts = batches.map((batch) => batch.reduce((sum, product) => sum + Math.max(1, candidateImageUrls(product).length), 0));
 
   // First reserve the minimum useful work in deterministic batch order:
@@ -617,6 +627,9 @@ export async function compareCandidateImages(
             if (!reserve(batchBudget)) { reason = 'image_budget'; break; }
             if (delayMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
           }
+          // Every model attempt is a platform subrequest, including retries and
+          // the privacy reroute below.
+          if (budget.ledger && !budget.ledger.reserve('model')) { reason = 'subrequest_budget'; break; }
           await pace();
           let result: { ok: boolean; status: number; text: string; retryAfterMs: number | null; structured?: boolean };
           try {

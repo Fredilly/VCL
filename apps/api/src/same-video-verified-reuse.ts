@@ -539,6 +539,36 @@ export function retrieveSameVideoRosterCandidates(input: {
   return selected;
 }
 
+/**
+ * How far below the best family a family may score and still be compared in
+ * full. The family round exists to fit a click inside a bounded number of
+ * subrequests, not to decide identity: the band is wide, and a family whose
+ * representative could not be compared always advances.
+ */
+export const ROSTER_FAMILY_ADVANCE_MARGIN = 0.2;
+
+/** Families still in play after the family round. Empty only when no family
+ * comparison succeeded, which the caller treats as "compare everything". */
+export function advancingRosterFamilies(input: {
+  candidates: SameVideoCanonicalCandidate[];
+  comparisons: Map<string, ImageComparison>;
+  margin?: number;
+}): string[] {
+  const scores = new Map<string, number>();
+  const unexamined = new Set<string>();
+  for (const { identity } of input.candidates) {
+    const family = rosterFamilyKey(identity);
+    const comparison = input.comparisons.get(identity.canonical_key);
+    if (!comparison || !Number.isFinite(comparison.similarity)) { unexamined.add(family); continue; }
+    scores.set(family, Math.max(scores.get(family) ?? 0, comparison.similarity));
+  }
+  if (!scores.size) return [];
+  const best = Math.max(...scores.values());
+  const margin = input.margin ?? ROSTER_FAMILY_ADVANCE_MARGIN;
+  const advancing = [...scores].filter(([, score]) => score >= best - margin).map(([family]) => family);
+  return [...new Set([...advancing, ...unexamined])];
+}
+
 /** Missing comparison is uncertainty, not a negative. Only consistent, strong
  * source-pixel attributes from the independent verifier can rule out an unseen
  * roster entry. Description/model guesses and retrieval scores cannot do it. */
