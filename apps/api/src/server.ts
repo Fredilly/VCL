@@ -935,13 +935,18 @@ async function confirmSameVideoReuseWithImage(
   // The image the roster already carries, without fetching a page to find one.
   // Mirrors the row builder's preference order so the representative compared in
   // the family round is the same product that would be compared later.
-  const storedImages = (candidate: SameVideoCanonicalCandidate): string[] => [...new Set([
-    preferredCanonicalReference(candidate.identity),
-    candidate.mapping.image_reference,
-    ...(candidate.identity.visual_references ?? []).map((ref) => ref.image_url),
-    ...candidate.identity.merchant_refs.map((ref) => ref.image_reference),
-    ...(candidate.mapping.reference_images ?? []),
-  ].filter((url): url is string => Boolean(url && safeImageUrl(url))))];
+  const storedImages = (candidate: SameVideoCanonicalCandidate): string[] => {
+    const candidates = [
+      preferredCanonicalReference(candidate.identity),
+      candidate.mapping.image_reference,
+      ...(candidate.identity.visual_references ?? []).map((ref) => ref.image_url),
+      ...candidate.identity.merchant_refs.map((ref) => ref.image_reference),
+      ...(candidate.mapping.reference_images ?? []),
+    ].filter((url): url is string => Boolean(url && (safeImageUrl(url) || url.includes('/product-reference/'))));
+    // Our own reference store first: merchant CDNs block datacenter egress and
+    // rotate URLs, and a representative that cannot be fetched is not evidence.
+    return [...new Set(candidates.sort((a, b) => Number(b.includes('/product-reference/')) - Number(a.includes('/product-reference/'))))];
+  };
   const storedImage = (candidate: SameVideoCanonicalCandidate): string | null => storedImages(candidate)[0] ?? null;
   // Without a family round the entire roster has to be compared, or none of it:
   // a shortlist would leave the coverage gate unsatisfiable.
