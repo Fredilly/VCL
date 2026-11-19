@@ -326,13 +326,17 @@ test('a 41-row roster across ten families resolves through the family round and 
     Array.from({ length: 41 }, (_, i) => offer(`Family${i % 10}`, `SKU-${i}`))), deps);
   await learning.ingestPartnerRoster(env, rows);
   Object.assign(env, { GEMINI_API_KEY: 'test-only', BRAVE_SEARCH_API_KEY: 'test-only', BENCHMARK_MODE: 'true' });
-  let verified = 0, server;
+  let verified = 0, imageFetches = 0, server;
   server = loadModule(new URL('../src/server.ts', import.meta.url).pathname, { console: { error() {}, warn() {} },
     fetch: async (url, options) => {
       const host = new URL(String(url)).hostname;
       if (host === 'api.scoop.shop') return server.default.fetch(new Request(url, options), env);
       if (host === 'api.search.brave.com') return Response.json({ web: { results: [] } });
-      if (host === 'generativelanguage.googleapis.com') {
+      if (host !== 'generativelanguage.googleapis.com') {
+        imageFetches++;
+        return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+      }
+      {
         const request = JSON.parse(options.body);
         const products = request.contents[0].parts.flatMap(part => {
           try { const value = JSON.parse(part.text); return typeof value.index === 'number' ? [value] : []; } catch { return []; }
@@ -361,13 +365,22 @@ test('a 41-row roster across ten families resolves through the family round and 
   assert.equal(retrieval.roster_count, 41);
   assert.equal(retrieval.family_stage.families, 10);
   assert.equal(retrieval.family_stage.advancing.join(','), 'family3');
-  assert.equal(result.verified_mapping.hit, true);
-  assert.equal(result.verified_mapping.track_diagnostics.decision_reason, 'visual_confirmed');
-  assert.equal(result.products.filter(row => row.result_class === 'EXACT').length, 1);
-  // Ten family representatives, four variants of the clicked family, one
-  // four-way head-to-head: 18 comparisons instead of 41, and the click is
-  // answered instead of abstaining on coverage.
-  assert.equal(verified, 18);
+  // A narrowed roster never claims a verified hit; the extension badges an Exact
+  // match from that flag.
+  assert.equal(result.verified_mapping.hit, false);
+  assert.equal(result.verified_mapping.narrowed, true);
+  // The family round narrowed this roster, so the identity is useful but never
+  // presented as Exact: not every variant of the roster was compared.
+  const exact = result.products.filter(row => row.result_class === 'EXACT');
+  assert.equal(exact.length, 0, 'a narrowed roster must not return Exact');
+  const best = result.products[0];
+  assert.equal(best.title ?? best.model, 'Louis Vuitton Family3 brown SKU-3', 'the clicked variant wins, not a lookalike');
+  assert.equal(best.result_class, 'SIMILAR');
+  assert.ok((best.verification_reasons ?? []).some(reason => /family round narrowed/i.test(reason)));
+  // Two representatives per family (twenty), four variants of the clicked
+  // family, one four-way head-to-head: 28 comparisons instead of 41, and the
+  // click is answered instead of abstaining on coverage.
+  assert.equal(verified, 28);
   // The ledger reports what the platform would actually be charged.
   const subrequests = result.verified_mapping.subrequests;
   console.error('MEASURED', JSON.stringify({ subrequests, compared: result.verified_mapping.candidates_compared, verified, stage: retrieval.family_stage }));

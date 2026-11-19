@@ -14,7 +14,7 @@
  * A case with no frame is recorded BLOCKED_NO_FRAME, which is neither a pass nor
  * a product failure.
  *
- *   node tools/golden-identity.mjs --endpoint http://localhost:8787/resolve-products \
+ *   node tools/golden-identity.mjs --endpoint http://localhost:8787 \
  *     [--frames tests/golden/frames] [--out tests/golden/runs/<session>.json] [--limit N]
  */
 
@@ -27,7 +27,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
 
 function args(argv) {
-  const out = { endpoint: '', frames: join(root, 'tests/golden/frames'), out: '', limit: 0 };
+  const out = { endpoint: '', frames: join(root, 'tests/golden/frames'), out: null, limit: 0 };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
     if (flag === '--endpoint') out.endpoint = argv[++i];
@@ -73,15 +73,30 @@ async function main() {
     const bytes = readFileSync(framePath);
     const frameSha256 = createHash('sha256').update(bytes).digest('hex');
     const started = Date.now();
-    let response, body;
+    const dataUrl = `data:image/jpeg;base64,${bytes.toString('base64')}`;
+    const context = { platform: 'youtube', content_ref: /v=([\w-]+)/.exec(testCase.url_at_time)?.[1] ?? null };
+    let response, body, description;
     try {
-      response = await fetch(options.endpoint, {
+      // The real flow is vision first: /analyze-selection turns the frame into the
+      // description that /resolve-products resolves. Posting the frame straight to
+      // the resolver would send an empty description and measure nothing.
+      const analysis = await fetch(`${options.endpoint}/analyze-selection`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ dataUrl }), signal: AbortSignal.timeout(120000),
+      });
+      description = await analysis.json().catch(() => null);
+      if (!analysis.ok || !description) {
+        results.push({
+          id: testCase.id, name: testCase.name, status: [429, 502, 503].includes(analysis.status) ? 'PROVIDER_BLOCKED' : 'SYSTEM_FAIL',
+          expected_identity: testCase.expected_identity, frame_sha256: frameSha256, latency_ms: Date.now() - started,
+          http_status: analysis.status, notes: `analyze-selection failed: ${String(description?.error ?? '').slice(0, 160)}`,
+        });
+        continue;
+      }
+      response = await fetch(`${options.endpoint}/resolve-products`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          source_image: `data:image/jpeg;base64,${bytes.toString('base64')}`,
-          context: { platform: 'youtube', content_ref: /v=([\w-]+)/.exec(testCase.url_at_time)?.[1] ?? null },
-        }),
+        body: JSON.stringify({ description, context, source_image: dataUrl }),
         signal: AbortSignal.timeout(120000),
       });
       body = await response.json().catch(() => ({}));
@@ -103,14 +118,26 @@ async function main() {
       });
       continue;
     }
-    const observed = [body.query ?? '', ...(body.products ?? []).map(product => `${product.title ?? ''} ${product.metadata?.category ?? ''}`)].join(' ');
-    const matched = identityMatches(testCase.expected_identity, observed);
+    const observed = [
+      body.query ?? '',
+      description?.subcategory, description?.category, description?.brand_candidate, description?.model_candidate,
+      ...(description?.visible_text ?? []), ...(description?.distinctive_features ?? []),
+      ...(body.products ?? []).map(product => `${product.title ?? ''} ${product.metadata?.category ?? ''}`),
+    ].filter(Boolean).join(' ');
+    // A correct-sounding identity with nothing purchasable behind it is not a
+    // pass: the case is about the user reaching a useful result.
+    const identityOk = identityMatches(testCase.expected_identity, observed);
+    const hasProducts = (body.products ?? []).length > 0;
+    const matched = Boolean(identityOk) && hasProducts;
     const exact = (body.products ?? []).filter(product => product.result_class === 'EXACT').length;
     results.push({
       id: testCase.id, name: testCase.name, status: matched ? 'PASS' : 'PRODUCT_FAIL',
       expected_identity: testCase.expected_identity, expected_brand_model: testCase.expected_brand_model ?? null,
-      observed_query: String(body.query ?? '').slice(0, 300), products: (body.products ?? []).length,
+      observed_query: String(body.query ?? '').slice(0, 300),
+      observed_identity: [description?.subcategory, description?.category, description?.brand_candidate, description?.model_candidate].filter(Boolean).join(' / '),
+      products: (body.products ?? []).length,
       exact_products: exact, frame_sha256: frameSha256, latency_ms,
+      identity_match: identityOk, has_products: hasProducts,
       ...(body.verified_mapping?.subrequests ? { subrequests: body.verified_mapping.subrequests } : {}),
     });
   }
@@ -143,7 +170,7 @@ async function main() {
     comparison,
   };
 
-  const out = options.out ?? join(root, 'tests/golden/runs', `${report.run_date}-${session_id}.json`);
+  const out = options.out || join(root, 'tests/golden/runs', `${report.run_date}-${session_id}.json`);
   if (existsSync(out)) throw new Error(`refusing to overwrite an existing run: ${basename(out)}`);
   writeFileSync(out, `${JSON.stringify(report, null, 2)}\n`);
   console.log(JSON.stringify({ run: out, summary: report.summary, comparison }, null, 2));

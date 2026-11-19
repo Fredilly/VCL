@@ -135,6 +135,20 @@ export function alphaPresentationProducts<T extends ProductCandidate>(
   });
 }
 
+/**
+ * An Exact from a narrowed roster is not an Exact. The family round compares
+ * representatives, so the clicked variant may never have been examined; the
+ * identity is still useful, but presenting it as Exact would claim a coverage the
+ * click did not have. Evidence, identity and learning are unchanged.
+ */
+export function narrowedRosterProducts<T extends ProductCandidate>(products: T[], narrowed: boolean): T[] {
+  if (!narrowed) return products;
+  return products.map(product => product.result_class !== 'EXACT' ? product : {
+    ...product, result_class: 'SIMILAR' as const, relationship: 'SIMILAR' as const,
+    verification_reasons: [...(product.verification_reasons ?? []), 'Exact withheld: the family round narrowed this roster, so not every variant was compared'],
+  });
+}
+
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type,x-scoop-install-id,x-scoop-admin-session,x-scoop-alpha-token', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
 
@@ -437,6 +451,7 @@ export async function refreshVerifiedOffers(
     context?: ProductContext;
     sourceImage?: ReturnType<typeof parseSourceImage>;
   },
+  ledger?: SubrequestLedger,
 ): Promise<{
   products: ProductCandidate[];
   providers_used: string[];
@@ -492,18 +507,18 @@ export async function refreshVerifiedOffers(
     if (exactLookupSource.name === 'ebay') {
       lookupItemId = ebayItemIdForLiveLookup(mapping.product_id, mapping.destination);
     }
-    exactSource = await exactLookup(lookupItemId, query).catch(() => null);
+    exactSource = ledger && !ledger.reserve('commerce') ? null : await exactLookup(lookupItemId, query).catch(() => null);
     if (exactSource?.model) canonicalModel = exactSource.model;
   }
 
   const merchantMetadata = exactSource?.price
     ? null
-    : await fetchProductPageMetadata(mapping.destination).catch(() => null);
+    : ledger && !ledger.reserve('page') ? null : await fetchProductPageMetadata(mapping.destination).catch(() => null);
   const sourceImage = exactSource?.image_reference
     ?? mapping.image_reference
     ?? merchantMetadata?.image_reference
     ?? await sourceImageForVerifiedMapping(mapping)
-    ?? await recoverVerifiedProductImage(visual?.env.BRAVE_SEARCH_API_KEY, mapping);
+    ?? (ledger && !ledger.reserve('commerce') ? null : await recoverVerifiedProductImage(visual?.env.BRAVE_SEARCH_API_KEY, mapping));
   const hydratedMapping: VerifiedProductMapping = {
     ...mapping,
     ...(sourceImage ? { image_reference: sourceImage } : {}),
@@ -929,9 +944,15 @@ async function confirmSameVideoReuseWithImage(
   let familyStage: { families: number; compared: number; advancing: string[] } | null = null;
   let shortlistCost = 0;
   if (familyMap.size > 1 && eligible.length > ROSTER_VISUAL_CANDIDATE_LIMIT) {
-    const representatives = [...familyMap].map(([family, list]) => ({ family, candidate: list.find((row) => Boolean(storedImage(row))) ?? null }));
-    const comparable = representatives.filter((row): row is { family: string; candidate: SameVideoCanonicalCandidate } => Boolean(row.candidate));
-    const stageProducts = comparable.map(({ candidate }) => ({
+    // Two representatives per family, not one: a single stored image can be a
+    // different colourway and would then stand in for variants it does not show.
+    const representatives = [...familyMap].flatMap(([family, list]) =>
+      list.filter((row) => Boolean(storedImage(row))).slice(0, 2).map((candidate) => ({ family, candidate })));
+    // A family with no stored image has no representative to compare, but it might
+    // be the clicked product: page recovery may resolve it later, so it must stay
+    // in play rather than vanish with the families that were actually compared.
+    const familiesWithoutImage = [...familyMap].filter(([, list]) => !list.some((row) => Boolean(storedImage(row)))).map(([family]) => family);
+    const stageProducts = representatives.map(({ candidate }) => ({
       id: candidate.identity.canonical_key,
       title: candidate.identity.title,
       brand: candidate.identity.brand,
@@ -952,18 +973,45 @@ async function confirmSameVideoReuseWithImage(
     ).catch(() => null) : null;
     const familyComparisons = new Map<string, ImageComparison>();
     if (familyCall) {
-      comparable.forEach(({ candidate }, index) => {
+      representatives.forEach(({ candidate }, index) => {
         const comparison = familyCall.comparisons.get(candidateKey(stageProducts[index]));
         if (comparison) familyComparisons.set(candidate.identity.canonical_key, comparison);
       });
     }
-    const advancing = advancingRosterFamilies({ candidates: comparable.map(({ candidate }) => candidate), comparisons: familyComparisons });
-    // A family whose representative carries no comparable image might be the
-    // answer, so it stays in play.
-    const advancingSet = new Set([...advancing, ...representatives.filter((row) => !row.candidate).map((row) => row.family)]);
-    familyStage = { families: representatives.length, compared: familyCall?.compared ?? 0, advancing: [...advancingSet] };
-    shortlistCost = familyCall?.compared ?? 0;
-    shortlisted = eligible.filter((row) => advancingSet.has(rosterFamilyKey(row.identity)));
+    // Narrow only when a representative actually identifies the object. A family
+    // round that is merely "less unconfident" than the others is not evidence for
+    // dropping the families it never looked at properly: in that case the whole
+    // roster is compared, or the click abstains on the ceiling above.
+    const strictFamily = [...familyComparisons.values()].some((comparison) =>
+      Number.isFinite(comparison.similarity) && Number.isFinite(comparison.confidence)
+      && comparison.similarity >= .9 && comparison.confidence >= .9);
+    if (strictFamily) {
+      const advancing = advancingRosterFamilies({ candidates: representatives.map(({ candidate }) => candidate), comparisons: familyComparisons });
+      const advancingSet = new Set([
+        ...advancing,
+        ...representatives.filter(({ candidate }) => !familyComparisons.has(candidate.identity.canonical_key)).map(({ family }) => family),
+        ...familiesWithoutImage,
+      ]);
+      familyStage = { families: familyMap.size, compared: familyCall?.compared ?? 0, advancing: [...advancingSet] };
+      shortlistCost = familyCall?.compared ?? 0;
+      // Variants of the families still in play, plus the already-compared
+      // representative of any eliminated family that was close enough to matter:
+      // it can still veto an Exact through the head-to-head round without paying
+      // for families the family round ruled out clearly.
+      const bestFamilyScore = Math.max(0, ...[...familyComparisons.values()].map((comparison) => comparison.similarity));
+      const eliminatedReps = representatives.filter(({ family, candidate }) => {
+        if (advancingSet.has(family)) return false;
+        const comparison = familyComparisons.get(candidate.identity.canonical_key);
+        return Boolean(comparison) && (comparison?.similarity ?? 0) >= bestFamilyScore - 0.45;
+      });
+      shortlisted = [
+        ...eligible.filter((row) => advancingSet.has(rosterFamilyKey(row.identity))),
+        ...eliminatedReps.map(({ candidate }) => candidate),
+      ];
+    } else {
+      familyStage = { families: familyMap.size, compared: familyCall?.compared ?? 0, advancing: [] };
+      shortlistCost = familyCall?.compared ?? 0;
+    }
   }
   if (familyStage) retrieval.family_stage = familyStage;
   // Coverage has to be affordable. If the candidates still in play exceed what one
@@ -1018,7 +1066,7 @@ async function confirmSameVideoReuseWithImage(
     }
 
     if (!merchantRef?.image_reference && ledger.reserve('commerce')) {
-      const refreshed = await refreshVerifiedOffers(providers, candidate.mapping).catch(() => null);
+      const refreshed = await refreshVerifiedOffers(providers, candidate.mapping, undefined, ledger).catch(() => null);
       const hydrated = refreshed?.products.find((product) => Boolean(product.image_reference && product.destination)) ?? null;
       const hydratedDestination = hydrated?.destination ?? null;
       if (hydrated?.image_reference && hydratedDestination) {
@@ -1098,7 +1146,10 @@ async function confirmSameVideoReuseWithImage(
   }
 
   if (!rows.length) return { ...empty,
-    decision: { ...noDecision, reason: 'visual_unavailable' },
+    // No candidate image could be resolved. If that is because the click ran out
+    // of platform budget, say so instead of blaming a missing reference.
+    decision: { ...noDecision, reason: ledger.exhausted() ? 'roster_exceeds_visual_budget' : 'visual_unavailable' },
+    retrieval: { ...retrieval, ...(ledger.exhausted() ? { truncated: true } : {}) },
     failures: 1, failure_reasons: { missing_sku_image_reference: 1 },
   };
 
@@ -1276,6 +1327,15 @@ async function confirmSameVideoReuseWithImage(
     }
     decision = confirmHeadToHead({ decision, comparisons: roundComparisons });
     headToHead = { rivals: rivals.length, outcome: decision.reason, comparisons: Object.fromEntries(roundComparisons) };
+  }
+
+  // A budget refusal during the second round is still a budget refusal: the click
+  // did not fail because the verifier was unsure.
+  const lateBudgetFailures = (failureReasons.subrequest_budget ?? 0) + (failureReasons.image_budget ?? 0)
+    + (failureReasons.image_redirect_budget ?? 0) + (failureReasons.model_budget ?? 0);
+  if (!decision.mapping && lateBudgetFailures) {
+    decision = { mapping: null, canonical_key: null, confidence: 0, reason: 'roster_exceeds_visual_budget' };
+    retrieval.truncated = true;
   }
 
   return {
@@ -2651,7 +2711,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           description,
           context,
           sourceImage,
-        });
+        }, ledger);
         const total_ms = Date.now() - verifiedResolutionStarted;
         recordAlphaScoop({
           telemetry: alphaTelemetry,
@@ -2698,7 +2758,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             model: verifiedMapping.product_id || null,
             attributes: [],
           },
-          products: alphaPresentationProducts(refreshed.products, env),
+          products: alphaPresentationProducts(narrowedRosterProducts(refreshed.products, Boolean(sameVideoVisualCheck.retrieval?.family_stage?.advancing?.length)), env),
           state: 'RESULTS',
           providers_configured: configuredProviders.map(({ name }) => name),
           providers_used: refreshed.providers_used,
@@ -2727,7 +2787,11 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           },
           feedback_learning: { penalized: 0, suppressed: 0, signal_levels: { exact: 0, candidate_global: 0, family: 0 }, reviewed_roster_suppressed: reviewedNegatives.length },
           verified_mapping: {
-            hit: true,
+            // A narrowed roster never claims a verified hit: the extension badges
+            // "Exact match" from this flag, and the clicked variant may not have
+            // been compared. The products are still returned as useful results.
+            hit: !Boolean(sameVideoVisualCheck.retrieval?.family_stage?.advancing?.length),
+            ...(sameVideoVisualCheck.retrieval?.family_stage?.advancing?.length ? { narrowed: true } : {}),
             roster_retrieval: sameVideoVisualCheck.retrieval,
             subrequests: ledger.snapshot(),
           // Counts only: establish whether a replay is using imported variants
@@ -2865,7 +2929,9 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           : queries;
       const started = Date.now();
       const markingVerifyV1 = record.benchmark_marking_verify_v1 === true;
-      const resolved = await resolveProducts(routedProviders, routedQueries, fallbackDescription, env, context, sourceImage, compareCandidateImages, routing, markingVerifyV1);
+      // The fallback fan-out costs one search per provider; charge it before it runs.
+      const fallbackAffordable = routedProviders.every(() => ledger.reserve('commerce'));
+      const resolved = await resolveProducts(fallbackAffordable ? routedProviders : [], routedQueries, fallbackDescription, env, context, sourceImage, compareCandidateImages, routing, markingVerifyV1);
       if (sameVideoVisualCheck.usage) {
         const usage = resolved.cost_usage.verification_usage;
         usage.requests += sameVideoVisualCheck.usage.requests ?? 0;
@@ -3018,7 +3084,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
       return jsonResponse({
         ...resolved,
-        products: alphaPresentationProducts(attributedProducts, env),
+        products: alphaPresentationProducts(narrowedRosterProducts(attributedProducts, Boolean(sameVideoVisualCheck.retrieval?.family_stage?.advancing?.length)), env),
         feedback_learning: feedbackLearning,
         verified_mapping: {
           hit: false,

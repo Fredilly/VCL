@@ -117,6 +117,8 @@ async function fetchImage(url: string, failure: (reason: string) => void, budget
       if (!location) { failure('image_redirect'); return null; }
       url = new URL(location, url).href;
       if (!safeImageUrl(url)) { failure('image_redirect'); return null; }
+      // Each hop is its own outbound request.
+      if (budget.ledger && !budget.ledger.reserve('redirect')) { failure('subrequest_budget'); return null; }
       if (!reserveRedirect(budget)) { failure('image_redirect_budget'); return null; }
       response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(6000) });
     }
