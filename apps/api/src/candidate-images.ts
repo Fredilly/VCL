@@ -21,6 +21,13 @@ export type ImageRequestBudget = {
   fetches?: RedirectAllowance;
   /** Invocation-wide ledger: the real platform bound this pool only approximates. */
   ledger?: SubrequestLedger;
+  /**
+   * The worker's own origin, when it is a loopback address in local dev or CI.
+   * Reference images are served from /product-reference/ on that origin, which
+   * safeImageUrl refuses by design (https, public hostnames only). Only that exact
+   * path on that exact host is let through, so nothing arbitrary is reachable.
+   */
+  localReferenceHost?: string;
 };
 export const MAX_IMAGE_REDIRECTS_PER_INVOCATION = 3;
 /**
@@ -99,8 +106,18 @@ export function safeImageUrl(value: string): boolean {
   } catch { return false; }
 }
 
+function isLocalReference(url: string, budget: ImageRequestBudget): boolean {
+  if (!budget.localReferenceHost) return false;
+  try {
+    const parsed = new URL(url);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+      && parsed.host === budget.localReferenceHost
+      && parsed.pathname.startsWith('/product-reference/');
+  } catch { return false; }
+}
+
 async function fetchImage(url: string, failure: (reason: string) => void, budget: ImageRequestBudget): Promise<Image | null> {
-  if (!safeImageUrl(url)) { failure('image_url'); return null; }
+  if (!safeImageUrl(url) && !isLocalReference(url, budget)) { failure('image_url'); return null; }
   if (budget.ledger && !budget.ledger.reserve('image')) { failure('subrequest_budget'); return null; }
   if (budget.fetches) {
     if (budget.fetches.remaining <= 0) { failure('image_budget'); return null; }

@@ -876,6 +876,7 @@ async function confirmSameVideoReuseWithImage(
   sourceImage: ReturnType<typeof parseSourceImage>,
   candidates: SameVideoCanonicalCandidate[],
   ledger: SubrequestLedger = createSubrequestLedger(),
+  localReferenceHost?: string,
 ): Promise<SameVideoVisualCheck> {
   const noDecision: SameVideoReuseDecision = {
     mapping: null,
@@ -912,6 +913,7 @@ async function confirmSameVideoReuseWithImage(
   const providers = commerceProviders(env);
   const budget = imageRequestBudget();
   budget.ledger = ledger;
+  budget.localReferenceHost = localReferenceHost;
   // The verifier compares pixels with pixels. It is told which kind of object to
   // look at and nothing the upstream model guessed about it, and no page title:
   // it repeats those back as its own reading of the click, and that reading then
@@ -2655,6 +2657,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           sourceImage,
           canonicalRows,
           ledger,
+          new URL(request.url).host,
         );
         sameVideoReuse = sameVideoVisualCheck.decision;
         if (sameVideoReuse.mapping) {
