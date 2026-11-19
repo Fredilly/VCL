@@ -132,7 +132,7 @@ jobs:
           node tools/roster-live-probe.mjs \
             --endpoint http://127.0.0.1:8787 \
             --manifest "$RUNNER_TEMP/intake/manifest.json" \
-            --limit "${{ inputs.probe_limit || '1' }}" \
+            --limit "${{ inputs.probe_limit || '6' }}" \
             --import \
             --diagnose \
             --out "$RUNNER_TEMP/live-probe.json" || status=1
