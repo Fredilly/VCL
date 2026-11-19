@@ -982,6 +982,9 @@ async function confirmSameVideoReuseWithImage(
   let shortlisted = eligible;
   let familyStage: { families: number; compared: number; advancing: string[] } | null = null;
   let shortlistCost = 0;
+  // Best family evidence per family key, used to rank variants when the ledger
+  // cannot pay for all of them.
+  const familyScore = new Map<string, number>();
   if (familyMap.size > 1 && eligible.length > ROSTER_VISUAL_CANDIDATE_LIMIT) {
     // Two representatives per family, not one: a single stored image can be a
     // different colourway and would then stand in for variants it does not show.
@@ -1028,7 +1031,7 @@ async function confirmSameVideoReuseWithImage(
     if (strictFamily) {
       const advancing = advancingRosterFamilies({ candidates: representatives.map(({ candidate }) => candidate), comparisons: familyComparisons });
       // Best evidence per family, used to rank the variants that survive the cap.
-      const familyBest = new Map<string, number>();
+      const familyBest = familyScore;
       for (const { family, candidate } of representatives) {
         const similarity = familyComparisons.get(candidate.identity.canonical_key)?.similarity ?? 0;
         familyBest.set(family, Math.max(familyBest.get(family) ?? 0, similarity));
@@ -1094,11 +1097,10 @@ async function confirmSameVideoReuseWithImage(
     // One candidate can cost two image fetches (primary and fallback) plus a
     // sixth of a model call, so a naive one-per-row estimate overruns the ledger
     // and ends in image_budget, which reads as an oversized roster.
-    const affordable = Math.max(4, Math.min(ROSTER_VISUAL_CANDIDATE_LIMIT, Math.floor((ledger.remaining() - 6) * 6 / 13)));
+    const affordable = Math.max(4, Math.min(ROSTER_VISUAL_CANDIDATE_LIMIT, Math.floor((ledger.remaining() - 6) / 1.6)));
     if (shortlisted.length > affordable) {
-      const advancingFamilies = new Set(familyStage.advancing);
       const ranked = [...shortlisted].sort((a, b) =>
-        Number(advancingFamilies.has(rosterFamilyKey(b.identity))) - Number(advancingFamilies.has(rosterFamilyKey(a.identity))));
+        (familyScore.get(rosterFamilyKey(b.identity)) ?? 0) - (familyScore.get(rosterFamilyKey(a.identity)) ?? 0));
       shortlisted = ranked.slice(0, affordable);
       retrieval.truncated = true;
     }
