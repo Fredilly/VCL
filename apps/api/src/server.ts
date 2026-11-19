@@ -1006,6 +1006,12 @@ async function confirmSameVideoReuseWithImage(
       && comparison.similarity >= .9 && comparison.confidence >= .9);
     if (strictFamily) {
       const advancing = advancingRosterFamilies({ candidates: representatives.map(({ candidate }) => candidate), comparisons: familyComparisons });
+      // Best evidence per family, used to rank the variants that survive the cap.
+      const familyBest = new Map<string, number>();
+      for (const { family, candidate } of representatives) {
+        const similarity = familyComparisons.get(candidate.identity.canonical_key)?.similarity ?? 0;
+        familyBest.set(family, Math.max(familyBest.get(family) ?? 0, similarity));
+      }
       const advancingSet = new Set([
         ...advancing,
         ...representatives.filter(({ candidate }) => !familyComparisons.has(candidate.identity.canonical_key)).map(({ family }) => family),
@@ -1027,6 +1033,16 @@ async function confirmSameVideoReuseWithImage(
         ...eligible.filter((row) => advancingSet.has(rosterFamilyKey(row.identity))),
         ...eliminatedReps.map(({ candidate }) => candidate),
       ];
+      // A family can hold more variants than one click can compare (a broad
+      // "monogram" bucket absorbs half a roster). Keep the families with the
+      // strongest evidence and the variants inside them, cap at the ceiling and
+      // mark the result partial: it can still be useful, never Exact.
+      if (shortlisted.length > ROSTER_VISUAL_CANDIDATE_LIMIT) {
+        const score = (row: SameVideoCanonicalCandidate) => familyComparisons.get(row.identity.canonical_key)?.similarity
+          ?? familyBest.get(rosterFamilyKey(row.identity)) ?? 0;
+        shortlisted = [...shortlisted].sort((a, b) => score(b) - score(a)).slice(0, ROSTER_VISUAL_CANDIDATE_LIMIT);
+        retrieval.truncated = true;
+      }
     } else {
       // No family passed the strict check, so nothing can be eliminated. If the
       // roster cannot be covered in full, answer from the representatives that
