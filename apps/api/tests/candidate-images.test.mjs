@@ -513,7 +513,9 @@ test('OpenRouter 404 reroutes to a vision-capable model without weakening ZDR', 
   } });
   const result = await compareCandidateImages('key', 'unavailable-model', image, description, [candidate],
     undefined, undefined, { provider: 'openrouter', maxAttempts: 1 });
-  assert.deepEqual(models, ['unavailable-model', 'qwen/qwen3.8-27b']);
+  // The fallback must be a model the same provider serves; qwen/qwen3.8-27b is a
+  // Cloudflare/Groq id and OpenRouter answers 404 for it.
+  assert.deepEqual(models, ['unavailable-model', 'qwen/qwen2.5-vl-72b-instruct']);
   assert.equal(result.compared, 1);
   assert.equal(result.provider_unavailable, undefined);
   assert.equal(result.failure_reasons.model_privacy_reroute, 1);
@@ -537,7 +539,11 @@ test('OpenRouter fallback 404 stops additional batches rather than searching bli
   const result = await compareCandidateImages('key', 'unavailable-model', image, description, products,
     undefined, undefined, { provider: 'openrouter', concurrency: 1, maxAttempts: 1 });
   assert.equal(modelCalls, 2, 'primary and one fallback, no further requests');
-  assert.equal(result.provider_unavailable, 'model_http_404');
+  // A policy 404 is a property of the request, not a provider outage: it must not
+  // disable the provider for the rest of the click.
+  assert.equal(result.provider_unavailable, undefined);
+  assert.equal(result.failure_reasons.model_privacy_unavailable, 13);
+  assert.equal(result.failure_reasons.model_http_404, undefined);
   assert.equal(result.compared, 0);
 });
 
