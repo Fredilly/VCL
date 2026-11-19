@@ -167,8 +167,9 @@ export function narrowedRosterProducts<T extends ProductCandidate>(products: T[]
 
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
 /** Provider attempts per click, retries included: an outage must not multiply cost. */
-const VISION_ATTEMPTS_PER_REQUEST = 3;
-const VISION_RETRY_BACKOFF_MS = 250;
+const VISION_ATTEMPTS_PER_REQUEST = 4;
+// A 429 needs patience, not another immediate call: the gateway throttles bursts.
+const VISION_RETRY_BACKOFF_MS = 900;
 
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type,x-scoop-install-id,x-scoop-admin-session,x-scoop-alpha-token', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
 

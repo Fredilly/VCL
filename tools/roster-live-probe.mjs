@@ -115,8 +115,13 @@ if (args.includes('--diagnose') && sessionToken) {
 }
 
 const rows = [];
+let firstProbe = true;
 for (const offer of probes) {
   const started = Date.now();
+  // Space the probes: a burst trips the provider's rate limit and reads as an
+  // outage, which hides the matching signal this run exists to measure.
+  if (!firstProbe) await new Promise((resolve) => setTimeout(resolve, 1500));
+  firstProbe = false;
   try {
     const crop = await dataUrlFor(offer.image_reference);
     const analysed = await post('/analyze-selection', {
