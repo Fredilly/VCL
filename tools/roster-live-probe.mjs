@@ -171,6 +171,8 @@ for (const offer of probes) {
       visual_failure_reasons: resolved.body.verified_mapping?.visual_failure_reasons ?? null,
       unexamined: resolved.body.verified_mapping?.roster_retrieval?.unresolved_keys?.length ?? null,
       subrequests: resolved.body.verified_mapping?.subrequests?.total ?? null,
+      cost_usd: resolved.body.usage?.cost_usd ?? resolved.body.provider_usage?.cost_usd ?? null,
+      tokens: resolved.body.usage?.total_tokens ?? null,
       evidence: (top?.evidence ?? top?.matching_details ?? top?.verification_reasons ?? [])
         .slice(0, 3).map((item) => scrub(item, offer)),
       ms: Date.now() - started,
@@ -192,6 +194,9 @@ const summary = {
   exact_rows: exact.length,
   wrong_exact: rows.filter((row) => row.returned?.class === 'EXACT' && !row.useful).length,
   subrequest_max: rows.reduce((max, row) => Math.max(max, row.subrequests ?? 0), 0),
+  latency_ms: rows.length ? Math.round(rows.reduce((sum, row) => sum + (row.ms ?? 0), 0) / rows.length) : null,
+  cost_usd: Number(rows.reduce((sum, row) => sum + (row.cost_usd ?? 0), 0).toFixed(4)),
+  model_similarity: rows.filter((row) => row.returned).map((row) => row.returned.class),
   failures: rows.filter((row) => !row.useful).map((row) => ({ handle: row.handle, decision: row.decision ?? row.failure ?? null, stage: row.stage ?? 'resolve', retrieved: row.retrieved ?? null, unexamined: row.unexamined ?? null })),
 };
 
