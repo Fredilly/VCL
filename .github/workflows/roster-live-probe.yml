@@ -32,7 +32,8 @@ jobs:
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
-      GOOGLE_AI_STUDIO_KEY: ${{ secrets.GOOGLE_AI_STUDIO_KEY }}
+      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+      VERCEL_AI_GATEWAY_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,6 +66,15 @@ jobs:
           head -c 300 "$RUNNER_TEMP/lite.json" 2>/dev/null; echo
           brave=$(curl -s -o /dev/null -w '%{http_code}' 'https://api.search.brave.com/res/v1/web/search?q=test' -H "X-Subscription-Token: $BRAVE_SEARCH_API_KEY")
           echo "brave: $brave"
+          if [ -n "${AI_GATEWAY_API_KEY:-}" ]; then
+            vg=$(curl -s -o "$RUNNER_TEMP/vercel.json" -w '%{http_code}' https://ai-gateway.vercel.sh/v1/chat/completions \
+              -H "Authorization: Bearer $AI_GATEWAY_API_KEY" -H 'content-type: application/json' \
+              -d '{"model":"google/gemini-2.5-flash-lite","messages":[{"role":"user","content":"reply with ok"}],"max_tokens":8}')
+            echo "vercel ai gateway vision probe: $vg"
+            head -c 300 "$RUNNER_TEMP/vercel.json"; echo
+          else
+            echo 'AI_GATEWAY_API_KEY not available'
+          fi
 
       - name: Write the partner roster from the secret
         run: |
