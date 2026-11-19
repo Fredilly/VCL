@@ -864,6 +864,7 @@ type SameVideoVisualCheck = {
     family_stage?: { families: number; compared: number; advancing: string[] };
     /** Why rows in play did not reach the verifier. Counts only. */
     coverage?: { shortlisted: number; comparable_rows: number; compared: number; skipped: Record<string, number> };
+    image_hosts?: Record<string, number>;
   };
   comparisons?: Record<string, ImageComparison>;
   /** The head-to-head round, when one ran: how many rivals, and how it ended. */
@@ -1431,6 +1432,15 @@ async function confirmSameVideoReuseWithImage(
     retrieval: { ...retrieval, verified_keys: [...comparisons.keys()],
       unresolved_keys: unresolvedRosterCandidateKeys({ candidates: shortlisted, comparisons }),
       coverage: { shortlisted: shortlisted.length, comparable_rows: rows.length, compared: images.compared, skipped: { ...skipReasons } },
+      image_hosts: rows.reduce((acc, row) => {
+        try {
+          const url = row.product.image_reference ?? '';
+          const host = new URL(url).hostname;
+          const kind = /^(127\.0\.0\.1|localhost)$/.test(host) ? 'loopback' : safeImageUrl(url) ? 'public' : 'rejected';
+          acc[kind] = (acc[kind] ?? 0) + 1;
+        } catch { acc.missing = (acc.missing ?? 0) + 1; }
+        return acc;
+      }, {} as Record<string, number>),
       ...(familyStage ? { family_stage: familyStage } : {}) },
     comparisons: Object.fromEntries(comparisons),
     ...(headToHead ? { head_to_head: headToHead } : {}),
@@ -2741,7 +2751,10 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           sourceImage,
           canonicalRows,
           ledger,
-          new URL(request.url).host,
+          // wrangler rewrites the request URL to the configured route, so the host
+          // the client used is not necessarily the host this worker answers for.
+          // The reference origin, when set, is the one that serves the images.
+          env.REFERENCE_ORIGIN ? new URL(env.REFERENCE_ORIGIN).host : new URL(request.url).host,
         );
         sameVideoReuse = sameVideoVisualCheck.decision;
         if (sameVideoReuse.mapping) {

@@ -177,6 +177,7 @@ for (const offer of probes) {
       roster_count: resolved.body.verified_mapping?.roster_retrieval?.roster_count ?? null,
       family_stage: resolved.body.verified_mapping?.roster_retrieval?.family_stage ?? null,
       coverage: resolved.body.verified_mapping?.roster_retrieval?.coverage ?? null,
+      image_hosts: resolved.body.verified_mapping?.roster_retrieval?.image_hosts ?? null,
       analyze_ms: Date.now() - analyzeStarted,
       visual_failure_reasons: resolved.body.verified_mapping?.visual_failure_reasons ?? null,
       unexamined: resolved.body.verified_mapping?.roster_retrieval?.unresolved_keys?.length ?? null,
