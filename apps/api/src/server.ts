@@ -57,6 +57,7 @@ export interface Env {
   GROQ_API_KEY?: string;
   VISION_PROVIDER?: string;
   OPENROUTER_BASE_URL?: string;
+  PRIVACY_FALLBACK_MODEL?: string;
   REFERENCE_ORIGIN?: string;
   GEMINI_MODEL?: string;
   OPENROUTER_API_KEY?: string;
@@ -112,13 +113,16 @@ export interface Env {
  * clamped in compareCandidateImages; an absent or invalid value falls back to
  * the built-in default rather than failing the request.
  */
-export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIER_PACING_MS' | 'VERIFIER_MAX_ATTEMPTS' | 'VERIFIER_STRUCTURED_OUTPUT'> & { OPENROUTER_BASE_URL?: string }, useOpenRouter: boolean): VerifierOptions {
+export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIER_PACING_MS' | 'VERIFIER_MAX_ATTEMPTS' | 'VERIFIER_STRUCTURED_OUTPUT'> & { OPENROUTER_BASE_URL?: string; PRIVACY_FALLBACK_MODEL?: string; VERIFIER_TIME_BUDGET_MS?: string }, useOpenRouter: boolean): VerifierOptions {
   const concurrency = Number(env.VERIFIER_CONCURRENCY);
   const pacing = Number(env.VERIFIER_PACING_MS);
   const attempts = Number(env.VERIFIER_MAX_ATTEMPTS);
   return {
     provider: useOpenRouter ? 'openrouter' : 'gemini',
     ...(env.OPENROUTER_BASE_URL ? { endpoint: env.OPENROUTER_BASE_URL } : {}),
+    ...(env.PRIVACY_FALLBACK_MODEL ? { privacyFallbackModel: env.PRIVACY_FALLBACK_MODEL } : {}),
+    ...(Number.isFinite(Number(env.VERIFIER_TIME_BUDGET_MS)) && Number(env.VERIFIER_TIME_BUDGET_MS) > 0
+      ? { timeBudgetMs: Number(env.VERIFIER_TIME_BUDGET_MS) } : {}),
     ...(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 4 ? { concurrency } : {}),
     ...(Number.isFinite(pacing) && pacing >= 0 && pacing <= 5000 ? { pacingMs: pacing } : {}),
     ...(Number.isInteger(attempts) && attempts >= 1 && attempts <= 3 ? { maxAttempts: attempts } : {}),
@@ -1247,16 +1251,46 @@ async function confirmSameVideoReuseWithImage(
     failures: 1, failure_reasons: { ...skipReasons, missing_sku_image_reference: 1 },
   };
 
-  const images = await compareCandidateImages(
-    key,
-    model,
+  // Recognition already degrades openrouter -> gemini. Verification used to have no
+  // such path: a dead or privacy-blocked OpenRouter key meant every comparison
+  // failed while the click itself still worked, which is exactly the production
+  // signature (model_http_404 + model_privacy_reroute, zero products).
+  let verifierKey = key;
+  let verifierModel = model;
+  let verifierConfigActive: VerifierOptions = verifierConfig;
+  let images = await compareCandidateImages(
+    verifierKey,
+    verifierModel,
     sourceImage,
     seen,
     rows.map((row) => row.product),
     undefined,
     budget,
-    verifierConfig,
+    verifierConfigActive,
   ).catch(() => null);
+
+  const verifierBroken = Boolean(images) && images!.compared === 0 && (
+    Boolean(images!.provider_unavailable)
+    || (images!.failure_reasons?.model_privacy_unavailable ?? 0) > 0
+    || (images!.failure_reasons?.model_privacy_reroute ?? 0) > 0
+    || (images!.failure_reasons?.model_http_404 ?? 0) > 0
+    || (images!.failure_reasons?.model_timeout ?? 0) > 0
+  );
+  if (verifierBroken && useOpenRouter && env.GEMINI_API_KEY) {
+    const fallbackKey = env.GEMINI_API_KEY;
+    const fallbackModel = env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+    const fallbackConfig: VerifierOptions = { ...verifierOptions(env, false), pixelOnlySource: true };
+    const retried = await compareCandidateImages(
+      fallbackKey, fallbackModel, sourceImage, seen, rows.map((row) => row.product), undefined, budget, fallbackConfig,
+    ).catch(() => null);
+    if (retried && retried.compared > 0) {
+      images = retried;
+      verifierKey = fallbackKey;
+      verifierModel = fallbackModel;
+      verifierConfigActive = fallbackConfig;
+      retried.failure_reasons = { ...(retried.failure_reasons ?? {}), verifier_fallback_gemini: 1 };
+    }
+  }
 
   if (!images) {
     return {
@@ -1315,14 +1349,14 @@ async function confirmSameVideoReuseWithImage(
 
     if (recoveredRows.length) {
       retryVerification = await compareCandidateImages(
-        key,
-        model,
+        verifierKey,
+        verifierModel,
         sourceImage,
         seen,
         recoveredRows.map((row) => row.product),
         undefined,
         budget,
-        { ...verifierOptions(env, useOpenRouter), pixelOnlySource: true },
+        { ...verifierConfigActive, pixelOnlySource: true, ...(verifierConfigActive.headToHead ? { headToHead: false } : {}) },
       ).catch(() => null);
 
       if (retryVerification) {
@@ -1405,8 +1439,8 @@ async function confirmSameVideoReuseWithImage(
       return product ? [{ canonicalKey, product }] : [];
     });
     const round = finalists.length === order.length ? await compareCandidateImages(
-      key, model, sourceImage, seen, finalists.map(finalist => finalist.product), undefined, budget,
-      { ...verifierOptions(env, useOpenRouter), pixelOnlySource: true, headToHead: true },
+      verifierKey, verifierModel, sourceImage, seen, finalists.map(finalist => finalist.product), undefined, budget,
+      { ...verifierConfigActive, pixelOnlySource: true, headToHead: true },
     ).catch(() => null) : null;
     const roundComparisons = new Map<string, ImageComparison>();
     if (round) {

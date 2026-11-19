@@ -395,6 +395,10 @@ export type VerifierOptions = {
   provider?: 'gemini' | 'openrouter';
   /** OpenAI-compatible chat-completions endpoint for the openrouter provider. */
   endpoint?: string;
+  /** Vision model used when the primary model has no endpoint under the privacy policy. */
+  privacyFallbackModel?: string;
+  /** Total model time one interaction may spend before remaining batches fail fast. */
+  timeBudgetMs?: number;
   /** Verifier batches in flight at once. Bounded so a burst cannot trip provider rate limits. */
   concurrency?: number;
   /** Minimum gap between model calls, measured across concurrent batches. */
@@ -444,7 +448,12 @@ export async function compareCandidateImages(
   // OpenRouter may have no endpoint for the configured model under the required
   // zero-retention policy. Give one other vision-capable ZDR-routed model a
   // chance, without ever relaxing the request's privacy restrictions.
-  const privacyFallbackModel = 'qwen/qwen3.8-27b';
+  // The privacy fallback must be a model the SAME provider actually serves. The
+  // previous value, qwen/qwen3.8-27b, is a Cloudflare/Groq id: OpenRouter answers
+  // 404 for it, so the reroute could never succeed.
+  const privacyFallbackModel = options.privacyFallbackModel
+    ?? (globalThis as { __VCL_PRIVACY_FALLBACK_MODEL__?: string }).__VCL_PRIVACY_FALLBACK_MODEL__
+    ?? 'qwen/qwen2.5-vl-72b-instruct';
   let activeModel = model;
   // Pacing is shared across concurrent batches so the aggregate call rate is
   // bounded, not just each batch's. Retries go through the same gate.
@@ -472,6 +481,15 @@ export async function compareCandidateImages(
   // rate-limit response survives bounded recovery. Comparisons stay unknown;
   // no provider failure can promote a candidate.
   let providerUnavailableReason: string | null = null;
+  // A 404 under the privacy policy means "no endpoint satisfies it", which is a
+  // property of the request, not an outage. Once established it holds for the
+  // whole click: further batches must fail fast instead of spending a timeout each.
+  let privacyUnavailable = false;
+  // A click that spends minutes in the verifier is a user-visible failure even when
+  // it eventually answers. Bound the total model time, not just each call.
+  const timeBudgetMs = Math.max(5000, Math.min(180000, Math.trunc(options.timeBudgetMs ?? 60000) || 60000));
+  const modelTimeStarted = Date.now();
+  let timeBudgetSpent = false;
   // Six thumbnails + one source stay under the inline payload limit, even at MAX_BYTES.
   const batches = Array.from({ length: Math.ceil(products.length / 6) }, (_, i) => products.slice(i * 6, i * 6 + 6));
   // Pre-allocate budget in deterministic batch order before any concurrent work.
@@ -531,6 +549,30 @@ export async function compareCandidateImages(
       failures += batch.length;
       failure('image_budget', batch.length);
       budget.remaining += batchBudget.remaining; // return unused budget to shared pool
+      batchBudget.remaining = 0;
+      batchTiming.total_ms = Date.now() - batchStarted;
+      timing.batches.push(batchTiming);
+      return;
+    }
+    // The click has already spent its model-time allowance; further batches would
+    // only add latency to a failure the user has not asked to wait for.
+    if (!timeBudgetSpent && Date.now() - modelTimeStarted > timeBudgetMs) {
+      timeBudgetSpent = true;
+      failure('model_time_budget');
+    }
+    if (timeBudgetSpent) {
+      failures += batch.length;
+      failure('model_time_budget', batch.length);
+      budget.remaining += batchBudget.remaining;
+      batchBudget.remaining = 0;
+      batchTiming.total_ms = Date.now() - batchStarted;
+      timing.batches.push(batchTiming);
+      return;
+    }
+    if (privacyUnavailable) {
+      failures += batch.length;
+      failure('model_privacy_unavailable', batch.length);
+      budget.remaining += batchBudget.remaining;
       batchBudget.remaining = 0;
       batchTiming.total_ms = Date.now() - batchStarted;
       timing.batches.push(batchTiming);
@@ -681,20 +723,30 @@ export async function compareCandidateImages(
           if (!result.ok) {
             reason = `model_http_${result.status}`;
             if (result.status === 404 && verificationProvider === 'openrouter'
-              && activeModel !== privacyFallbackModel) {
+              && activeModel !== privacyFallbackModel && !privacyUnavailable) {
               // 404 may mean that none of this model's endpoints satisfy ZDR.
               // Reserve the extra model call; fail closed if there is no budget.
               if (!reserve(batchBudget)) { reason = 'image_budget'; break; }
               activeModel = privacyFallbackModel;
               usage.model = `${model} -> ${privacyFallbackModel}`;
               failure('model_privacy_reroute');
+              reason = '';
               attempt--; // this is routing recovery, not a malformed response retry
               continue;
+            }
+            if (result.status === 404 && verificationProvider === 'openrouter') {
+              // The fallback model itself is unavailable under the same policy:
+              // stop routing for this click and say so, without blaming the
+              // provider's availability.
+              privacyUnavailable = true;
+              failure('model_privacy_unavailable');
+              reason = ''; // already reported precisely; do not also record model_http_404
+              break;
             }
             if (![429, 500, 502, 503, 504].includes(result.status)) {
               // Auth failures never heal by retrying, and later batches must not
               // spend their own calls discovering the same thing.
-              if ([401, 403, 404].includes(result.status)) providerUnavailableReason = reason;
+              if ([401, 403].includes(result.status)) providerUnavailableReason = reason;
               break;
             }
             // A hard rate limit that survives recovery means the provider is
