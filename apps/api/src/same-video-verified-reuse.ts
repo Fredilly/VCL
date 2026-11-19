@@ -650,11 +650,15 @@ export function probableRosterCandidates(input: {
     if (comparison.similarity < PROBABLE_ROSTER_SIMILARITY || comparison.confidence < PROBABLE_ROSTER_CONFIDENCE) return [];
     const details = (comparison.matching_details ?? []).filter((detail) => distinctiveWords([detail]).length >= 2);
     if (!details.length) return [];
-    // Positive evidence has to connect the two objects, not just be specific.
-    if (source && source.size && !details.some((detail) => distinctiveWords([detail]).some((word) => source.has(word)))) return [];
+    // Corroboration is a ranking signal, not a gate: the crop description does
+    // not enumerate every visible part, so requiring a shared word rejected
+    // honest matches ('rolled handles and front padlock' against a description
+    // that never mentioned a padlock). A detail that shares the crop's evidence is
+    // preferred below, and title overlap is never consulted.
+    const corroborated = Boolean(source && details.some((detail) => distinctiveWords([detail]).some((word) => source!.has(word))));
     if (criticalContradictionKey(comparison)) return [];
-    return [{ candidate, similarity: comparison.similarity, confidence: comparison.confidence }];
-  }).sort((a, b) => b.similarity - a.similarity || b.confidence - a.confidence
+    return [{ candidate, similarity: comparison.similarity, confidence: comparison.confidence, corroborated }];
+  }).sort((a, b) => Number(b.corroborated) - Number(a.corroborated) || b.similarity - a.similarity || b.confidence - a.confidence
     || a.candidate.identity.canonical_key.localeCompare(b.candidate.identity.canonical_key))
     .slice(0, PROBABLE_ROSTER_LIMIT);
 }
