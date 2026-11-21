@@ -250,7 +250,7 @@ jobs:
       # Live intake reads the partner's seller pages and images from this runner.
       # It uses no provider key and writes nothing outside the runner.
       - name: Download private partner roster only for local evaluation
-        if: github.event_name == 'push' || inputs.intake_list == 'PRIVATE_R2'
+        if: inputs.intake_list == 'PRIVATE_R2'
         shell: bash
         env:
           PRIVATE_ROSTER_KEY: ${{ secrets.SCOOP_REPLAY_ROSTER_OBJECT_KEY }}
@@ -283,14 +283,27 @@ jobs:
           print('Verified private roster downloaded into ephemeral runner')
           PY
 
+      - name: Write secret partner roster for push-only local replay
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          PARTNER_ROSTER_LIST: ${{ secrets.PARTNER_ROSTER_LIST }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [ -n "${PARTNER_ROSTER_LIST:-}" ] || { echo 'Partner roster secret missing'; exit 1; }
+          printf '%s' "$PARTNER_ROSTER_LIST" > "$RUNNER_TEMP/private-partner-roster.md"
+          printf '%s' "$RUNNER_TEMP/private-partner-roster.md" > "$RUNNER_TEMP/private-roster-path"
+          echo 'Private roster prepared in ephemeral runner'
+
       - name: Live roster intake on the partner list
         if: github.event_name == 'push' || inputs.intake_list != ''
         shell: bash
         env:
-          INTAKE_LIST: ${{ github.event_name == 'push' && 'PRIVATE_R2' || inputs.intake_list }}
+          INTAKE_LIST: ${{ github.event_name == 'push' && 'PRIVATE_LOCAL' || inputs.intake_list }}
         run: |
           set -euo pipefail
-          if [ "$INTAKE_LIST" = PRIVATE_R2 ]; then
+          if [ "$INTAKE_LIST" = PRIVATE_R2 ] || [ "$INTAKE_LIST" = PRIVATE_LOCAL ]; then
             INTAKE_LIST="$(cat "$RUNNER_TEMP/private-roster-path")"
           else
             case "$INTAKE_LIST" in
