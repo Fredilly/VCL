@@ -7,6 +7,8 @@ on:
   push:
     paths:
       - '.github/workflows/relevance-check.yml'
+      - 'apps/api/src/**'
+      - 'apps/api/wrangler.jsonc'
   workflow_dispatch:
 
 permissions:
