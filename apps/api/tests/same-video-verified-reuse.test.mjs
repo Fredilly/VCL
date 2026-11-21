@@ -609,6 +609,52 @@ test('visual verification preserves agreeing in-roster match and fails closed on
   assert.equal(unavailable.reason, 'visual_unavailable');
 });
 
+test('a roster at the comparison ceiling is examined in full, not shortlisted', () => {
+  // The retrieval budget used to stop at 24 candidates while the coverage gate
+  // still demanded every eligible row, so every click ended incomplete_comparison.
+  const rows = Array.from({ length: mod.ROSTER_VISUAL_CANDIDATE_LIMIT }, (_, i) => ({
+    mapping: { ...mapping, canonical_key: `product:v1:tee-${i}`, product_id: `tee-${i}`, track_id: `product:v1:tee-${i}` },
+    identity: {
+      ...identity, canonical_key: `product:v1:tee-${i}`,
+      family: `Family ${i % 10}`, variant_id: `V${i}`,
+      title: `Building is my Love Language tee variant ${i}`,
+    },
+  }));
+  const winner = rows[17].identity.canonical_key;
+  const comparisons = new Map(rows.map((row, i) => [row.identity.canonical_key, {
+    source: {}, candidate: {},
+    similarity: row.identity.canonical_key === winner ? .97 : .4,
+    confidence: row.identity.canonical_key === winner ? .96 : .92,
+    matching_details: ['tonal embossed chest lettering'],
+  }]));
+  const selected = mod.retrieveSameVideoRosterCandidates({ description, candidates: rows });
+  assert.equal(selected.length, rows.length, 'a roster under the ceiling must be examined in full');
+  const decision = mod.resolveSameVideoReuse({ description, candidates: rows, comparisons, require_complete_comparisons: true });
+  assert.equal(decision.reason, 'head_to_head_required');
+  assert.equal(decision.front_runner?.canonical_key, winner);
+});
+
+test('a roster above the comparison ceiling is detectable, never silently dropped', () => {
+  const rows = Array.from({ length: mod.ROSTER_VISUAL_CANDIDATE_LIMIT + 1 }, (_, i) => ({
+    mapping: { ...mapping, canonical_key: `product:v1:over-${i}`, product_id: `over-${i}`, track_id: `product:v1:over-${i}` },
+    identity: { ...identity, canonical_key: `product:v1:over-${i}`, family: `Family ${i % 12}`, variant_id: `V${i}` },
+  }));
+  const selected = mod.retrieveSameVideoRosterCandidates({ description, candidates: rows });
+  assert.equal(selected.length, mod.ROSTER_VISUAL_CANDIDATE_LIMIT);
+  assert.ok(rows.length > selected.length, 'the caller can see the roster was truncated and must abstain');
+});
+
+test('a bounded shortlist spends its budget on families before siblings', () => {
+  const rows = Array.from({ length: 40 }, (_, i) => ({
+    mapping: { ...mapping, canonical_key: `product:v1:fam-${i}`, product_id: `fam-${i}`, track_id: `product:v1:fam-${i}` },
+    identity: { ...identity, canonical_key: `product:v1:fam-${i}`, family: `Family ${i % 10}`, variant_id: `V${i}` },
+  }));
+  const selected = mod.retrieveSameVideoRosterCandidates({ description, candidates: rows, limit: 10 });
+  assert.equal(selected.length, 10);
+  const families = new Set(selected.map(row => mod.rosterFamilyKey(row.identity)));
+  assert.equal(families.size, 10, 'ten slots must cover ten families, not one family ten times');
+});
+
 test('structural roster retrieval keeps true SKU despite misleading model and OCR among 40 items', () => {
   const rows=Array.from({length:40},(_,i)=>({
     mapping:{...mapping,canonical_key:'product:v1:bag-'+i,product_id:'bag-'+i},

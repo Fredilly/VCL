@@ -10,6 +10,7 @@ import { CommerceNoResultsError, buildProductQueryVariants, type CommerceProvide
 import { classifyCanonicalRelationship, highConfidenceMetadataContradiction, verifyCandidate, rankVerified } from './candidate-verification.js';
 import { canonical } from './verification-evidence.js';
 import { candidateKey, compareCandidateImages, parseSourceImage, imageRequestBudget, safeImageUrl, type VerifierOptions } from './candidate-images.js';
+import { createSubrequestLedger, ledgerFetch, type SubrequestLedger } from './subrequest-ledger.js';
 import type { ImageComparison } from './verification-evidence.js';
 import { EbayAuth } from './ebay-auth.js';
 import { EbayCommerceProvider, ebayItemIdForLiveLookup } from './ebay-commerce.js';
@@ -31,7 +32,7 @@ import { creatorForContent, makeAttribution, makeCommerceClickRef, recordCommerc
 import { activateAlphaInvite, alphaInviteRequired, authorizeAlphaRequest, createAlphaInvite, type DurableObjectNamespaceLike as AlphaAccessNamespaceLike } from './alpha-access.js';
 import { lookupVerifiedProductMapping, parseVerifiedProductMappings, verifiedMappingProduct, type VerifiedProductMapping } from './verified-product-mapping.js';
 import { backfillLegacyAdminCanonicalMappings, consolidateCanonicalProducts, durableCanonicalCandidates, durableCanonicalProductIdentity, durableVerifiedMappings, persistAdminVerifiedMapping, persistCanonicalProductIdentity, persistTrustedVpmObservation, revokeAdminVerifiedMapping, type VerifiedProductLedgerNamespaceLike } from './verified-product-ledger.js';
-import { confirmHeadToHead, probableRosterCandidates, strictVisualOutcome } from './same-video-verified-reuse.js';
+import { advancingRosterFamilies, confirmHeadToHead, probableRosterCandidates, rosterFamilyKey, ROSTER_VISUAL_CANDIDATE_LIMIT, strictVisualOutcome } from './same-video-verified-reuse.js';
 import { eligibleSameVideoCanonicalCandidates, resolveSameVideoReuse, identityWithTrustedVpmObservations, rankSameVideoRosterCandidates, retrieveSameVideoRosterCandidates, unresolvedRosterCandidateKeys, type SameVideoCanonicalCandidate, type SameVideoReuseDecision } from './same-video-verified-reuse.js';
 import { canonicalIdentityHasMerchantOffer, canonicalProductIdentity, preferredCanonicalReference, type CanonicalProductIdentity } from './canonical-product-memory.js';
 import { confirmCrossVideoVisual, crossVideoCanonicalCandidates, type CrossVideoReuseDecision } from './cross-video-verified-reuse.js';
@@ -55,9 +56,11 @@ export interface Env {
   GEMINI_API_KEY?: string;
   GROQ_API_KEY?: string;
   VISION_PROVIDER?: string;
+  OPENROUTER_BASE_URL?: string;
+  PRIVACY_FALLBACK_MODEL?: string;
+  REFERENCE_ORIGIN?: string;
   GEMINI_MODEL?: string;
   OPENROUTER_API_KEY?: string;
-  OPENROUTER_BASE_URL?: string;
   OPENROUTER_MODEL?: string;
   EBAY_SANDBOX_CLIENT_ID?: string;
   EBAY_SANDBOX_CLIENT_SECRET?: string;
@@ -111,11 +114,8 @@ export interface Env {
  * clamped in compareCandidateImages; an absent or invalid value falls back to
  * the built-in default rather than failing the request.
  */
-/**
- * The OpenAI-compatible vision provider can be OpenRouter or any gateway that
- * speaks the same API. A gateway deployment authenticates with its own key, so it
- * must not require a working OpenRouter key.
- */
+/** Resolve the actual OpenAI-compatible endpoint and credential, including the
+ * production AI Gateway which must not use the expired OpenRouter key. */
 export function openAIVisionCredentials(env: Env): { key: string; model: string; endpoint?: string } | null {
   const base = env.OPENROUTER_BASE_URL ?? '';
   const viaGateway = Boolean(base) && !base.includes('openrouter.ai');
@@ -124,20 +124,20 @@ export function openAIVisionCredentials(env: Env): { key: string; model: string;
   return { key, model: env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL, ...(base ? { endpoint: base } : {}) };
 }
 
-export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIER_PACING_MS' | 'VERIFIER_MAX_ATTEMPTS' | 'VERIFIER_STRUCTURED_OUTPUT'> & { PRIVACY_FALLBACK_MODEL?: string; VERIFIER_TIME_BUDGET_MS?: string; OPENROUTER_BASE_URL?: string }, useOpenRouter: boolean): VerifierOptions {
+export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIER_PACING_MS' | 'VERIFIER_MAX_ATTEMPTS' | 'VERIFIER_STRUCTURED_OUTPUT'> & { OPENROUTER_BASE_URL?: string; PRIVACY_FALLBACK_MODEL?: string; VERIFIER_TIME_BUDGET_MS?: string }, useOpenRouter: boolean): VerifierOptions {
   const concurrency = Number(env.VERIFIER_CONCURRENCY);
   const pacing = Number(env.VERIFIER_PACING_MS);
   const attempts = Number(env.VERIFIER_MAX_ATTEMPTS);
   return {
     provider: useOpenRouter ? 'openrouter' : 'gemini',
     ...(env.OPENROUTER_BASE_URL ? { endpoint: env.OPENROUTER_BASE_URL } : {}),
+    ...(env.PRIVACY_FALLBACK_MODEL ? { privacyFallbackModel: env.PRIVACY_FALLBACK_MODEL } : {}),
+    ...(Number.isFinite(Number(env.VERIFIER_TIME_BUDGET_MS)) && Number(env.VERIFIER_TIME_BUDGET_MS) > 0
+      ? { timeBudgetMs: Number(env.VERIFIER_TIME_BUDGET_MS) } : {}),
     ...(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 4 ? { concurrency } : {}),
     ...(Number.isFinite(pacing) && pacing >= 0 && pacing <= 5000 ? { pacingMs: pacing } : {}),
     ...(Number.isInteger(attempts) && attempts >= 1 && attempts <= 3 ? { maxAttempts: attempts } : {}),
     ...(env.VERIFIER_STRUCTURED_OUTPUT === 'false' ? { structuredOutput: false } : {}),
-    ...(env.PRIVACY_FALLBACK_MODEL ? { privacyFallbackModel: env.PRIVACY_FALLBACK_MODEL } : {}),
-    ...(Number.isFinite(Number(env.VERIFIER_TIME_BUDGET_MS)) && Number(env.VERIFIER_TIME_BUDGET_MS) > 0
-      ? { timeBudgetMs: Number(env.VERIFIER_TIME_BUDGET_MS) } : {}),
   };
 }
 
@@ -177,7 +177,39 @@ export function alphaCommerceRelevance<T extends ProductCandidate>(
   }).slice(0, 3);
 }
 
+/** A reference image this worker can actually read: a public https URL or our own store. */
+function isUsableReferenceUrl(url: string | null | undefined): url is string {
+  return Boolean(url && (safeImageUrl(url) || url.includes('/product-reference/')));
+}
+
+/** Reference-store rows were written before https was enforced; the store is https. */
+function normaliseReferenceUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (!url.startsWith('http://') || !url.includes('/product-reference/')) return url;
+  // A loopback worker serves that store over http; upgrading it would break it.
+  return /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(url) ? url : url.replace('http://', 'https://');
+}
+
+/**
+ * An Exact from a narrowed roster is not an Exact. The family round compares
+ * representatives, so the clicked variant may never have been examined; the
+ * identity is still useful, but presenting it as Exact would claim a coverage the
+ * click did not have. Evidence, identity and learning are unchanged.
+ */
+export function narrowedRosterProducts<T extends ProductCandidate>(products: T[], narrowed: boolean): T[] {
+  if (!narrowed) return products;
+  return products.map(product => product.result_class !== 'EXACT' ? product : {
+    ...product, result_class: 'SIMILAR' as const, relationship: 'SIMILAR' as const,
+    verification_reasons: [...(product.verification_reasons ?? []), 'Exact withheld: the family round narrowed this roster, so not every variant was compared'],
+  });
+}
+
 type NamedCommerceProvider = { name: string; provider: CommerceProvider; tier: 'primary' | 'fallback' };
+/** Provider attempts per click, retries included: an outage must not multiply cost. */
+const VISION_ATTEMPTS_PER_REQUEST = 4;
+// A 429 needs patience, not another immediate call: the gateway throttles bursts.
+const VISION_RETRY_BACKOFF_MS = 900;
+
 const corsHeaders = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type,x-scoop-install-id,x-scoop-admin-session,x-scoop-alpha-token', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' };
 
 type VisionProviderName = 'openrouter' | 'gemini' | 'groq-3.8' | 'groq-3.6' | 'cloudflare';
@@ -187,7 +219,9 @@ const visionFailureReason = new Map<VisionProviderName, string>();
 function visionCooldownMs(error: unknown): number {
   const reason = error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR';
   if (reason === 'QUOTA_EXHAUSTED' || reason === 'PROVIDER_AUTH') return 15 * 60_000;
-  if (reason === 'RATE_LIMITED') return 60_000;
+  // A 429 is usually a burst, not a broken account: shed load briefly and let the
+  // next click try again. Quota exhaustion and auth still get a long cooldown.
+  if (reason === 'RATE_LIMITED') return 15_000;
   if (reason === 'PROVIDER_5XX' || reason === 'PROVIDER_TIMEOUT') return 15_000;
   return 10_000;
 }
@@ -429,13 +463,14 @@ function sourceImageFromHtml(html: string, base: URL): string | null {
   return null;
 }
 
-async function sourceImageForVerifiedMapping(mapping: VerifiedProductMapping): Promise<string | null> {
+async function sourceImageForVerifiedMapping(mapping: VerifiedProductMapping, ledger?: SubrequestLedger): Promise<string | null> {
   if (mapping.image_reference) return mapping.image_reference;
   const source = safeVerifiedSourceUrl(mapping.destination);
   if (!source) return null;
   const cached = verifiedSourceImageCache.get(source.toString());
   if (cached && cached.expires_at > Date.now()) return cached.image;
 
+  if (ledger && !ledger.reserve('page')) return null;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1800);
   try {
@@ -482,6 +517,7 @@ export async function refreshVerifiedOffers(
     context?: ProductContext;
     sourceImage?: ReturnType<typeof parseSourceImage>;
   },
+  ledger?: SubrequestLedger,
 ): Promise<{
   products: ProductCandidate[];
   providers_used: string[];
@@ -537,18 +573,18 @@ export async function refreshVerifiedOffers(
     if (exactLookupSource.name === 'ebay') {
       lookupItemId = ebayItemIdForLiveLookup(mapping.product_id, mapping.destination);
     }
-    exactSource = await exactLookup(lookupItemId, query).catch(() => null);
+    exactSource = ledger && !ledger.reserve('commerce') ? null : await exactLookup(lookupItemId, query).catch(() => null);
     if (exactSource?.model) canonicalModel = exactSource.model;
   }
 
   const merchantMetadata = exactSource?.price
     ? null
-    : await fetchProductPageMetadata(mapping.destination).catch(() => null);
+    : ledger && !ledger.reserve('page') ? null : await fetchProductPageMetadata(mapping.destination).catch(() => null);
   const sourceImage = exactSource?.image_reference
     ?? mapping.image_reference
     ?? merchantMetadata?.image_reference
     ?? await sourceImageForVerifiedMapping(mapping)
-    ?? await recoverVerifiedProductImage(activeBraveKey(visual?.env), mapping);
+    ?? (ledger && !ledger.reserve('commerce') ? null : await recoverVerifiedProductImage(activeBraveKey(visual?.env), mapping));
   const hydratedMapping: VerifiedProductMapping = {
     ...mapping,
     ...(sourceImage ? { image_reference: sourceImage } : {}),
@@ -613,6 +649,7 @@ export async function refreshVerifiedOffers(
   };
 
   const batches = await Promise.all(providers.map(async ({ name, provider }) => {
+    if (ledger && !ledger.reserve('commerce')) return [];
     providersUsed.push(name);
     commerceCalls[name] = (commerceCalls[name] ?? 0) + 1;
     try {
@@ -659,9 +696,9 @@ export async function refreshVerifiedOffers(
   let visualCompared = 0;
 
   if (visual?.sourceImage && needsVisual.length) {
-    const openAIVision = visual.env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(visual.env) : null;
-    const useOpenRouter = Boolean(openAIVision);
-    const key = openAIVision?.key ?? visual.env.GEMINI_API_KEY;
+    const visionRoute = visual.env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(visual.env) : null;
+    const useOpenRouter = Boolean(visionRoute);
+    const key = visionRoute?.key ?? visual.env.GEMINI_API_KEY;
     if (key) {
       const model = useOpenRouter
         ? (visual.env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL)
@@ -673,7 +710,7 @@ export async function refreshVerifiedOffers(
         visual.description,
         needsVisual.slice(0, 8),
         visual.context,
-        imageRequestBudget(),
+        ledger ? { ...imageRequestBudget(), ledger } : imageRequestBudget(),
         verifierOptions(visual.env, useOpenRouter),
       ).catch(() => null);
 
@@ -782,6 +819,7 @@ export async function refreshVerifiedOffers(
         if (provider !== 'ebay') return product;
         const itemId = ebayItemIdForLiveLookup(product.id, product.destination);
         if (!itemId) return product;
+        if (ledger && !ledger.reserve('commerce')) return product;
         commerceCalls.ebay = (commerceCalls.ebay ?? 0) + 1;
         if (!providersUsed.includes('ebay')) providersUsed.push('ebay');
         const live = await getItemById(itemId, query).catch(() => null);
@@ -864,7 +902,14 @@ export async function refreshVerifiedOffers(
 }
 
 type SameVideoVisualCheck = {
-  retrieval?: { roster_count: number; retrieved_keys: string[]; verified_keys: string[]; unresolved_keys: string[] };
+  retrieval?: {
+    roster_count: number; retrieved_keys: string[]; verified_keys: string[]; unresolved_keys: string[];
+    truncated?: boolean;
+    family_stage?: { families: number; compared: number; advancing: string[] };
+    /** Why rows in play did not reach the verifier. Counts only. */
+    coverage?: { shortlisted: number; comparable_rows: number; compared: number; skipped: Record<string, number> };
+    image_hosts?: Record<string, number>;
+  };
   comparisons?: Record<string, ImageComparison>;
   /** The head-to-head round, when one ran: how many rivals, and how it ended. */
   head_to_head?: { rivals: number; outcome: SameVideoReuseDecision['reason']; comparisons: Record<string, ImageComparison> };
@@ -903,6 +948,8 @@ async function confirmSameVideoReuseWithImage(
   context: ProductContext | undefined,
   sourceImage: ReturnType<typeof parseSourceImage>,
   candidates: SameVideoCanonicalCandidate[],
+  ledger: SubrequestLedger = createSubrequestLedger(),
+  localReferenceHost?: string,
 ): Promise<SameVideoVisualCheck> {
   const noDecision: SameVideoReuseDecision = {
     mapping: null,
@@ -920,22 +967,202 @@ async function confirmSameVideoReuseWithImage(
     description,
     candidates: eligible,
   });
-  const retrieval = { roster_count: eligible.length, retrieved_keys: visualCandidates.map(row => row.identity.canonical_key),
-    verified_keys: [] as string[], unresolved_keys: eligible.map(row => row.identity.canonical_key) };
+  // The comparison ceiling is applied after the family round, to the candidates
+  // that are actually compared. A roster larger than the ceiling is not a
+  // retrieval failure: retrieval never drops a candidate on its own.
+  const retrieval: NonNullable<SameVideoVisualCheck['retrieval']> = {
+    roster_count: eligible.length, retrieved_keys: visualCandidates.map(row => row.identity.canonical_key),
+    verified_keys: [], unresolved_keys: eligible.map(row => row.identity.canonical_key) };
   const empty = { decision: noDecision, compared: 0, failures: 0, failure_reasons: {}, retrieval };
   if (!visualCandidates.length || !sourceImage) {
     return { ...empty, decision: { ...noDecision, reason: visualCandidates.length ? 'visual_unavailable' : 'no_candidate' } };
   }
 
-  const openAIVision = env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(env) : null;
-  const useOpenRouter = Boolean(openAIVision);
-  const key = openAIVision?.key ?? env.GEMINI_API_KEY;
+  const visionRoute = env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(env) : null;
+  const useOpenRouter = Boolean(visionRoute);
+  const key = visionRoute?.key ?? env.GEMINI_API_KEY;
   if (!key) return { ...empty, decision: { ...noDecision, reason: 'visual_unavailable' } };
   const model = useOpenRouter ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
 
   const providers = commerceProviders(env);
+  const budget = imageRequestBudget();
+  budget.ledger = ledger;
+  budget.localReferenceHost = localReferenceHost;
+  // The verifier compares pixels with pixels. It is told which kind of object to
+  // look at and nothing the upstream model guessed about it, and no page title:
+  // it repeats those back as its own reading of the click, and that reading then
+  // vetoes correctly matched roster products.
+  const seen = rosterVerifierDescription(description);
+  const verifierConfig = { ...verifierOptions(env, useOpenRouter), pixelOnlySource: true };
+
+  // Family round, before any page is fetched. One representative per family is
+  // compared using the image the roster already carries; only the families still
+  // in play get their rows resolved and their variants compared. This is what
+  // keeps a 41-variant roster inside the subrequest budget instead of resolving
+  // 41 merchant pages to answer one click.
+  const familyMap = new Map<string, SameVideoCanonicalCandidate[]>();
+  for (const candidate of eligible) {
+    const family = rosterFamilyKey(candidate.identity);
+    const bucket = familyMap.get(family);
+    if (bucket) bucket.push(candidate); else familyMap.set(family, [candidate]);
+  }
+  // The image the roster already carries, without fetching a page to find one.
+  // Mirrors the row builder's preference order so the representative compared in
+  // the family round is the same product that would be compared later.
+  const storedImages = (candidate: SameVideoCanonicalCandidate): string[] => {
+    const candidates = [
+      normaliseReferenceUrl(preferredCanonicalReference(candidate.identity)),
+      normaliseReferenceUrl(candidate.mapping.image_reference),
+      ...(candidate.identity.visual_references ?? []).map((ref) => ref.image_url),
+      ...candidate.identity.merchant_refs.map((ref) => normaliseReferenceUrl(ref.image_reference)),
+      ...(candidate.mapping.reference_images ?? []),
+    ].filter((url): url is string => Boolean(url && (safeImageUrl(url) || url.includes('/product-reference/'))));
+    // Our own reference store first: merchant CDNs block datacenter egress and
+    // rotate URLs, and a representative that cannot be fetched is not evidence.
+    return [...new Set(candidates.sort((a, b) => Number(b.includes('/product-reference/')) - Number(a.includes('/product-reference/'))))];
+  };
+  const storedImage = (candidate: SameVideoCanonicalCandidate): string | null => storedImages(candidate)[0] ?? null;
+  // Without a family round the entire roster has to be compared, or none of it:
+  // a shortlist would leave the coverage gate unsatisfiable.
+  let shortlisted = eligible;
+  let familyStage: { families: number; compared: number; advancing: string[] } | null = null;
+  let shortlistCost = 0;
+  // Best family evidence per family key, used to rank variants when the ledger
+  // cannot pay for all of them.
+  const familyScore = new Map<string, number>();
+  if (familyMap.size > 1 && eligible.length > ROSTER_VISUAL_CANDIDATE_LIMIT) {
+    // Two representatives per family, not one: a single stored image can be a
+    // different colourway and would then stand in for variants it does not show.
+    const representatives = [...familyMap].flatMap(([family, list]) =>
+      list.filter((row) => Boolean(storedImage(row))).slice(0, 2).map((candidate) => ({ family, candidate })));
+    // A family with no stored image has no representative to compare, but it might
+    // be the clicked product: page recovery may resolve it later, so it must stay
+    // in play rather than vanish with the families that were actually compared.
+    const familiesWithoutImage = [...familyMap].filter(([, list]) => !list.some((row) => Boolean(storedImage(row)))).map(([family]) => family);
+    const stageProducts = representatives.map(({ candidate }) => ({
+      id: candidate.identity.canonical_key,
+      title: candidate.identity.title,
+      brand: candidate.identity.brand,
+      model: candidate.identity.model,
+      category: candidate.identity.object_type,
+      image_reference: storedImage(candidate),
+      image_references: storedImages(candidate),
+      provenance: 'canonical_verified',
+      destination: candidate.mapping.destination,
+      price: null,
+      currency: null,
+      result_class: 'RELATED' as const,
+      relationship: 'RELATED' as const,
+      metadata: { category: candidate.identity.object_type },
+    }));
+    let familyError: string | null = null;
+    const familyCall = stageProducts.length ? await compareCandidateImages(
+      key, model, sourceImage, seen, stageProducts, undefined, budget, verifierConfig,
+    ).catch((error) => { familyError = error instanceof Error ? error.message.slice(0, 140) : String(error).slice(0, 140); return null; }) : null;
+    const familyComparisons = new Map<string, ImageComparison>();
+    if (familyCall) {
+      representatives.forEach(({ candidate }, index) => {
+        const comparison = familyCall.comparisons.get(candidateKey(stageProducts[index]));
+        if (comparison) familyComparisons.set(candidate.identity.canonical_key, comparison);
+      });
+    }
+    // Narrow only when a representative actually identifies the object. A family
+    // round that is merely "less unconfident" than the others is not evidence for
+    // dropping the families it never looked at properly: in that case the whole
+    // roster is compared, or the click abstains on the ceiling above.
+    const strictFamily = [...familyComparisons.values()].some((comparison) =>
+      Number.isFinite(comparison.similarity) && Number.isFinite(comparison.confidence)
+      && comparison.similarity >= .9 && comparison.confidence >= .9);
+    if (strictFamily) {
+      const advancing = advancingRosterFamilies({ candidates: representatives.map(({ candidate }) => candidate), comparisons: familyComparisons });
+      // Best evidence per family, used to rank the variants that survive the cap.
+      const familyBest = familyScore;
+      for (const { family, candidate } of representatives) {
+        const similarity = familyComparisons.get(candidate.identity.canonical_key)?.similarity ?? 0;
+        familyBest.set(family, Math.max(familyBest.get(family) ?? 0, similarity));
+      }
+      const advancingSet = new Set([
+        ...advancing,
+        ...representatives.filter(({ candidate }) => !familyComparisons.has(candidate.identity.canonical_key)).map(({ family }) => family),
+        ...familiesWithoutImage,
+      ]);
+      familyStage = { families: familyMap.size, compared: familyCall?.compared ?? 0, advancing: [...advancingSet] };
+      shortlistCost = familyCall?.compared ?? 0;
+      // Variants of the families still in play, plus the already-compared
+      // representative of any eliminated family that was close enough to matter:
+      // it can still veto an Exact through the head-to-head round without paying
+      // for families the family round ruled out clearly.
+      const bestFamilyScore = Math.max(0, ...[...familyComparisons.values()].map((comparison) => comparison.similarity));
+      const eliminatedReps = representatives.filter(({ family, candidate }) => {
+        if (advancingSet.has(family)) return false;
+        const comparison = familyComparisons.get(candidate.identity.canonical_key);
+        return Boolean(comparison) && (comparison?.similarity ?? 0) >= bestFamilyScore - 0.45;
+      });
+      shortlisted = [
+        ...eligible.filter((row) => advancingSet.has(rosterFamilyKey(row.identity))),
+        ...eliminatedReps.map(({ candidate }) => candidate),
+      ];
+      // A family can hold more variants than one click can compare (a broad
+      // "monogram" bucket absorbs half a roster). Keep the families with the
+      // strongest evidence and the variants inside them, cap at the ceiling and
+      // mark the result partial: it can still be useful, never Exact.
+      if (shortlisted.length > ROSTER_VISUAL_CANDIDATE_LIMIT) {
+        const score = (row: SameVideoCanonicalCandidate) => familyComparisons.get(row.identity.canonical_key)?.similarity
+          ?? familyBest.get(rosterFamilyKey(row.identity)) ?? 0;
+        shortlisted = [...shortlisted].sort((a, b) => score(b) - score(a)).slice(0, ROSTER_VISUAL_CANDIDATE_LIMIT);
+        retrieval.truncated = true;
+      }
+    } else {
+      // No family passed the strict check, so nothing can be eliminated. If the
+      // roster cannot be covered in full, answer from the representatives that
+      // were compared and label it a partial, SIMILAR-only result rather than
+      // returning nothing: a useful near-miss beats an empty panel.
+      familyStage = { families: familyMap.size, compared: familyCall?.compared ?? 0, advancing: [] };
+      (familyStage as Record<string, unknown>).representatives = representatives.length;
+      (familyStage as Record<string, unknown>).rows_with_image = eligible.filter((row) => Boolean(storedImage(row))).length;
+      (familyStage as Record<string, unknown>).sample_image = storedImage(eligible.find((row) => Boolean(storedImage(row))) ?? eligible[0])?.slice(0, 40) ?? null;
+      if (familyError) (familyStage as Record<string, unknown>).error = familyError;
+      shortlistCost = familyCall?.compared ?? 0;
+      if (shortlisted.length > ROSTER_VISUAL_CANDIDATE_LIMIT && familyComparisons.size) {
+        shortlisted = [...representatives]
+          .sort((a, b) => (familyComparisons.get(b.candidate.identity.canonical_key)?.similarity ?? 0)
+            - (familyComparisons.get(a.candidate.identity.canonical_key)?.similarity ?? 0))
+          .slice(0, 8)
+          .map(({ candidate }) => candidate);
+        retrieval.truncated = true;
+      }
+    }
+  }
+  if (familyStage) retrieval.family_stage = familyStage;
+  // Coverage has to be affordable, not merely capped: one image per candidate plus
+  // a model call per six is what a comparison really costs. Rank by the family
+  // evidence already gathered, keep what the ledger can pay for, and mark the
+  // result partial so no Exact can come from an uncompared row.
+  if (shortlisted.length > 4 && familyStage) {
+    // One candidate can cost two image fetches (primary and fallback) plus a
+    // sixth of a model call, so a naive one-per-row estimate overruns the ledger
+    // and ends in image_budget, which reads as an oversized roster.
+    const affordable = Math.max(4, Math.min(ROSTER_VISUAL_CANDIDATE_LIMIT, Math.floor((ledger.remaining() - 6) / 1.6)));
+    if (shortlisted.length > affordable) {
+      const ranked = [...shortlisted].sort((a, b) =>
+        (familyScore.get(rosterFamilyKey(b.identity)) ?? 0) - (familyScore.get(rosterFamilyKey(a.identity)) ?? 0));
+      shortlisted = ranked.slice(0, affordable);
+      retrieval.truncated = true;
+    }
+  }
+  if (shortlisted.length > ROSTER_VISUAL_CANDIDATE_LIMIT) {
+    return {
+      ...empty,
+      decision: { ...noDecision, reason: 'roster_exceeds_visual_budget' },
+      retrieval: { ...retrieval, truncated: true, ...(familyStage ? { family_stage: familyStage } : {}) },
+    };
+  }
+  const neededSlots = shortlisted.length * 3 + Math.ceil(shortlisted.length / 6);
+  if (budget.remaining < neededSlots) budget.remaining = neededSlots;
+
   const rows: Array<{ candidate: SameVideoCanonicalCandidate; identity: CanonicalProductIdentity; product: ProductCandidate }> = [];
-  for (const candidate of visualCandidates) {
+  const skipReasons: Record<string, number> = {};
+  for (const candidate of shortlisted) {
     let identity = candidate.identity;
     // Trust SKU-bound visual memory ahead of volatile shopping-offer imagery.
     // This is a candidate reference, never an automatic Exact decision.
@@ -959,7 +1186,7 @@ async function confirmSameVideoReuseWithImage(
     // This URL is attached to the saved mapping, not a visually similar search hit.
     // A recovered image is still only candidate evidence and must pass the visual gate.
     if (!merchantRef?.image_reference) {
-      const sourceImageUrl = await sourceImageForVerifiedMapping(candidate.mapping).catch(() => null);
+      const sourceImageUrl = await sourceImageForVerifiedMapping(candidate.mapping, ledger).catch(() => null);
       if (sourceImageUrl && safeImageUrl(sourceImageUrl)) {
         const sourceRef = {
           source: 'verified_roster_destination_page',
@@ -972,8 +1199,8 @@ async function confirmSameVideoReuseWithImage(
       }
     }
 
-    if (!merchantRef?.image_reference) {
-      const refreshed = await refreshVerifiedOffers(providers, candidate.mapping).catch(() => null);
+    if (!merchantRef?.image_reference && ledger.reserve('commerce')) {
+      const refreshed = await refreshVerifiedOffers(providers, candidate.mapping, undefined, ledger).catch(() => null);
       const hydrated = refreshed?.products.find((product) => Boolean(product.image_reference && product.destination)) ?? null;
       const hydratedDestination = hydrated?.destination ?? null;
       if (hydrated?.image_reference && hydratedDestination) {
@@ -994,7 +1221,7 @@ async function confirmSameVideoReuseWithImage(
 
     if (!merchantRef?.image_reference && activeBraveKey(env)) {
       const recovered = await recoverVerifiedProductImage(
-        activeBraveKey(env), { ...candidate.mapping, image_reference: null },
+        activeBraveKey(env), { ...candidate.mapping, image_reference: null }, ledgerFetch(ledger, 'commerce'),
       ).catch(() => null);
       if (recovered) {
         const recoveredRef = {
@@ -1007,7 +1234,12 @@ async function confirmSameVideoReuseWithImage(
         merchantRef = recoveredRef;
       }
     }
-    if (!merchantRef?.image_reference) continue;
+    if (!merchantRef?.image_reference) {
+      // Observable, not silent: a row that never gets an image cannot be compared,
+      // and the reason has to reach the response.
+      skipReasons.no_reference = (skipReasons.no_reference ?? 0) + 1;
+      continue;
+    }
 
     // Roster-curated same-variant reference images are fallback evidence, never
     // primary identity evidence. They must not outrank the merchant/partner
@@ -1018,11 +1250,11 @@ async function confirmSameVideoReuseWithImage(
       .filter((url) => safeImageUrl(url));
     const imageReferences = [...new Set([
       preferredImage,
-      candidate.mapping.image_reference,
+      normaliseReferenceUrl(candidate.mapping.image_reference),
       ...(identity.visual_references ?? []).map((ref) => ref.image_url),
       ...identity.merchant_refs.map((ref) => ref.image_reference),
       ...curatedReferences,
-    ].filter((url): url is string => Boolean(url && safeImageUrl(url))))];
+    ].filter(isUsableReferenceUrl))];
 
     rows.push({
       candidate,
@@ -1053,23 +1285,20 @@ async function confirmSameVideoReuseWithImage(
   }
 
   if (!rows.length) return { ...empty,
-    decision: { ...noDecision, reason: 'visual_unavailable' },
-    failures: 1, failure_reasons: { missing_sku_image_reference: 1 },
+    // No candidate image could be resolved. If that is because the click ran out
+    // of platform budget, say so instead of blaming a missing reference.
+    decision: { ...noDecision, reason: ledger.exhausted() ? 'roster_exceeds_visual_budget' : 'visual_unavailable' },
+    retrieval: { ...retrieval, ...(ledger.exhausted() ? { truncated: true } : {}) },
+    failures: 1, failure_reasons: { ...skipReasons, missing_sku_image_reference: 1 },
   };
 
-  const budget = imageRequestBudget();
-  // The verifier compares pixels with pixels. It is told which kind of object
-  // to look at and nothing the upstream model guessed about it, and no page
-  // title: it repeats those back as its own reading of the click, and that
-  // reading then vetoes correctly matched roster products.
-  const seen = rosterVerifierDescription(description);
   // Recognition already degrades openrouter -> gemini. Verification used to have no
   // such path: a dead or privacy-blocked OpenRouter key meant every comparison
-  // failed while the click itself still worked — the production signature
-  // (model_http_404 + model_privacy_reroute, zero products).
+  // failed while the click itself still worked, which is exactly the production
+  // signature (model_http_404 + model_privacy_reroute, zero products).
   let verifierKey = key;
   let verifierModel = model;
-  let verifierConfigActive: VerifierOptions = { ...verifierOptions(env, useOpenRouter), pixelOnlySource: true };
+  let verifierConfigActive: VerifierOptions = verifierConfig;
   let images = await compareCandidateImages(
     verifierKey,
     verifierModel,
@@ -1168,7 +1397,7 @@ async function confirmSameVideoReuseWithImage(
         recoveredRows.map((row) => row.product),
         undefined,
         budget,
-        verifierConfigActive,
+        { ...verifierConfigActive, pixelOnlySource: true, ...(verifierConfigActive.headToHead ? { headToHead: false } : {}) },
       ).catch(() => null);
 
       if (retryVerification) {
@@ -1181,7 +1410,7 @@ async function confirmSameVideoReuseWithImage(
   }
 
   const retryFailures = retryVerification?.failure_reasons ?? {};
-  const failureReasons = { ...(images.failure_reasons ?? {}) };
+  const failureReasons = { ...skipReasons, ...(images.failure_reasons ?? {}) };
   for (const [reason, count] of Object.entries(retryFailures)) {
     failureReasons[reason] = (failureReasons[reason] ?? 0) + count;
   }
@@ -1208,7 +1437,29 @@ async function confirmSameVideoReuseWithImage(
   // Missing/blocked image evidence is candidate-local. Keep every successful
   // comparison and let the existing strict visual threshold decide among them.
   // Uncompared roster identities remain visible in retrieval telemetry.
-  let decision = resolveSameVideoReuse({ description, candidates: eligible, comparisons, require_complete_comparisons: true });
+  // Dead primary URLs and fallbacks can exhaust the invocation's image budget
+  // before every roster row is compared. That is the same user-visible situation
+  // as an oversized roster, so it must not be reported as the verifier being
+  // merely incomplete.
+  const budgetFailures = (images.failure_reasons?.image_budget ?? 0) + (images.failure_reasons?.image_redirect_budget ?? 0)
+    + (images.failure_reasons?.subrequest_budget ?? 0);
+  if (budgetFailures && unresolvedRosterCandidateKeys({ candidates: shortlisted, comparisons }).length) {
+    return {
+      ...empty,
+      decision: { ...noDecision, reason: 'roster_exceeds_visual_budget' },
+      retrieval: { ...retrieval, truncated: true },
+      compared: images.compared,
+      failures: images.failures,
+      failure_reasons: { ...skipReasons, ...(images.failure_reasons ?? {}) },
+      usage: images.usage,
+      timing: images.timing,
+    };
+  }
+
+  // Coverage is judged over the candidates this click put in play. A family that
+  // lost the family round was examined through its representative, and that
+  // elimination is reported in `family_stage`; its variants are not compared.
+  let decision = resolveSameVideoReuse({ description, candidates: shortlisted, comparisons, require_complete_comparisons: true });
 
   // Head-to-head round. One candidate passed the strict check and every roster
   // candidate was examined; it becomes Exact only if it wins again in a call
@@ -1247,13 +1498,33 @@ async function confirmSameVideoReuseWithImage(
     headToHead = { rivals: rivals.length, outcome: decision.reason, comparisons: Object.fromEntries(roundComparisons) };
   }
 
+  // A budget refusal during the second round is still a budget refusal: the click
+  // did not fail because the verifier was unsure.
+  const lateBudgetFailures = (failureReasons.subrequest_budget ?? 0) + (failureReasons.image_budget ?? 0)
+    + (failureReasons.image_redirect_budget ?? 0) + (failureReasons.model_budget ?? 0);
+  if (!decision.mapping && lateBudgetFailures) {
+    decision = { mapping: null, canonical_key: null, confidence: 0, reason: 'roster_exceeds_visual_budget' };
+    retrieval.truncated = true;
+  }
+
   return {
     decision,
     retrieval: { ...retrieval, verified_keys: [...comparisons.keys()],
-      unresolved_keys: unresolvedRosterCandidateKeys({ candidates: eligible, comparisons }) },
+      unresolved_keys: unresolvedRosterCandidateKeys({ candidates: shortlisted, comparisons }),
+      coverage: { shortlisted: shortlisted.length, comparable_rows: rows.length, compared: images.compared, skipped: { ...skipReasons } },
+      image_hosts: rows.reduce((acc, row) => {
+        try {
+          const url = row.product.image_reference ?? '';
+          const host = new URL(url).hostname;
+          const kind = /^(127\.0\.0\.1|localhost)$/.test(host) ? 'loopback' : safeImageUrl(url) ? 'public' : 'rejected';
+          acc[kind] = (acc[kind] ?? 0) + 1;
+        } catch { acc.missing = (acc.missing ?? 0) + 1; }
+        return acc;
+      }, {} as Record<string, number>),
+      ...(familyStage ? { family_stage: familyStage } : {}) },
     comparisons: Object.fromEntries(comparisons),
     ...(headToHead ? { head_to_head: headToHead } : {}),
-    compared: images.compared + (retryVerification?.compared ?? 0) + roundCompared,
+    compared: shortlistCost + images.compared + (retryVerification?.compared ?? 0) + roundCompared,
     failures: images.failures + (retryVerification?.failures ?? 0),
     failure_reasons: failureReasons,
     usage: roundUsage ? {
@@ -1382,9 +1653,9 @@ async function confirmCrossVideoReuseWithImage(
   });
   if (!rows.length) return { ...empty, decision: { ...noDecision, reason: 'visual_rejected' } };
 
-  const openAIVision = env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(env) : null;
-  const useOpenRouter = Boolean(openAIVision);
-  const key = openAIVision?.key ?? env.GEMINI_API_KEY;
+  const visionRoute = env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(env) : null;
+  const useOpenRouter = Boolean(visionRoute);
+  const key = visionRoute?.key ?? env.GEMINI_API_KEY;
   if (!key) return empty;
   const model = useOpenRouter
     ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL)
@@ -1450,7 +1721,7 @@ function crossVideoMapping(
   };
 }
 
-export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages, routing?: { commerce_action: 'SKIP' | 'SEARCH_NORMAL' | 'SEARCH_BROAD'; verification_action: 'LIGHT' | 'FULL'; telemetry: JevRouterTelemetry; broad_search_on_miss?: boolean }, useMarkingEvidence = false) {
+export async function resolveProducts(providers: NamedCommerceProvider[], queries: ProductQuery[], description: ReturnType<typeof normalizeObjectDescription>, env: Env, context?: ProductContext, sourceImage?: ReturnType<typeof parseSourceImage>, imageVerifier = compareCandidateImages, routing?: { commerce_action: 'SKIP' | 'SEARCH_NORMAL' | 'SEARCH_BROAD'; verification_action: 'LIGHT' | 'FULL'; telemetry: JevRouterTelemetry; broad_search_on_miss?: boolean }, useMarkingEvidence = false, ledger?: SubrequestLedger) {
   const routingActive = Boolean(routing && !routing.telemetry.failed);
   let attempts = 0;
   let sawProviderFailure = false;
@@ -1462,6 +1733,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
   const seen = new Set<string>();
   const imageEvidence = new Map<string, ImageComparison>();
   const imageBudget = imageRequestBudget();
+  if (ledger) imageBudget.ledger = ledger;
   const verification = { retrieved: 0, metadata_prefiltered: 0, light_escalations: 0, compared: 0, image_failures: 0, image_failure_reasons: {} as Record<string, number>, rejected: 0, contradictions: {} as Record<string, number> };
   const timing = {
     provider_retrieval_ms: 0,
@@ -1479,8 +1751,8 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     }>,
   };
   const commerceCalls: Record<string, number> = {};
-  const commerceVisionCredentials = env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(env) : null;
-  const useOpenRouterVerification = Boolean(commerceVisionCredentials);
+  const commerceVisionRoute = env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(env) : null;
+  const useOpenRouterVerification = Boolean(commerceVisionRoute);
   const verificationUsage = {
     provider: useOpenRouterVerification ? 'openrouter' : 'gemini',
     model: useOpenRouterVerification ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite'),
@@ -1559,7 +1831,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     });
 
     const runImageVerification = async () => {
-      const verificationKey = useOpenRouterVerification ? commerceVisionCredentials?.key : env.GEMINI_API_KEY;
+      const verificationKey = commerceVisionRoute?.key ?? env.GEMINI_API_KEY;
       if (!sourceImage || !verificationKey || !viable.length) return;
       const verificationModel = useOpenRouterVerification ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
       const images = await imageVerifier(
@@ -1591,7 +1863,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     if (!lightMode) await runImageVerification();
 
     let decisions = viable.map((product) => ({ product, decision: verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context, useMarkingEvidence) }));
-    if (lightMode && viable.length && !decisions.some(({ decision }) => decision.product) && sourceImage && (useOpenRouterVerification ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY)) {
+    if (lightMode && viable.length && !decisions.some(({ decision }) => decision.product) && sourceImage && (commerceVisionRoute?.key ?? env.GEMINI_API_KEY)) {
       verification.light_escalations++;
       await runImageVerification();
       decisions = viable.map((product) => ({ product, decision: verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context, useMarkingEvidence) }));
@@ -1624,7 +1896,10 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
 
     if (activePrimary.length) {
       const retrievalStarted = Date.now();
-      const settled = await Promise.allSettled(activePrimary.map(async ({ name, provider }) => { providersUsed.add(name); noteCommerceCall(name); return provider.search(query); }));
+      const settled = await Promise.allSettled(activePrimary.map(async ({ name, provider }) => {
+        if (ledger && !ledger.reserve('commerce')) return [] as ProductCandidate[];
+        providersUsed.add(name); noteCommerceCall(name); return provider.search(query);
+      }));
       timing.provider_retrieval_ms += Date.now() - retrievalStarted;
       const products: ProductCandidate[] = [];
       const failedProviders = new Set<string>();
@@ -1666,7 +1941,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       try {
         providersUsed.add('brave');
         noteCommerceCall('brave');
-        result = await braveProvider.provider.search(query);
+        result = ledger && !ledger.reserve('commerce') ? [] : await braveProvider.provider.search(query);
         completedProviderAttempt = true;
         braveTelemetry.success = true;
       } catch (error) {
@@ -1700,7 +1975,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
       try {
         providersUsed.add('serpapi');
         noteCommerceCall('serpapi');
-        result = await serpapiProvider.provider.search(query);
+        result = ledger && !ledger.reserve('commerce') ? [] : await serpapiProvider.provider.search(query);
         completedProviderAttempt = true;
         serpapiTelemetry.success = true;
       } catch (error) {
@@ -2079,10 +2354,10 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
       type ActiveVisionProvider = OpenRouterVisionProvider | GeminiVisionProvider | GroqVisionProvider | CloudflareVisionProvider;
       type NamedVisionProvider = { name: VisionProviderName; provider: ActiveVisionProvider };
-      // Recognition must use the same route as verification: a gateway deployment
-      // has no working OpenRouter key, and the gateway key is the one that answers.
-      const openAIVisionProvider = openAIVisionCredentials(env);
-      const openrouter = openAIVisionProvider ? { name: 'openrouter' as const, provider: new OpenRouterVisionProvider(openAIVisionProvider.key, openAIVisionProvider.model, openAIVisionProvider.endpoint) } : null;
+      const openaiVision = env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(env) : null;
+      const openrouter = openaiVision
+        ? { name: 'openrouter' as const, provider: new OpenRouterVisionProvider(openaiVision.key, openaiVision.model, openaiVision.endpoint) }
+        : null;
       const gemini = env.GEMINI_API_KEY ? { name: 'gemini' as const, provider: new GeminiVisionProvider(env.GEMINI_API_KEY, env.GEMINI_MODEL) } : null;
       const groq38 = env.GROQ_API_KEY ? { name: 'groq-3.8' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY, 'qwen/qwen3.8-27b') } : null;
       const groq36 = env.GROQ_API_KEY ? { name: 'groq-3.6' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY, 'qwen/qwen3.6-27b') } : null;
@@ -2104,13 +2379,20 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       const tryVision = async <T>(operation: (provider: ActiveVisionProvider) => Promise<T>) => {
         let lastError: unknown;
         let attempted = 0;
+        // One click spends at most this many provider attempts, retries included.
+        let visionAttempts = 0;
         for (const { name, provider } of visionProviders) {
           if (visionCircuitOpen(name)) {
             visionRouting.push({ provider: name, status: 'SKIPPED', reason: visionFailureReason.get(name) ?? 'COOLDOWN' });
             continue;
           }
-          const maxAttempts = name === 'cloudflare' ? 2 : 1;
+          // A transient 5xx, a timeout or a rate-limit is an outage, not a
+          // matching failure: retry it once with backoff before moving on. Auth
+          // and schema refusals are not retried — they will fail the same way.
+          const maxAttempts = name === 'cloudflare' ? 2 : 2;
           for (let providerAttempt = 1; providerAttempt <= maxAttempts; providerAttempt++) {
+            if (visionAttempts >= VISION_ATTEMPTS_PER_REQUEST) break;
+            visionAttempts++;
             attempted++;
             try {
               const value = await operation(provider);
@@ -2122,8 +2404,11 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
               const reason = error instanceof VisionProviderError ? error.reason : 'PROVIDER_ERROR';
               visionRouting.push({ provider: name, status: 'FAILED', reason });
               logSafeError(error);
-              const shouldRetryScout = name === 'cloudflare' && providerAttempt === 1 && reason === 'PROVIDER_ERROR';
-              if (shouldRetryScout) continue;
+              const retryable = reason === 'PROVIDER_5XX' || reason === 'RATE_LIMITED' || reason === 'PROVIDER_ERROR';
+              if (retryable && providerAttempt < maxAttempts && visionAttempts < VISION_ATTEMPTS_PER_REQUEST) {
+                await new Promise((resolve) => setTimeout(resolve, VISION_RETRY_BACKOFF_MS * providerAttempt));
+                continue;
+              }
               markVisionFailure(name, error);
               break;
             }
@@ -2277,7 +2562,11 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       try {
         if (path === '/learning-export') return jsonResponse(await verifiedLedgerRequest(env, '/learning/export', {}));
         const input = await request.json() as { platform: string; content_ref: string; offers: Array<RosterOfferInput | string> };
-        const rows = await preparePartnerRoster(env, new URL(request.url).origin, input, undefined, activeBraveKey(env));
+        // Reference images are served by this worker, so the origin baked into the
+        // roster must be one this worker answers for. A deployment whose public
+        // origin differs from the request URL (local dev, CI, preview) sets it
+        // explicitly; production keeps using the request origin.
+        const rows = await preparePartnerRoster(env, env.REFERENCE_ORIGIN || new URL(request.url).origin, input, undefined, activeBraveKey(env));
         await ingestPartnerRoster(env, rows);
         await auditAdminAction(env, authorized.admin_id, 'partner_roster_ingested', { identities: rows.length, offers: input.offers.length, content_ref: input.content_ref });
         return jsonResponse({ accepted: true, distinct_variants: rows.length, merchant_offers: input.offers.length, reference_ready: rows.length });
@@ -2451,6 +2740,10 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           ? routing.canonical_retrieval_action ?? 'HYBRID'
           : 'HYBRID';
 
+      // One ledger for this click: every outbound page, image, redirect, model
+      // and commerce request draws from it, so the roster cannot quietly cost more
+      // subrequests than the platform allows.
+      const ledger = createSubrequestLedger();
       const verifiedResolutionStarted = Date.now();
       let durableMappings = await durableVerifiedMappings(env, context?.platform ?? null, contentRef).catch(() => []);
       if (durableMappings.some((mapping) => mapping.provenance === 'admin_verified' && !mapping.canonical_key)) {
@@ -2544,6 +2837,11 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           context,
           sourceImage,
           canonicalRows,
+          ledger,
+          // wrangler rewrites the request URL to the configured route, so the host
+          // the client used is not necessarily the host this worker answers for.
+          // The reference origin, when set, is the one that serves the images.
+          env.REFERENCE_ORIGIN ? new URL(env.REFERENCE_ORIGIN).host : new URL(request.url).host,
         );
         sameVideoReuse = sameVideoVisualCheck.decision;
         if (sameVideoReuse.mapping) {
@@ -2576,7 +2874,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
       // Unresolved roster evidence is not an open-set miss. A different memory
       // candidate must not acquire Exact while roster rivals remain unchecked.
-      if (!verifiedMapping && !['incomplete_comparison', 'ambiguous', 'visual_unavailable'].includes(sameVideoReuse.reason)) {
+      if (!verifiedMapping && !['incomplete_comparison', 'ambiguous', 'visual_unavailable', 'roster_exceeds_visual_budget'].includes(sameVideoReuse.reason)) {
         const sameVideoCanonicalKeys = new Set(
           [...reviewedNegativeKeys, ...canonicalRows.map(row => row.identity.canonical_key),
             ...durableMappings.map((mapping) => mapping.canonical_key).filter((key): key is string => Boolean(key))],
@@ -2621,7 +2919,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           description,
           context,
           sourceImage,
-        });
+        }, ledger);
         const total_ms = Date.now() - verifiedResolutionStarted;
         recordAlphaScoop({
           telemetry: alphaTelemetry,
@@ -2668,7 +2966,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             model: verifiedMapping.product_id || null,
             attributes: [],
           },
-          products: alphaPresentationProducts(refreshed.products, env),
+          products: alphaPresentationProducts(narrowedRosterProducts(refreshed.products, Boolean(sameVideoVisualCheck.retrieval?.family_stage?.advancing?.length)), env),
           state: 'RESULTS',
           providers_configured: configuredProviders.map(({ name }) => name),
           providers_used: refreshed.providers_used,
@@ -2697,8 +2995,13 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           },
           feedback_learning: { penalized: 0, suppressed: 0, signal_levels: { exact: 0, candidate_global: 0, family: 0 }, reviewed_roster_suppressed: reviewedNegatives.length },
           verified_mapping: {
-            hit: true,
+            // A narrowed roster never claims a verified hit: the extension badges
+            // "Exact match" from this flag, and the clicked variant may not have
+            // been compared. The products are still returned as useful results.
+            hit: !Boolean(sameVideoVisualCheck.retrieval?.family_stage?.advancing?.length),
+            ...(sameVideoVisualCheck.retrieval?.family_stage?.advancing?.length ? { narrowed: true } : {}),
             roster_retrieval: sameVideoVisualCheck.retrieval,
+            subrequests: ledger.snapshot(),
           // Counts only: establish whether a replay is using imported variants
           // or falling back to alpha seeds, without disclosing catalog content.
           // Benchmark worker only: per-candidate verifier scores keyed by roster
@@ -2769,9 +3072,19 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         });
       }
       const providers = commerceProviders(env);
-      if (!providers.length) {
+      if (!providers.length && !benchmarkMode) {
         recordFailureState('commerce', 'NO_CONFIGURED_PROVIDER', false);
-        return jsonResponse({ error: 'Shopping sources are temporarily unavailable', reason: 'NO_CONFIGURED_PROVIDER', failure_state: 'TEMPORARILY_UNAVAILABLE', retryable: false }, 503);
+        // The shopping layer being unconfigured must not hide why identification
+        // abstained: a caller that only sees NO_CONFIGURED_PROVIDER cannot tell a
+        // missing key from a roster too large to cover.
+        return jsonResponse({
+          error: 'Shopping sources are temporarily unavailable',
+          reason: 'NO_CONFIGURED_PROVIDER',
+          failure_state: 'TEMPORARILY_UNAVAILABLE',
+          retryable: false,
+          identification_reason: sameVideoReuse.reason,
+          roster_retrieval: sameVideoVisualCheck.retrieval,
+        }, 503);
       }
       const creatorId = creatorForContent(env.ALPHA_CREATOR_CONTENT_MAP, contentRef);
       const affiliateClickRef = env.ALPHA_ATTRIBUTION_SECRET && creatorId && contentRef && alphaTelemetry
@@ -2792,7 +3105,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       // offer ahead of the unverified roster candidates. Keep physical evidence,
       // but suppress unsupported model names until the comparison is complete.
       const retrievalDescription = canonicalRows.length
-        ? (['incomplete_comparison', 'ambiguous', 'visual_unavailable'].includes(sameVideoReuse.reason)
+        ? (['incomplete_comparison', 'ambiguous', 'visual_unavailable', 'roster_exceeds_visual_budget'].includes(sameVideoReuse.reason)
           ? fallbackDescription
           : rosterFallbackRetrievalDescription(description))
         : description;
@@ -2824,7 +3137,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           : queries;
       const started = Date.now();
       const markingVerifyV1 = record.benchmark_marking_verify_v1 === true;
-      const resolved = await resolveProducts(routedProviders, routedQueries, fallbackDescription, env, context, sourceImage, compareCandidateImages, routing, markingVerifyV1);
+      const resolved = await resolveProducts(routedProviders, routedQueries, fallbackDescription, env, context, sourceImage, compareCandidateImages, routing, markingVerifyV1, ledger);
       if (sameVideoVisualCheck.usage) {
         const usage = resolved.cost_usage.verification_usage;
         usage.requests += sameVideoVisualCheck.usage.requests ?? 0;
@@ -2851,6 +3164,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       const rosterSuggestions: ProductCandidate[] = probableRosterCandidates({
         candidates: canonicalRows,
         comparisons: new Map(Object.entries(sameVideoVisualCheck.comparisons ?? {})),
+        description,
       }).map(({ candidate, similarity, confidence }) => {
         const base = verifiedMappingProduct(candidate.mapping);
         return {
@@ -2977,7 +3291,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
       return jsonResponse({
         ...resolved,
-        products: alphaPresentationProducts(attributedProducts, env),
+        products: alphaPresentationProducts(narrowedRosterProducts(attributedProducts, Boolean(sameVideoVisualCheck.retrieval?.family_stage?.advancing?.length)), env),
         feedback_learning: feedbackLearning,
         verified_mapping: {
           hit: false,
@@ -3011,6 +3325,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           confidence: crossVideoReuse.reason !== 'no_candidate' ? crossVideoReuse.confidence : sameVideoReuse.confidence,
           reason: crossVideoReuse.reason !== 'no_candidate' ? crossVideoReuse.reason : sameVideoReuse.reason,
           same_video_reason: sameVideoReuse.reason,
+          subrequests: ledger.snapshot(),
           cross_video_reason: crossVideoReuse.reason,
           ...(typeof crossVideoReuse.visual_similarity === 'number'
             ? { visual_similarity: crossVideoReuse.visual_similarity }

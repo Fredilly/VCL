@@ -44,6 +44,38 @@ test('Groq localization exposes its own usage snapshot', async () => {
   assert.equal(result.provider_usage.completion_tokens, 20);
 });
 
+test('candidate image redirects are capped per invocation, not per image', async () => {
+  let assetRequests = 0;
+  const fetch = async url => {
+    if (String(url).includes('generativelanguage')) {
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: {
+        category: { value: 'apparel', confidence: .95, basis: 'image' },
+        subtype: { value: 'sweater', confidence: .95, basis: 'image' },
+        color: { value: 'navy', confidence: .95, basis: 'image' },
+      }, candidates: [{ index: 0, attributes: {}, similarity: .9, confidence: .9, matching_details: [] }] }) }] } }] });
+    }
+    if (String(url).includes('/cdn.example.com/')) {
+      // Every reference image URL redirects once to the real asset.
+      return new Response(null, { status: 302, headers: { location: String(url).replace('/cdn.example.com/', '/assets.example.com/') } });
+    }
+    assetRequests++;
+    return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+  };
+  const { compareCandidateImages, parseSourceImage, MAX_IMAGE_REDIRECTS_PER_INVOCATION } = loadModule(imagesFile, { fetch });
+  // Seven candidates span two batches: the allowance is per invocation, not per batch.
+  const candidates = Array.from({ length: 7 }, (_, i) => ({
+    id: String(i), title: `Sweater ${i}`, brand: null, model: null, category: 'apparel',
+    image_reference: `https://cdn.example.com/${i}.png`, provenance: 'test', destination: null,
+    price: null, currency: null, result_class: 'SIMILAR',
+  }));
+  const result = await compareCandidateImages('key', 'gemini-3.5-flash-lite', parseSourceImage(image), description, candidates);
+  // Three hops for the whole invocation. Images after that are candidate-local
+  // failures, not three more subrequests each.
+  assert.equal(MAX_IMAGE_REDIRECTS_PER_INVOCATION, 3);
+  assert.equal(result.failure_reasons.image_redirect_budget, 4);
+  assert.equal(assetRequests, 3);
+});
+
 test('Gemini candidate verification exposes usageMetadata', async () => {
   const source = {
     category: { value: 'apparel', confidence: 0.95, basis: 'image' },

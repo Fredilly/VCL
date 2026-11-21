@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "suite": "golden-identity-ci",
+  "session_id": "golden-identity-2026-11-19-045102",
+  "run_date": "2026-11-19",
+  "run_timezone": "UTC",
+  "recorded_at": "2026-11-19T04:51:02.062Z",
+  "source_parent_commit": null,
+  "endpoint": "http://127.0.0.1:8787/resolve-products",
+  "scope": "Object identity only, scored from the resolver query terms. Not a replacement for the manual three-run Golden PASS procedure, and not a localisation measurement: the frozen cases describe click points in prose.",
+  "cases": [
+    {
+      "id": "golden-001-billions-tie",
+      "name": "Billions tie",
+      "status": "BLOCKED_NO_FRAME",
+      "expected_identity": "men's necktie",
+      "expected_brand_model": null,
+      "notes": "No frozen frame at /home/hermes/projects/vcl/tests/golden/frames/golden-001-billions-tie.jpg. Capture it from a signed-in browser and commit the image; this harness never fetches YouTube (datacenter IPs are bot-walled) and never handles session cookies."
+    },
+    {
+      "id": "golden-002-casio-f91w",
+      "name": "Casio F-91W",
+      "status": "BLOCKED_NO_FRAME",
+      "expected_identity": "digital wristwatch",
+      "expected_brand_model": "Casio F-91W",
+      "notes": "No frozen frame at /home/hermes/projects/vcl/tests/golden/frames/golden-002-casio-f91w.jpg. Capture it from a signed-in browser and commit the image; this harness never fetches YouTube (datacenter IPs are bot-walled) and never handles session cookies."
+    },
+    {
+      "id": "golden-003-hugo-boss-bottled",
+      "name": "Hugo Boss bottle",
+      "status": "BLOCKED_NO_FRAME",
+      "expected_identity": "perfume / fragrance bottle",
+      "expected_brand_model": "Hugo Boss Boss Bottled",
+      "notes": "No frozen frame at /home/hermes/projects/vcl/tests/golden/frames/golden-003-hugo-boss-bottled.jpg. Capture it from a signed-in browser and commit the image; this harness never fetches YouTube (datacenter IPs are bot-walled) and never handles session cookies."
+    },
+    {
+      "id": "golden-004-white-denim-jacket",
+      "name": "White denim jacket",
+      "status": "BLOCKED_NO_FRAME",
+      "expected_identity": "white denim jacket",
+      "expected_brand_model": null,
+      "notes": "No frozen frame at /home/hermes/projects/vcl/tests/golden/frames/golden-004-white-denim-jacket.jpg. Capture it from a signed-in browser and commit the image; this harness never fetches YouTube (datacenter IPs are bot-walled) and never handles session cookies."
+    },
+    {
+      "id": "golden-005-dior-book-tote",
+      "name": "Christian Dior Book Tote",
+      "status": "BLOCKED_NO_FRAME",
+      "expected_identity": "tote bag / handbag",
+      "expected_brand_model": "Christian Dior Book Tote",
+      "notes": "No frozen frame at /home/hermes/projects/vcl/tests/golden/frames/golden-005-dior-book-tote.jpg. Capture it from a signed-in browser and commit the image; this harness never fetches YouTube (datacenter IPs are bot-walled) and never handles session cookies."
+    }
+  ],
+  "summary": {
+    "cases": 5,
+    "scored": 0,
+    "pass": 0,
+    "pass_rate": null,
+    "blocked_no_frame": 5,
+    "provider_blocked": 0
+  },
+  "comparison": {
+    "previous_session": null,
+    "pass_rate_change": null,
+    "reason": "First automated Golden identity run"
+  }
+}

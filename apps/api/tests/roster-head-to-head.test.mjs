@@ -35,11 +35,12 @@ const offers = VARIANTS.map((name, index) => {
   return index === 0 ? { ...base, variant_id: 'VR-video-A-1-red-20', identity_scope: 'video_local' } : { ...base, sku: `SKU-${slug}` };
 });
 
-async function resolve({ stage, round = () => null, failBatchWith = null, openrouterBroken = false }) {
+async function resolve({ stage, round = () => null, failBatchWith = null, openrouterBroken = false, noCommerce = false }) {
   const env = environment();
   const rows = await learning.preparePartnerRoster(env, 'https://api.scoop.shop', { platform: 'youtube', content_ref: 'video-A', offers }, deps);
   await learning.ingestPartnerRoster(env, rows);
   Object.assign(env, { GEMINI_API_KEY: 'test-only', BRAVE_SEARCH_API_KEY: 'test-only', BENCHMARK_MODE: 'true' });
+  if (noCommerce) delete env.BRAVE_SEARCH_API_KEY;
   if (openrouterBroken) Object.assign(env, { VISION_PROVIDER: 'openrouter', OPENROUTER_API_KEY: 'dead-key' });
   const calls = { stage: 0, round: 0, roundOrder: null, told: [], openrouter: 0 };
   let server;
@@ -49,7 +50,7 @@ async function resolve({ stage, round = () => null, failBatchWith = null, openro
       if (host === 'api.scoop.shop') return server.default.fetch(new Request(url, options), env);
       if (host === 'api.search.brave.com') return Response.json({ web: { results: [] } });
       if (host === 'openrouter.ai') {
-        // The production signature: the OpenRouter verifier is refused outright.
+        // The production signature: the OpenRouter key is refused for the verifier.
         calls.openrouter++;
         return new Response('no endpoints found matching your data policy', { status: 404 });
       }
@@ -145,6 +146,19 @@ test('a rival that closes in during the round stops the Exact; the likely produc
   assert.equal(result.state, 'RESULTS');
 });
 
+test('benchmark can score roster suggestions without any commerce-provider key', async () => {
+  const { result } = await resolve({
+    stage: realistic,
+    round: name => name === 'Speedy Red 20' ? [.92, .92] : name === 'Speedy Red 40' ? [.85, .8] : [.3, .75],
+    noCommerce: true,
+  });
+  assert.equal(result.state, 'RESULTS');
+  assert.equal(result.verified_mapping.hit, false);
+  assert.ok(result.products.some(product =>
+    product.result_class === 'SIMILAR' && product.destination.startsWith('https://catalog.shop/products/')));
+  assert.ok(result.products.every(product => product.result_class !== 'EXACT'));
+});
+
 test('a front-runner that fails its second look is not Exact', async () => {
   const { result } = await resolve({ stage: realistic, round: name => name === 'Speedy Red 20' ? [.8, .9] : [.3, .75] });
   assert.equal(result.verified_mapping.hit, false);
@@ -156,7 +170,7 @@ test('a refused OpenRouter verifier falls back to the provider recognition alrea
   assert.ok(calls.openrouter > 0, 'the OpenRouter verifier was actually attempted');
   assert.ok(calls.stage > 0, 'comparisons still happened, through the fallback provider');
   assert.ok(result.products.length > 0, 'the click is not empty just because one verifier is refused');
-  assert.ok(result.verification.compared > 0, 'the fallback verifier produced the comparisons');
+  assert.ok(calls.stage > 0 && result.verification.compared > 0, 'the fallback verifier produced the comparisons');
 });
 
 test('a candidate the verifier never examined still blocks Exact, and no round is spent', async () => {

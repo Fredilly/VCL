@@ -43,6 +43,8 @@ export class OpenRouterVisionProvider implements VisionProvider {
   constructor(
     private readonly apiKey: string,
     private readonly model = DEFAULT_OPENROUTER_MODEL,
+    // Any OpenAI-compatible chat-completions endpoint can serve this provider; the
+    // AI gateway route exists so a deployment (or CI) is not tied to one vendor.
     private readonly endpoint = DEFAULT_OPENROUTER_ENDPOINT,
   ) {}
 
@@ -92,12 +94,11 @@ export class OpenRouterVisionProvider implements VisionProvider {
               ...images.map((url) => ({ type: 'image_url', image_url: { url } })),
             ],
           }],
-          // Production privacy guardrail: route only to endpoints that do not
-          // collect prompts for training/storage and that support zero data retention.
-          provider: {
-            data_collection: 'deny',
-            zdr: true,
-          },
+          // Only OpenRouter supports these routing controls. Do not send them
+          // to an independent OpenAI-compatible gateway.
+          ...(this.endpoint === DEFAULT_OPENROUTER_ENDPOINT ? {
+            provider: { data_collection: 'deny', zdr: true },
+          } : {}),
           response_format: { type: 'json_object' },
           temperature: 0.2,
           usage: { include: true },
