@@ -23,6 +23,10 @@ on:
         required: false
         default: '6'
 
+concurrency:
+  group: scoop-live-vision-validation
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
