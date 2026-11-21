@@ -201,6 +201,21 @@ export function alphaCommerceRelevance<T extends ProductCandidate>(
   }).slice(0, 3);
 }
 
+/**
+ * Final commerce gate. When the response already contains an identified product
+ * (EXACT/SIMILAR), an unverified marketplace row only belongs there if it shares
+ * distinctive identity with it. Rows that share nothing are how a $14,180 lehenga
+ * and a box of nitrile gloves end up priced next to a Louis Vuitton trunk.
+ */
+export function dropUnrelatedCommerce<T extends ProductCandidate>(products: T[]): T[] {
+  const verified = products.filter((product) => product.result_class === 'EXACT' || product.result_class === 'SIMILAR');
+  if (!verified.length) return products;
+  const anchors = [...new Set(verified.flatMap((product) =>
+    identityTokens(`${product.title ?? ''} ${product.model ?? ''}`)))];
+  if (!anchors.length) return products;
+  return products.filter((product) => product.result_class !== 'RELATED' || sharesIdentity(product, anchors));
+}
+
 /** A reference image this worker can actually read: a public https URL or our own store. */
 function isUsableReferenceUrl(url: string | null | undefined): url is string {
   return Boolean(url && (safeImageUrl(url) || url.includes('/product-reference/')));
@@ -2990,7 +3005,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             model: verifiedMapping.product_id || null,
             attributes: [],
           },
-          products: alphaPresentationProducts(narrowedRosterProducts(refreshed.products, Boolean(sameVideoVisualCheck.retrieval?.family_stage?.advancing?.length)), env),
+          products: alphaPresentationProducts(dropUnrelatedCommerce(narrowedRosterProducts(refreshed.products, Boolean(sameVideoVisualCheck.retrieval?.family_stage?.advancing?.length))), env),
           state: 'RESULTS',
           providers_configured: configuredProviders.map(({ name }) => name),
           providers_used: refreshed.providers_used,
@@ -3335,7 +3350,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
       return jsonResponse({
         ...resolved,
-        products: alphaPresentationProducts(narrowedRosterProducts(attributedProducts, Boolean(sameVideoVisualCheck.retrieval?.family_stage?.advancing?.length)), env),
+        products: alphaPresentationProducts(dropUnrelatedCommerce(narrowedRosterProducts(attributedProducts, Boolean(sameVideoVisualCheck.retrieval?.family_stage?.advancing?.length))), env),
         feedback_learning: feedbackLearning,
         verified_mapping: {
           hit: false,

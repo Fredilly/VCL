@@ -25,3 +25,23 @@ test('an unrelated bag does not share identity with the match', () => {
 test('with no anchor, nothing is filtered out', () => {
   assert.equal(mod.sharesIdentity({ title: 'anything at all' }, []), true);
 });
+
+test('the final gate drops priced strangers next to an identified product', () => {
+  const products = [
+    { result_class: 'SIMILAR', title: 'Louis Vuitton Monogram Side Trunk PM', model: 'Side Trunk PM' },
+    { result_class: 'RELATED', title: 'Star Micronics Receipt Paper 37966300' },
+    { result_class: 'RELATED', title: 'Florarose Embroidered Silk Lehenga Set' },
+    { result_class: 'RELATED', title: 'Louis Vuitton Side Trunk pre owned' },
+  ];
+  const kept = mod.dropUnrelatedCommerce(products);
+  assert.equal(kept.length, 2);
+  assert.deepEqual(kept.map(p => p.title), [
+    'Louis Vuitton Monogram Side Trunk PM',
+    'Louis Vuitton Side Trunk pre owned',
+  ]);
+});
+
+test('with nothing identified, the gate keeps current behaviour', () => {
+  const products = [{ result_class: 'RELATED', title: 'anything' }];
+  assert.equal(mod.dropUnrelatedCommerce(products).length, 1);
+});
