@@ -3024,7 +3024,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         });
       }
       const providers = commerceProviders(env);
-      if (!providers.length) {
+      if (!providers.length && !benchmarkMode) {
         recordFailureState('commerce', 'NO_CONFIGURED_PROVIDER', false);
         // The shopping layer being unconfigured must not hide why identification
         // abstained: a caller that only sees NO_CONFIGURED_PROVIDER cannot tell a
