@@ -153,6 +153,30 @@ export function alphaPresentationProducts<T extends ProductCandidate>(
   });
 }
 
+/**
+ * Alpha commerce display gate: when the verifier cannot establish a visual
+ * similarity, generic marketplace results are NOT evidence of a match.
+ * Strong matches always take precedence; RELATED results require a specific,
+ * independently described product model to appear as clearly labelled leads.
+ * Nothing here upgrades identity or changes verification thresholds.
+ */
+export function alphaCommerceRelevance<T extends ProductCandidate>(
+  products: T[], modelCandidate: string | null | undefined,
+): T[] {
+  const verified = products.filter(p => p.result_class === 'EXACT' || p.result_class === 'SIMILAR');
+  if (verified.length) return verified;
+  const tokenize = (value: string) => value.normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '').toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  const generic = new Set(['bag','bags','tote','handbag','purse','shoulder','crossbody','clutch','hobo','small','large','mm','pm','leather','canvas']);
+  const modelTokens = tokenize(modelCandidate ?? '').filter(token => !generic.has(token));
+  if (!modelTokens.length) return [];
+  return products.filter(p => {
+    if (p.result_class !== 'RELATED') return false;
+    const title = new Set(tokenize(p.title ?? ''));
+    return modelTokens.every(token => title.has(token));
+  }).slice(0, 3);
+}
+
 /** A reference image this worker can actually read: a public https URL or our own store. */
 function isUsableReferenceUrl(url: string | null | undefined): url is string {
   return Boolean(url && (safeImageUrl(url) || url.includes('/product-reference/')));
@@ -1772,7 +1796,9 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
           : 'NO_RESULTS' as const;
     return {
       query,
-      products: dedupeProducts(rankVerified(visible)),
+      products: env.SCOOP_SIMILAR_ONLY === 'true' && sourceImage
+        ? alphaCommerceRelevance(dedupeProducts(rankVerified(visible)), description.model_candidate)
+        : dedupeProducts(rankVerified(visible)),
       state,
       providers_configured: providers.map((p) => p.name),
       providers_used: [...providersUsed],
