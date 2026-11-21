@@ -166,7 +166,7 @@ export function alphaCommerceRelevance<T extends ProductCandidate>(
   const verified = products.filter(p => p.result_class === 'EXACT' || p.result_class === 'SIMILAR');
   if (verified.length) return verified;
   const tokenize = (value: string) => value.normalize('NFKD')
-    .replace(/[\\u0300-\\u036f]/g, '').toLowerCase().match(/[a-z0-9]+/g) ?? [];
+    .replace(/[\u0300-\u036f]/g, '').toLowerCase().match(/[a-z0-9]+/g) ?? [];
   const generic = new Set(['bag','bags','tote','handbag','purse','shoulder','crossbody','clutch','hobo','small','large','mm','pm','leather','canvas']);
   const modelTokens = tokenize(modelCandidate ?? '').filter(token => !generic.has(token));
   if (!modelTokens.length) return [];
