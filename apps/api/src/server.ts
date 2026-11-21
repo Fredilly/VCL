@@ -1455,7 +1455,8 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     }>,
   };
   const commerceCalls: Record<string, number> = {};
-  const useOpenRouterVerification = env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
+  const commerceVisionCredentials = env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(env) : null;
+  const useOpenRouterVerification = Boolean(commerceVisionCredentials);
   const verificationUsage = {
     provider: useOpenRouterVerification ? 'openrouter' : 'gemini',
     model: useOpenRouterVerification ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite'),
@@ -1532,7 +1533,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     });
 
     const runImageVerification = async () => {
-      const verificationKey = useOpenRouterVerification ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY;
+      const verificationKey = useOpenRouterVerification ? commerceVisionCredentials?.key : env.GEMINI_API_KEY;
       if (!sourceImage || !verificationKey || !viable.length) return;
       const verificationModel = useOpenRouterVerification ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
       const images = await imageVerifier(
@@ -1543,7 +1544,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
         viable,
         context,
         imageBudget,
-        { provider: useOpenRouterVerification ? 'openrouter' : 'gemini' },
+        verifierOptions(env, useOpenRouterVerification),
       );
       if (images.provider_unavailable) verifierUnavailable = images.provider_unavailable;
       verification.compared += images.compared;
