@@ -58,6 +58,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Deterministic regression suite
+        run: pnpm test
+
       - name: Check provider credentials are present
         run: |
           set -euo pipefail
