@@ -1,0 +1,265 @@
+/**
+ * Live probe: does the resolver identify a variant from its own product photo
+ * when the whole partner roster is loaded?
+ *
+ *   node tools/roster-live-probe.mjs --endpoint http://127.0.0.1:8787 \
+ *     --manifest "$RUNNER_TEMP/intake/manifest.json" --limit 6
+ *
+ * Ground truth is the variant whose photo was used as the click crop. This
+ * measures identification, the family round and subrequest accounting with real
+ * vision models. It is not the video-frame test: a clean product photo is an
+ * easier crop than a paused frame, and this reports that difference rather than
+ * hiding it.
+ *
+ * The roster belongs to a partner. Nothing printed here may contain a listing
+ * link or a product title: handles, classes, reason codes and generic evidence
+ * phrases only.
+ */
+import { readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+
+const args = process.argv.slice(2);
+const option = (name, fallback = null) => {
+  const index = args.indexOf(`--${name}`);
+  return index >= 0 && args[index + 1] ? args[index + 1] : fallback;
+};
+
+const endpoint = option('endpoint', 'http://127.0.0.1:8787');
+const manifestPath = option('manifest');
+const limit = Number(option('limit', '6'));
+const outPath = option('out');
+const minConfirmedRate = Number(option('min-confirmed-rate', '0'));
+if (!Number.isFinite(minConfirmedRate) || minConfirmedRate < 0 || minConfirmedRate > 1) {
+  throw new Error('--min-confirmed-rate must be within 0..1');
+}
+const labelsPath = option('labels');
+// Human labels can list acceptable destinations for a variant. Unlabelled alternative
+// merchants stay UNREVIEWED, never silently scored as a correct match.
+const truth = labelsPath ? JSON.parse(await readFile(labelsPath, 'utf8')) : {};
+const labelFor = (id) => truth.cases?.[id] ?? truth[id] ?? null;
+const identifier = (value) => createHash('sha256').update(String(value ?? '')).digest('hex').slice(0, 12);
+const normalizeDestination = (url) => { try {
+  const parsed = new URL(url);
+  return parsed.hostname.toLowerCase().replace(/^www\./, '') + parsed.pathname.replace(/\/+$/, '').toLowerCase();
+} catch { return null; } };
+const matchedDestination = (destination, accepted) => Boolean(normalizeDestination(destination) && accepted.some((url) => normalizeDestination(url) === normalizeDestination(destination)));
+const timestamp = Number(option('timestamp', '0'));
+
+if (!manifestPath) {
+  console.error('Usage: node tools/roster-live-probe.mjs --manifest <intake/manifest.json> [--endpoint URL] [--limit N] [--out FILE]');
+  process.exit(2);
+}
+
+const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+const offers = (manifest.offers ?? []).filter((offer) => typeof offer.image_reference === 'string');
+if (!offers.length) {
+  console.error('No offers carry an image reference; intake did not resolve any variant photo.');
+  process.exit(2);
+}
+
+// One variant per family first, so the probes are not all the same silhouette.
+const byFamily = new Map();
+for (const offer of offers) {
+  const family = String(offer.family ?? offer.title ?? offer.variant_id);
+  if (!byFamily.has(family)) byFamily.set(family, offer);
+}
+// Deterministic selection: families sorted by key, one probe each, same set on
+// every run so two runs are comparable.
+const probes = [...byFamily.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, offer]) => offer).slice(0, limit);
+
+const normalize = (value) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const tokens = (value) => new Set(normalize(value).split(' ').filter((token) => token.length > 2));
+
+async function dataUrlFor(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`image ${response.status}`);
+  const type = response.headers.get('content-type')?.split(';')[0] ?? 'image/jpeg';
+  const bytes = Buffer.from(await response.arrayBuffer());
+  return `data:${type};base64,${bytes.toString('base64')}`;
+}
+
+async function post(path, body) {
+  const response = await fetch(new URL(path, endpoint), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-scoop-install-id': 'roster-live-probe' },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, body: await response.json().catch(() => ({})) };
+}
+
+const scrub = (text, offer) => {
+  let value = String(text ?? '');
+  for (const secret of [offer.title, offer.family, offer.merchant_item_id, offer.destination]) {
+    if (secret && String(secret).length > 3) value = value.split(String(secret)).join('<expected>');
+  }
+  return value.slice(0, 160);
+};
+
+let sessionToken = null;
+// Preferred path: ingest through the same endpoint production uses, so the
+// worker stores the reference images the family round needs.
+if (args.includes('--import')) {
+  const credential = process.env.ADMIN_CREDENTIAL || 'roster-live-probe';
+  const auth = await post('/admin/auth', { credential, label: 'roster-live-probe' });
+  const session = auth.body.session_token ?? auth.body.token ?? auth.body.session?.token ?? null;
+  sessionToken = session;
+  if (auth.status !== 200 || !session) {
+    console.error(`admin auth failed: ${auth.status} ${auth.body.error ?? ''}`);
+    process.exit(2);
+  }
+  const imported = await fetch(new URL('/partner-roster', endpoint), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-scoop-admin-session': session },
+    body: JSON.stringify(manifest),
+  });
+  const body = await imported.json().catch(() => ({}));
+  console.log(JSON.stringify({ import: { status: imported.status, ...body } }));
+  if (imported.status !== 200) process.exit(2);
+}
+
+// Diagnostic: what the ledger actually kept. Counts and key names only.
+if (args.includes('--diagnose') && sessionToken) {
+  const exported = await fetch(new URL('/learning-export', endpoint), { headers: { 'x-scoop-admin-session': sessionToken } });
+  const body = await exported.json().catch(() => ({}));
+  const list = body.rows ?? body.mappings ?? body.items ?? [];
+  const first = list[0] ?? {};
+  console.log(JSON.stringify({
+    ledger_rows: list.length,
+    keys: Object.keys(first).slice(0, 20),
+    with_image_reference: list.filter((row) => row.image_reference || row.mapping?.image_reference).length,
+    with_merchant_image: list.filter((row) => (row.merchant_refs ?? row.identity?.merchant_refs ?? []).some((ref) => ref.image_reference)).length,
+    identity_keys: first.identity ? Object.keys(first.identity).slice(0, 20) : null,
+  }));
+}
+
+const rows = [];
+let firstProbe = true;
+for (const offer of probes) {
+  const started = Date.now();
+  // Space the probes: a burst trips the provider's rate limit and reads as an
+  // outage, which hides the matching signal this run exists to measure.
+  if (!firstProbe) await new Promise((resolve) => setTimeout(resolve, 20000));
+  firstProbe = false;
+  try {
+    const crop = await dataUrlFor(offer.image_reference);
+    const analyzeStarted = Date.now();
+    const analysed = await post('/analyze-selection', {
+      dataUrl: crop,
+      timestamp,
+      context: { platform: manifest.platform, content_ref: manifest.content_ref, timestamp_ms: timestamp },
+    });
+    // The endpoint returns the description fields at the top level, not under a
+    // `description` key.
+    const description = analysed.body.description ?? (analysed.body.category || analysed.body.search_terms ? analysed.body : null);
+    if (analysed.status !== 200 || !description) {
+      rows.push({
+        handle: identifier(offer.variant_id), stage: 'analyze', status: analysed.status,
+        failure: analysed.body.error ?? 'no description', reason: analysed.body.reason ?? null,
+        vision_routing: analysed.body.vision_routing ?? null,
+      });
+      continue;
+    }
+    const resolved = await post('/resolve-products', {
+      description,
+      source_image: crop,
+      context: { platform: manifest.platform, content_ref: manifest.content_ref, timestamp_ms: timestamp },
+    });
+    const products = Array.isArray(resolved.body.products) ? resolved.body.products : [];
+    const top = products[0] ?? null;
+    const expectedTokens = tokens(`${offer.title} ${offer.family ?? ''}`);
+    const topTokens = tokens(`${top?.title ?? ''} ${top?.model ?? ''}`);
+    const shared = [...expectedTokens].filter((token) => topTokens.has(token)).length;
+    const overlap = expectedTokens.size ? shared / expectedTokens.size : 0;
+    const label = labelFor(offer.variant_id);
+    const acceptableDestinations = [offer.destination, ...(label?.acceptable_destinations ?? [])].filter(Boolean);
+    const knownWrong = (label?.wrong_destinations ?? []).filter(Boolean);
+    const identityCorrect = Boolean(top) && (
+      matchedDestination(top.destination, acceptableDestinations)
+      || (label?.acceptable_canonical_keys ?? []).includes(top.id)
+    );
+    const identityWrong = Boolean(top) && !identityCorrect && (
+      matchedDestination(top.destination, knownWrong) || label?.closed_world === true
+    );
+    const outcome = !top ? 'NO_RESULT' : identityCorrect ? 'CONFIRMED_CORRECT' : identityWrong ? 'CONFIRMED_WRONG' : 'UNREVIEWED';
+    rows.push({
+      handle: identifier(offer.variant_id),
+      expected_class: 'EXACT',
+      status: resolved.status,
+      returned: top ? {
+        class: top.result_class ?? null,
+        overlap: Number(overlap.toFixed(2)),
+        id_hash: top.id ? identifier(top.id) : null,
+        merchant: (() => { try { return top.destination ? new URL(top.destination).host : null; } catch { return null; } })(),
+        has_destination: Boolean(top.destination),
+        price: typeof top.price === 'number' ? top.price : null,
+        currency: top.currency ?? null,
+        provenance: top.provenance ?? null,
+        verification: (top.verification_reasons ?? []).slice(0, 2).map((item) => String(item).slice(0, 90)),
+      } : null,
+      useful: outcome === 'CONFIRMED_CORRECT',
+      outcome,
+      // Title-overlap is diagnostic only. It is never ground truth.
+      truth_source: label ? 'human_labels' : 'same_listing_destination',
+      class_useful: top ? ['EXACT', 'SIMILAR'].includes(top.result_class) : false,
+      decision: resolved.body.verified_mapping?.same_video_reason ?? resolved.body.failure_state ?? null,
+      hit: resolved.body.verified_mapping?.hit ?? null,
+      retrieved: resolved.body.verified_mapping?.roster_retrieval?.retrieved_keys?.length ?? null,
+      roster_count: resolved.body.verified_mapping?.roster_retrieval?.roster_count ?? null,
+      family_stage: (() => { const stage = resolved.body.verified_mapping?.roster_retrieval?.family_stage; return stage ? { families: stage.families, compared: stage.compared, advancing_count: stage.advancing?.length ?? null } : null; })(),
+      coverage: resolved.body.verified_mapping?.roster_retrieval?.coverage ?? null,
+      image_host_count: Object.keys(resolved.body.verified_mapping?.roster_retrieval?.image_hosts ?? {}).length,
+      analyze_ms: Date.now() - analyzeStarted,
+      visual_failure_reasons: resolved.body.verified_mapping?.visual_failure_reasons ?? null,
+      unexamined: resolved.body.verified_mapping?.roster_retrieval?.unresolved_keys?.length ?? null,
+      subrequests: resolved.body.verified_mapping?.subrequests?.total ?? null,
+      cost_usd: resolved.body.usage?.cost_usd ?? resolved.body.provider_usage?.cost_usd ?? null,
+      tokens: resolved.body.usage?.total_tokens ?? null,
+      evidence_count: (top?.evidence ?? top?.matching_details ?? top?.verification_reasons ?? []).length,
+      ms: Date.now() - started,
+    });
+  } catch (error) {
+    rows.push({ handle: identifier(offer.variant_id), stage: 'probe', failure: error instanceof Error ? error.name : 'unknown' });
+  }
+}
+
+const answered = rows.filter((row) => row.returned);
+const useful = rows.filter((row) => row.useful);
+const reviewed = rows.filter((row) => ['CONFIRMED_CORRECT', 'CONFIRMED_WRONG'].includes(row.outcome));
+const wrong = rows.filter((row) => row.outcome === 'CONFIRMED_WRONG');
+const unreviewed = rows.filter((row) => row.outcome === 'UNREVIEWED');
+const exact = rows.filter((row) => row.returned?.class === 'EXACT');
+const summary = {
+  probes: rows.length,
+  answered: answered.length,
+  useful_results: useful.length,
+  // Photo-control lower bounds, NOT video-frame SKU accuracy: unknown results stay in the
+  // denominator. Separately report precision on the subset actually reviewed.
+  useful_rate: rows.length ? Number((useful.length / rows.length).toFixed(2)) : null,
+  useful_rate_when_answered: answered.length ? Number((useful.length / answered.length).toFixed(2)) : null,
+  reviewed_precision: reviewed.length ? Number((useful.length / reviewed.length).toFixed(2)) : null,
+  min_confirmed_rate: minConfirmedRate,
+  evaluation_scope: 'catalog_photo_control_not_video_frame',
+  reviewed: reviewed.length,
+  confirmed_wrong: wrong.length,
+  unreviewed: unreviewed.length,
+  no_result: rows.filter((row) => row.outcome === 'NO_RESULT').length,
+  exact_rows: exact.length,
+  wrong_exact: rows.filter((row) => row.returned?.class === 'EXACT' && row.outcome === 'CONFIRMED_WRONG').length,
+  unreviewed_exact: rows.filter((row) => row.returned?.class === 'EXACT' && row.outcome === 'UNREVIEWED').length,
+  subrequest_max: rows.reduce((max, row) => Math.max(max, row.subrequests ?? 0), 0),
+  latency_ms: rows.length ? Math.round(rows.reduce((sum, row) => sum + (row.ms ?? 0), 0) / rows.length) : null,
+  cost_usd: Number(rows.reduce((sum, row) => sum + (row.cost_usd ?? 0), 0).toFixed(4)),
+  model_similarity: rows.filter((row) => row.returned).map((row) => row.returned.class),
+  provider_failures: rows.filter((row) => row.stage === 'analyze').length,
+  matching_failures: rows.filter((row) => row.stage !== 'analyze' && !row.useful).length,
+  failures: rows.filter((row) => !row.useful).map((row) => ({ handle: row.handle, decision: row.decision ?? row.failure ?? null, stage: row.stage ?? 'resolve', retrieved: row.retrieved ?? null, unexamined: row.unexamined ?? null, coverage: row.coverage ?? null })),
+};
+
+console.log(JSON.stringify({ summary, cases: rows }, null, 1));
+if (outPath) await writeFile(outPath, JSON.stringify({ summary, cases: rows }, null, 1));
+// A live CI probe must never report green when vision is unavailable or no
+// labelled comparison was actually measured. Keep infrastructure failure distinct
+// from wrong-product failures in the JSON report.
+const unmeasured = summary.provider_failures > 0;
+process.exitCode = summary.wrong_exact > 0 || summary.confirmed_wrong > 0 || unmeasured
+  || (summary.useful_rate ?? 0) < minConfirmedRate ? 1 : 0;
