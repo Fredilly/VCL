@@ -52,7 +52,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pr-private-replay
+  group: scoop-live-vision-validation
   cancel-in-progress: false
 
 jobs:
