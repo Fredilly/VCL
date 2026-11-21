@@ -16,6 +16,7 @@
  * phrases only.
  */
 import { readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 
 const args = process.argv.slice(2);
 const option = (name, fallback = null) => {
@@ -27,6 +28,17 @@ const endpoint = option('endpoint', 'http://127.0.0.1:8787');
 const manifestPath = option('manifest');
 const limit = Number(option('limit', '6'));
 const outPath = option('out');
+const labelsPath = option('labels');
+// Human labels can list acceptable destinations for a variant. Unlabelled alternative
+// merchants stay UNREVIEWED, never silently scored as a correct match.
+const truth = labelsPath ? JSON.parse(await readFile(labelsPath, 'utf8')) : {};
+const labelFor = (id) => truth.cases?.[id] ?? truth[id] ?? null;
+const identifier = (value) => createHash('sha256').update(String(value ?? '')).digest('hex').slice(0, 12);
+const normalizeDestination = (url) => { try {
+  const parsed = new URL(url);
+  return parsed.hostname.toLowerCase().replace(/^www\./, '') + parsed.pathname.replace(/\/+$/, '').toLowerCase();
+} catch { return null; } };
+const matchedDestination = (destination, accepted) => Boolean(normalizeDestination(destination) && accepted.some((url) => normalizeDestination(url) === normalizeDestination(destination)));
 const timestamp = Number(option('timestamp', '0'));
 
 if (!manifestPath) {
@@ -137,7 +149,7 @@ for (const offer of probes) {
     const description = analysed.body.description ?? (analysed.body.category || analysed.body.search_terms ? analysed.body : null);
     if (analysed.status !== 200 || !description) {
       rows.push({
-        handle: offer.variant_id, stage: 'analyze', status: analysed.status,
+        handle: identifier(offer.variant_id), stage: 'analyze', status: analysed.status,
         failure: analysed.body.error ?? 'no description', reason: analysed.body.reason ?? null,
         vision_routing: analysed.body.vision_routing ?? null,
       });
@@ -154,14 +166,25 @@ for (const offer of probes) {
     const topTokens = tokens(`${top?.title ?? ''} ${top?.model ?? ''}`);
     const shared = [...expectedTokens].filter((token) => topTokens.has(token)).length;
     const overlap = expectedTokens.size ? shared / expectedTokens.size : 0;
+    const label = labelFor(offer.variant_id);
+    const acceptableDestinations = [offer.destination, ...(label?.acceptable_destinations ?? [])].filter(Boolean);
+    const knownWrong = (label?.wrong_destinations ?? []).filter(Boolean);
+    const identityCorrect = Boolean(top) && (
+      matchedDestination(top.destination, acceptableDestinations)
+      || (label?.acceptable_canonical_keys ?? []).includes(top.id)
+    );
+    const identityWrong = Boolean(top) && !identityCorrect && (
+      matchedDestination(top.destination, knownWrong) || label?.closed_world === true
+    );
+    const outcome = !top ? 'NO_RESULT' : identityCorrect ? 'CONFIRMED_CORRECT' : identityWrong ? 'CONFIRMED_WRONG' : 'UNREVIEWED';
     rows.push({
-      handle: offer.variant_id,
+      handle: identifier(offer.variant_id),
       expected_class: 'EXACT',
       status: resolved.status,
       returned: top ? {
         class: top.result_class ?? null,
         overlap: Number(overlap.toFixed(2)),
-        id: top.id ?? null,
+        id_hash: top.id ? identifier(top.id) : null,
         merchant: (() => { try { return top.destination ? new URL(top.destination).host : null; } catch { return null; } })(),
         has_destination: Boolean(top.destination),
         price: typeof top.price === 'number' ? top.price : null,
@@ -169,41 +192,51 @@ for (const offer of probes) {
         provenance: top.provenance ?? null,
         verification: (top.verification_reasons ?? []).slice(0, 2).map((item) => String(item).slice(0, 90)),
       } : null,
-      useful: Boolean(top) && overlap >= 0.6,
+      useful: outcome === 'CONFIRMED_CORRECT',
+      outcome,
+      // Title-overlap is diagnostic only. It is never ground truth.
+      truth_source: label ? 'human_labels' : 'same_listing_destination',
       class_useful: top ? ['EXACT', 'SIMILAR'].includes(top.result_class) : false,
       decision: resolved.body.verified_mapping?.same_video_reason ?? resolved.body.failure_state ?? null,
       hit: resolved.body.verified_mapping?.hit ?? null,
       retrieved: resolved.body.verified_mapping?.roster_retrieval?.retrieved_keys?.length ?? null,
       roster_count: resolved.body.verified_mapping?.roster_retrieval?.roster_count ?? null,
-      family_stage: resolved.body.verified_mapping?.roster_retrieval?.family_stage ?? null,
+      family_stage: (() => { const stage = resolved.body.verified_mapping?.roster_retrieval?.family_stage; return stage ? { families: stage.families, compared: stage.compared, advancing_count: stage.advancing?.length ?? null } : null; })(),
       coverage: resolved.body.verified_mapping?.roster_retrieval?.coverage ?? null,
-      image_hosts: resolved.body.verified_mapping?.roster_retrieval?.image_hosts ?? null,
+      image_host_count: Object.keys(resolved.body.verified_mapping?.roster_retrieval?.image_hosts ?? {}).length,
       analyze_ms: Date.now() - analyzeStarted,
       visual_failure_reasons: resolved.body.verified_mapping?.visual_failure_reasons ?? null,
       unexamined: resolved.body.verified_mapping?.roster_retrieval?.unresolved_keys?.length ?? null,
       subrequests: resolved.body.verified_mapping?.subrequests?.total ?? null,
       cost_usd: resolved.body.usage?.cost_usd ?? resolved.body.provider_usage?.cost_usd ?? null,
       tokens: resolved.body.usage?.total_tokens ?? null,
-      evidence: (top?.evidence ?? top?.matching_details ?? top?.verification_reasons ?? [])
-        .slice(0, 3).map((item) => scrub(item, offer)),
+      evidence_count: (top?.evidence ?? top?.matching_details ?? top?.verification_reasons ?? []).length,
       ms: Date.now() - started,
     });
   } catch (error) {
-    rows.push({ handle: offer.variant_id, stage: 'probe', failure: error instanceof Error ? error.message : String(error) });
+    rows.push({ handle: identifier(offer.variant_id), stage: 'probe', failure: error instanceof Error ? error.name : 'unknown' });
   }
 }
 
 const answered = rows.filter((row) => row.returned);
 const useful = rows.filter((row) => row.useful);
+const reviewed = rows.filter((row) => ['CONFIRMED_CORRECT', 'CONFIRMED_WRONG'].includes(row.outcome));
+const wrong = rows.filter((row) => row.outcome === 'CONFIRMED_WRONG');
+const unreviewed = rows.filter((row) => row.outcome === 'UNREVIEWED');
 const exact = rows.filter((row) => row.returned?.class === 'EXACT');
 const summary = {
   probes: rows.length,
   answered: answered.length,
   useful_results: useful.length,
-  useful_rate: rows.length ? Number((useful.length / rows.length).toFixed(2)) : 0,
-  useful_rate_when_answered: answered.length ? Number((useful.length / answered.length).toFixed(2)) : 0,
+  useful_rate: reviewed.length ? Number((useful.length / reviewed.length).toFixed(2)) : null,
+  useful_rate_when_answered: reviewed.length ? Number((useful.length / reviewed.length).toFixed(2)) : null,
+  reviewed: reviewed.length,
+  confirmed_wrong: wrong.length,
+  unreviewed: unreviewed.length,
+  no_result: rows.filter((row) => row.outcome === 'NO_RESULT').length,
   exact_rows: exact.length,
-  wrong_exact: rows.filter((row) => row.returned?.class === 'EXACT' && !row.useful).length,
+  wrong_exact: rows.filter((row) => row.returned?.class === 'EXACT' && row.outcome === 'CONFIRMED_WRONG').length,
+  unreviewed_exact: rows.filter((row) => row.returned?.class === 'EXACT' && row.outcome === 'UNREVIEWED').length,
   subrequest_max: rows.reduce((max, row) => Math.max(max, row.subrequests ?? 0), 0),
   latency_ms: rows.length ? Math.round(rows.reduce((sum, row) => sum + (row.ms ?? 0), 0) / rows.length) : null,
   cost_usd: Number(rows.reduce((sum, row) => sum + (row.cost_usd ?? 0), 0).toFixed(4)),
@@ -215,4 +248,6 @@ const summary = {
 
 console.log(JSON.stringify({ summary, cases: rows }, null, 1));
 if (outPath) await writeFile(outPath, JSON.stringify({ summary, cases: rows }, null, 1));
-process.exit(rows.length && useful.length === 0 ? 1 : 0);
+// No claims of good accuracy are allowed without a reviewed denominator.
+// Fail on confirmed wrong EXACТ, but do not turn missing human labels into a bogus accuracy score.
+process.exitCode = summary.wrong_exact > 0 ? 1 : 0;
