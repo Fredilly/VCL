@@ -521,6 +521,27 @@ test('OpenRouter 404 reroutes to a vision-capable model without weakening ZDR', 
   assert.equal(result.failure_reasons.model_privacy_reroute, 1);
 });
 
+test('gateway 404 does not trigger OpenRouter privacy reroute', async () => {
+  const { candidate, description } = example(apparelCases[0]);
+  const models = [];
+  const gateway = 'https://ai-gateway.vercel.sh/v1/chat/completions';
+  const { compareCandidateImages } = loadModule(filename, { fetch: async (url, options) => {
+    if (String(url) !== gateway) {
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+    }
+    const body = JSON.parse(options.body);
+    models.push(body.model);
+    assert.equal(body.provider, undefined, 'OpenRouter privacy fields must not be sent to gateways');
+    return new Response('model unavailable', { status: 404 });
+  } });
+  const result = await compareCandidateImages('key', 'google/gemini-2.5-flash-lite', image, description, [candidate],
+    undefined, undefined, { provider: 'openrouter', endpoint: gateway, maxAttempts: 2 });
+  assert.deepEqual(models, ['google/gemini-2.5-flash-lite']);
+  assert.equal(result.compared, 0);
+  assert.equal(result.provider_unavailable, 'model_http_404');
+  assert.equal(result.failure_reasons.model_privacy_reroute, undefined);
+});
+
 test('OpenRouter fallback 404 stops additional batches rather than searching blindly', async () => {
   const { candidate, description } = example(apparelCases[0]);
   let modelCalls = 0;
