@@ -356,6 +356,12 @@ export type VerifierOptions = {
   pixelOnlySource?: boolean;
   /** With pixelOnlySource on OpenRouter: false keeps plain JSON mode (for comparison runs). */
   structuredOutput?: boolean;
+  /** Vision model used when the primary model has no endpoint under the privacy policy. */
+  privacyFallbackModel?: string;
+  /** Total model time one interaction may spend before remaining batches fail fast. */
+  timeBudgetMs?: number;
+  /** OpenAI-compatible chat-completions endpoint; defaults to OpenRouter's. */
+  endpoint?: string;
 };
 
 const HEAD_TO_HEAD_SUFFIX = ` The numbered candidates are close alternatives from one product list, and at most one of them is the selected object. Judge each on its own against the crop. Look for what separates them: size and proportions, colour, pattern, material, hardware, handles and straps, closures. Give high similarity only to a candidate whose distinguishing details are actually visible in the crop; when the crop cannot tell two candidates apart, give both the same moderate similarity and low confidence.`;
@@ -369,6 +375,8 @@ export async function compareCandidateImages(
   let failures = 0;
   const failure_reasons: Record<string, number> = {};
   const verificationProvider = options.provider ?? 'gemini';
+  const providerEndpoint = options.endpoint ?? 'https://openrouter.ai/api/v1/chat/completions';
+  const isDefaultRouter = providerEndpoint === 'https://openrouter.ai/api/v1/chat/completions';
   const concurrency = Math.max(1, Math.min(4, Math.trunc(options.concurrency ?? 2) || 2));
   const pacingMs = Math.max(0, Math.min(5000, options.pacingMs ?? 0));
   const maxAttempts = Math.max(1, Math.min(3, Math.trunc(options.maxAttempts ?? 2) || 2));
@@ -380,7 +388,10 @@ export async function compareCandidateImages(
   // OpenRouter may have no endpoint for the configured model under the required
   // zero-retention policy. Give one other vision-capable ZDR-routed model a
   // chance, without ever relaxing the request's privacy restrictions.
-  const privacyFallbackModel = 'qwen/qwen3.8-27b';
+  // The privacy fallback must be a model the SAME provider actually serves.
+  // qwen/qwen3.8-27b is a Cloudflare/Groq id: OpenRouter answers 404 for it, so
+  // the reroute could never succeed and then poisoned the rest of the click.
+  const privacyFallbackModel = options.privacyFallbackModel ?? 'qwen/qwen2.5-vl-72b-instruct';
   let activeModel = model;
   // Pacing is shared across concurrent batches so the aggregate call rate is
   // bounded, not just each batch's. Retries go through the same gate.
@@ -408,6 +419,14 @@ export async function compareCandidateImages(
   // rate-limit response survives bounded recovery. Comparisons stay unknown;
   // no provider failure can promote a candidate.
   let providerUnavailableReason: string | null = null;
+  // A 404 under the privacy policy means "no endpoint satisfies it", a property of
+  // the request rather than a provider outage. Once established it holds for the
+  // click: further batches must fail fast instead of spending a timeout each.
+  let privacyUnavailable = false;
+  // A click that spends minutes in the verifier is a failure even when it answers.
+  const timeBudgetMs = Math.max(5000, Math.min(180000, Math.trunc(options.timeBudgetMs ?? 60000) || 60000));
+  const modelTimeStarted = Date.now();
+  let timeBudgetSpent = false;
   // Six thumbnails + one source stay under the inline payload limit, even at MAX_BYTES.
   const batches = Array.from({ length: Math.ceil(products.length / 6) }, (_, i) => products.slice(i * 6, i * 6 + 6));
   // Pre-allocate budget in deterministic batch order before any concurrent work.
@@ -465,6 +484,27 @@ export async function compareCandidateImages(
     // This batch was pre-reserved before an earlier concurrent batch hit a hard
     // provider failure. Return its unused reservations and mark the candidates
     // unknown without fetching images or calling the provider again.
+    if (!timeBudgetSpent && Date.now() - modelTimeStarted > timeBudgetMs) {
+      timeBudgetSpent = true;
+    }
+    if (timeBudgetSpent) {
+      failures += batch.length;
+      failure('model_time_budget', batch.length);
+      budget.remaining += batchBudget.remaining;
+      batchBudget.remaining = 0;
+      batchTiming.total_ms = Date.now() - batchStarted;
+      timing.batches.push(batchTiming);
+      return;
+    }
+    if (privacyUnavailable) {
+      failures += batch.length;
+      failure('model_privacy_unavailable', batch.length);
+      budget.remaining += batchBudget.remaining;
+      batchBudget.remaining = 0;
+      batchTiming.total_ms = Date.now() - batchStarted;
+      timing.batches.push(batchTiming);
+      return;
+    }
     if (providerUnavailableReason) {
       failures += batch.length;
       failure('model_provider_unavailable', batch.length);
@@ -505,7 +545,7 @@ export async function compareCandidateImages(
           const base = options.headToHead ? INSTRUCTIONS + HEAD_TO_HEAD_SUFFIX : INSTRUCTIONS;
           const system = recovery ? base + RECOVERY_SUFFIX : base;
           const response = verificationProvider === 'openrouter'
-            ? await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            ? await fetch(providerEndpoint, {
                 method: 'POST',
                 headers: {
                   'Authorization': `Bearer ${apiKey}`,
@@ -522,8 +562,9 @@ export async function compareCandidateImages(
                       ? { type: 'text', text: part.text }
                       : { type: 'image_url', image_url: { url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` } }) },
                   ],
-                  // Match recognition's no-training / zero-retention routing for every verifier attempt.
-                  provider: { data_collection: 'deny', zdr: true },
+                  // Routing fields only OpenRouter understands; another
+                  // OpenAI-compatible gateway can reject them outright.
+                  ...(isDefaultRouter ? { provider: { data_collection: 'deny', zdr: true } } : {}),
                   response_format: structured
                     ? { type: 'json_schema', json_schema: { name: 'candidate_comparison', strict: true, schema: VERIFIER_JSON_SCHEMA } }
                     : { type: 'json_object' },
@@ -602,20 +643,29 @@ export async function compareCandidateImages(
           if (!result.ok) {
             reason = `model_http_${result.status}`;
             if (result.status === 404 && verificationProvider === 'openrouter'
-              && activeModel !== privacyFallbackModel) {
+              && activeModel !== privacyFallbackModel && !privacyUnavailable) {
               // 404 may mean that none of this model's endpoints satisfy ZDR.
               // Reserve the extra model call; fail closed if there is no budget.
               if (!reserve(batchBudget)) { reason = 'image_budget'; break; }
               activeModel = privacyFallbackModel;
               usage.model = `${model} -> ${privacyFallbackModel}`;
               failure('model_privacy_reroute');
+              reason = '';
               attempt--; // this is routing recovery, not a malformed response retry
               continue;
+            }
+            if (result.status === 404 && verificationProvider === 'openrouter') {
+              // The fallback model is unavailable under the same policy: stop
+              // routing for this click and say so, without blaming availability.
+              privacyUnavailable = true;
+              failure('model_privacy_unavailable');
+              reason = '';
+              break;
             }
             if (![429, 500, 502, 503, 504].includes(result.status)) {
               // Auth failures never heal by retrying, and later batches must not
               // spend their own calls discovering the same thing.
-              if ([401, 403, 404].includes(result.status)) providerUnavailableReason = reason;
+              if ([401, 403].includes(result.status)) providerUnavailableReason = reason;
               break;
             }
             // A hard rate limit that survives recovery means the provider is

@@ -57,6 +57,7 @@ export interface Env {
   VISION_PROVIDER?: string;
   GEMINI_MODEL?: string;
   OPENROUTER_API_KEY?: string;
+  OPENROUTER_BASE_URL?: string;
   OPENROUTER_MODEL?: string;
   EBAY_SANDBOX_CLIENT_ID?: string;
   EBAY_SANDBOX_CLIENT_SECRET?: string;
@@ -109,16 +110,33 @@ export interface Env {
  * clamped in compareCandidateImages; an absent or invalid value falls back to
  * the built-in default rather than failing the request.
  */
-export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIER_PACING_MS' | 'VERIFIER_MAX_ATTEMPTS' | 'VERIFIER_STRUCTURED_OUTPUT'>, useOpenRouter: boolean): VerifierOptions {
+/**
+ * The OpenAI-compatible vision provider can be OpenRouter or any gateway that
+ * speaks the same API. A gateway deployment authenticates with its own key, so it
+ * must not require a working OpenRouter key.
+ */
+export function openAIVisionCredentials(env: Env): { key: string; model: string; endpoint?: string } | null {
+  const base = env.OPENROUTER_BASE_URL ?? '';
+  const viaGateway = Boolean(base) && !base.includes('openrouter.ai');
+  const key = viaGateway ? (env.AI_GATEWAY_API_KEY ?? env.OPENROUTER_API_KEY) : env.OPENROUTER_API_KEY;
+  if (!key) return null;
+  return { key, model: env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL, ...(base ? { endpoint: base } : {}) };
+}
+
+export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIER_PACING_MS' | 'VERIFIER_MAX_ATTEMPTS' | 'VERIFIER_STRUCTURED_OUTPUT'> & { PRIVACY_FALLBACK_MODEL?: string; VERIFIER_TIME_BUDGET_MS?: string; OPENROUTER_BASE_URL?: string }, useOpenRouter: boolean): VerifierOptions {
   const concurrency = Number(env.VERIFIER_CONCURRENCY);
   const pacing = Number(env.VERIFIER_PACING_MS);
   const attempts = Number(env.VERIFIER_MAX_ATTEMPTS);
   return {
     provider: useOpenRouter ? 'openrouter' : 'gemini',
+    ...(env.OPENROUTER_BASE_URL ? { endpoint: env.OPENROUTER_BASE_URL } : {}),
     ...(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 4 ? { concurrency } : {}),
     ...(Number.isFinite(pacing) && pacing >= 0 && pacing <= 5000 ? { pacingMs: pacing } : {}),
     ...(Number.isInteger(attempts) && attempts >= 1 && attempts <= 3 ? { maxAttempts: attempts } : {}),
     ...(env.VERIFIER_STRUCTURED_OUTPUT === 'false' ? { structuredOutput: false } : {}),
+    ...(env.PRIVACY_FALLBACK_MODEL ? { privacyFallbackModel: env.PRIVACY_FALLBACK_MODEL } : {}),
+    ...(Number.isFinite(Number(env.VERIFIER_TIME_BUDGET_MS)) && Number(env.VERIFIER_TIME_BUDGET_MS) > 0
+      ? { timeBudgetMs: Number(env.VERIFIER_TIME_BUDGET_MS) } : {}),
   };
 }
 
@@ -612,8 +630,9 @@ export async function refreshVerifiedOffers(
   let visualCompared = 0;
 
   if (visual?.sourceImage && needsVisual.length) {
-    const useOpenRouter = visual.env.VISION_PROVIDER === 'openrouter' && Boolean(visual.env.OPENROUTER_API_KEY);
-    const key = useOpenRouter ? visual.env.OPENROUTER_API_KEY : visual.env.GEMINI_API_KEY;
+    const openAIVision = visual.env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(visual.env) : null;
+    const useOpenRouter = Boolean(openAIVision);
+    const key = openAIVision?.key ?? visual.env.GEMINI_API_KEY;
     if (key) {
       const model = useOpenRouter
         ? (visual.env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL)
@@ -879,8 +898,9 @@ async function confirmSameVideoReuseWithImage(
     return { ...empty, decision: { ...noDecision, reason: visualCandidates.length ? 'visual_unavailable' : 'no_candidate' } };
   }
 
-  const useOpenRouter = env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
-  const key = useOpenRouter ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY;
+  const openAIVision = env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(env) : null;
+  const useOpenRouter = Boolean(openAIVision);
+  const key = openAIVision?.key ?? env.GEMINI_API_KEY;
   if (!key) return { ...empty, decision: { ...noDecision, reason: 'visual_unavailable' } };
   const model = useOpenRouter ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
 
@@ -1014,16 +1034,46 @@ async function confirmSameVideoReuseWithImage(
   // title: it repeats those back as its own reading of the click, and that
   // reading then vetoes correctly matched roster products.
   const seen = rosterVerifierDescription(description);
-  const images = await compareCandidateImages(
-    key,
-    model,
+  // Recognition already degrades openrouter -> gemini. Verification used to have no
+  // such path: a dead or privacy-blocked OpenRouter key meant every comparison
+  // failed while the click itself still worked — the production signature
+  // (model_http_404 + model_privacy_reroute, zero products).
+  let verifierKey = key;
+  let verifierModel = model;
+  let verifierConfigActive: VerifierOptions = { ...verifierOptions(env, useOpenRouter), pixelOnlySource: true };
+  let images = await compareCandidateImages(
+    verifierKey,
+    verifierModel,
     sourceImage,
     seen,
     rows.map((row) => row.product),
     undefined,
     budget,
-    { ...verifierOptions(env, useOpenRouter), pixelOnlySource: true },
+    verifierConfigActive,
   ).catch(() => null);
+
+  const verifierBroken = Boolean(images) && images!.compared === 0 && (
+    Boolean(images!.provider_unavailable)
+    || (images!.failure_reasons?.model_privacy_unavailable ?? 0) > 0
+    || (images!.failure_reasons?.model_privacy_reroute ?? 0) > 0
+    || (images!.failure_reasons?.model_http_404 ?? 0) > 0
+    || (images!.failure_reasons?.model_timeout ?? 0) > 0
+  );
+  if (verifierBroken && useOpenRouter && env.GEMINI_API_KEY) {
+    const fallbackKey = env.GEMINI_API_KEY;
+    const fallbackModel = env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+    const fallbackConfig: VerifierOptions = { ...verifierOptions(env, false), pixelOnlySource: true };
+    const retried = await compareCandidateImages(
+      fallbackKey, fallbackModel, sourceImage, seen, rows.map((row) => row.product), undefined, budget, fallbackConfig,
+    ).catch(() => null);
+    if (retried && retried.compared > 0) {
+      images = retried;
+      verifierKey = fallbackKey;
+      verifierModel = fallbackModel;
+      verifierConfigActive = fallbackConfig;
+      retried.failure_reasons = { ...(retried.failure_reasons ?? {}), verifier_fallback_gemini: 1 };
+    }
+  }
 
   if (!images) {
     return {
@@ -1082,14 +1132,14 @@ async function confirmSameVideoReuseWithImage(
 
     if (recoveredRows.length) {
       retryVerification = await compareCandidateImages(
-        key,
-        model,
+        verifierKey,
+        verifierModel,
         sourceImage,
         seen,
         recoveredRows.map((row) => row.product),
         undefined,
         budget,
-        { ...verifierOptions(env, useOpenRouter), pixelOnlySource: true },
+        verifierConfigActive,
       ).catch(() => null);
 
       if (retryVerification) {
@@ -1150,8 +1200,8 @@ async function confirmSameVideoReuseWithImage(
       return product ? [{ canonicalKey, product }] : [];
     });
     const round = finalists.length === order.length ? await compareCandidateImages(
-      key, model, sourceImage, seen, finalists.map(finalist => finalist.product), undefined, budget,
-      { ...verifierOptions(env, useOpenRouter), pixelOnlySource: true, headToHead: true },
+      verifierKey, verifierModel, sourceImage, seen, finalists.map(finalist => finalist.product), undefined, budget,
+      { ...verifierConfigActive, pixelOnlySource: true, headToHead: true },
     ).catch(() => null) : null;
     const roundComparisons = new Map<string, ImageComparison>();
     if (round) {
@@ -1303,8 +1353,9 @@ async function confirmCrossVideoReuseWithImage(
   });
   if (!rows.length) return { ...empty, decision: { ...noDecision, reason: 'visual_rejected' } };
 
-  const useOpenRouter = env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
-  const key = useOpenRouter ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY;
+  const openAIVision = env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(env) : null;
+  const useOpenRouter = Boolean(openAIVision);
+  const key = openAIVision?.key ?? env.GEMINI_API_KEY;
   if (!key) return empty;
   const model = useOpenRouter
     ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL)
@@ -1996,7 +2047,10 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
       type ActiveVisionProvider = OpenRouterVisionProvider | GeminiVisionProvider | GroqVisionProvider | CloudflareVisionProvider;
       type NamedVisionProvider = { name: VisionProviderName; provider: ActiveVisionProvider };
-      const openrouter = env.OPENROUTER_API_KEY ? { name: 'openrouter' as const, provider: new OpenRouterVisionProvider(env.OPENROUTER_API_KEY, env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) } : null;
+      // Recognition must use the same route as verification: a gateway deployment
+      // has no working OpenRouter key, and the gateway key is the one that answers.
+      const openAIVisionProvider = openAIVisionCredentials(env);
+      const openrouter = openAIVisionProvider ? { name: 'openrouter' as const, provider: new OpenRouterVisionProvider(openAIVisionProvider.key, openAIVisionProvider.model, openAIVisionProvider.endpoint) } : null;
       const gemini = env.GEMINI_API_KEY ? { name: 'gemini' as const, provider: new GeminiVisionProvider(env.GEMINI_API_KEY, env.GEMINI_MODEL) } : null;
       const groq38 = env.GROQ_API_KEY ? { name: 'groq-3.8' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY, 'qwen/qwen3.8-27b') } : null;
       const groq36 = env.GROQ_API_KEY ? { name: 'groq-3.6' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY, 'qwen/qwen3.6-27b') } : null;

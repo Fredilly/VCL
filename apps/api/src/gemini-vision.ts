@@ -22,6 +22,7 @@ export class VisionProviderError extends Error {
 }
 
 function classifyProviderFailure(status: number, message: string): VisionFailureReason {
+  if (status === 402) return 'QUOTA_EXHAUSTED';
   if (status === 429) return /quota|resource exhausted/i.test(message) ? 'QUOTA_EXHAUSTED' : 'RATE_LIMITED';
   if (status === 401 || status === 403) return 'PROVIDER_AUTH';
   if (status >= 500) return 'PROVIDER_5XX';
