@@ -248,6 +248,8 @@ const summary = {
 
 console.log(JSON.stringify({ summary, cases: rows }, null, 1));
 if (outPath) await writeFile(outPath, JSON.stringify({ summary, cases: rows }, null, 1));
-// No claims of good accuracy are allowed without a reviewed denominator.
-// Fail on confirmed wrong EXACТ, but do not turn missing human labels into a bogus accuracy score.
-process.exitCode = summary.wrong_exact > 0 ? 1 : 0;
+// A live CI probe must never report green when vision is unavailable or no
+// labelled comparison was actually measured. Keep infrastructure failure distinct
+// from wrong-product failures in the JSON report.
+const unmeasured = summary.reviewed === 0 || summary.provider_failures > 0;
+process.exitCode = summary.wrong_exact > 0 || summary.confirmed_wrong > 0 || unmeasured ? 1 : 0;
