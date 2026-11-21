@@ -66,9 +66,11 @@ jobs:
           } catch (e) { console.log('crop_fetch_failed', e.message); }
           if (!dataUrl) { console.log(JSON.stringify({ result: 'no crop reachable from CI' })); process.exit(0); }
           const analysed = await post('/analyze-selection', { dataUrl, timestamp: 0, context: { platform: 'youtube', content_ref: 'n9u8ynhBdSo', timestamp_ms: 0 } });
-          if (analysed.status !== 200) { console.log(JSON.stringify({ stage: 'analyze', status: analysed.status, reason: analysed.body.reason, routing: analysed.body.vision_routing })); process.exit(0); }
+          console.log(JSON.stringify({ analyze: { status: analysed.status, keys: Object.keys(analysed.body).slice(0, 14), error: analysed.body.error ?? null, routing: analysed.body.vision_routing ?? null } }));
+          if (analysed.status !== 200) { process.exit(0); }
           const description = analysed.body.description ?? (analysed.body.category ? analysed.body : null);
           const resolved = await post('/resolve-products', { description, source_image: dataUrl, context: { platform: 'youtube', content_ref: 'n9u8ynhBdSo', timestamp_ms: 0 } });
+          console.log(JSON.stringify({ resolve_error: resolved.status === 200 ? null : (resolved.body.error ?? resolved.body.reason ?? null), bytes: dataUrl.length }));
           const vm = resolved.body.verified_mapping ?? {};
           console.log(JSON.stringify({
             status: resolved.status,
