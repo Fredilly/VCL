@@ -5,6 +5,7 @@ import { clickedObjectPrompt, normalizeTargetBox, selectionTargetPrompt, type Se
 import { OCR_PROMPT, normalizeOcrEvidence, type OcrEvidence } from './ocr-evidence.js';
 
 export const DEFAULT_OPENROUTER_MODEL = 'google/gemini-2.5-flash-lite';
+export const DEFAULT_OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const PROMPT = 'Analyze only the selected object crop. Return JSON only with exactly these fields: category, subcategory, brand_candidate, model_candidate, color, material, style_attributes, visible_text, contextual_text, logos_markings, distinctive_features, hardware_details, shape_silhouette, search_terms, confidence, identity_confidence. Extract only visually supported evidence. category should be broad, but subcategory must be the most specific visible product type you can support. For apparel, do not use generic labels such as Tops when a more specific visible garment type is supported. Prefer concrete subcategories such as Sweater, Jumper, Pullover, Polo, T-shirt, Shirt, Jacket, Coat, Hoodie, Dress, Trousers, Jeans, Shorts, or Cardigan. Use cut, sleeve length, neckline, collar, knit construction, closures, silhouette, and other visible structural cues to choose the specific garment type. visible_text should contain readable words/letters/numbers actually visible on the selected product. contextual_text may contain nearby text in the same frame only when it clearly labels or identifies the selected product, such as an adjacent product name, model code, SKU, slide label, or price-card identifier. Do not copy subtitles, unrelated products, creator overlays, or generic surrounding prose into contextual_text. Keep contextual_text separate from visible_text because it is retrieval/context evidence, not a physical marking on the product. logos_markings should describe visible logos, emblems, monograms, patches, labels, or symbols without guessing a brand unless supported. distinctive_features should capture unusual graphics, patterns, construction details, placements, trims, stitching, motifs, or design elements. hardware_details should capture buckles, clasps, buttons, zippers, fasteners, crowns, bezels, soles, laces, ports, or other product-specific hardware when relevant. shape_silhouette should capture recognizable shape, cut, proportions, collar, neckline, sleeve form, knit structure, case shape, frame, toe shape, bag profile, or other structural cues. confidence is confidence that the description is commercially searchable. identity_confidence is confidence that the proposed brand/model identity is visually supported. If brand/model evidence is weak, use null and keep identity_confidence low. Do not infer a famous brand from style alone. search_terms should be 1-4 concise purchase-search queries that use the strongest visible identity evidence first.';
 
 function classify(status: number, message: string): VisionFailureReason {
@@ -39,7 +40,11 @@ function parseText(payload: any): string {
 }
 
 export class OpenRouterVisionProvider implements VisionProvider {
-  constructor(private readonly apiKey: string, private readonly model = DEFAULT_OPENROUTER_MODEL) {}
+  constructor(
+    private readonly apiKey: string,
+    private readonly model = DEFAULT_OPENROUTER_MODEL,
+    private readonly endpoint = DEFAULT_OPENROUTER_ENDPOINT,
+  ) {}
 
   async analyzeSelection(dataUrl: string, point?: SelectionPoint, detailDataUrl?: string): Promise<ObjectDescription> {
     const detailPrompt = detailDataUrl
@@ -69,7 +74,7 @@ export class OpenRouterVisionProvider implements VisionProvider {
   private async generate(prompt: string, images: string[]): Promise<{ value: unknown; usage: ProviderUsage }> {
     let response: Response;
     try {
-      response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      response = await fetch(this.endpoint, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${this.apiKey}`,

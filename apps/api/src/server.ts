@@ -2047,7 +2047,10 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
       type ActiveVisionProvider = OpenRouterVisionProvider | GeminiVisionProvider | GroqVisionProvider | CloudflareVisionProvider;
       type NamedVisionProvider = { name: VisionProviderName; provider: ActiveVisionProvider };
-      const openrouter = env.OPENROUTER_API_KEY ? { name: 'openrouter' as const, provider: new OpenRouterVisionProvider(env.OPENROUTER_API_KEY, env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) } : null;
+      // Recognition must use the same route as verification: a gateway deployment
+      // has no working OpenRouter key, and the gateway key is the one that answers.
+      const openAIVisionProvider = openAIVisionCredentials(env);
+      const openrouter = openAIVisionProvider ? { name: 'openrouter' as const, provider: new OpenRouterVisionProvider(openAIVisionProvider.key, openAIVisionProvider.model, openAIVisionProvider.endpoint) } : null;
       const gemini = env.GEMINI_API_KEY ? { name: 'gemini' as const, provider: new GeminiVisionProvider(env.GEMINI_API_KEY, env.GEMINI_MODEL) } : null;
       const groq38 = env.GROQ_API_KEY ? { name: 'groq-3.8' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY, 'qwen/qwen3.8-27b') } : null;
       const groq36 = env.GROQ_API_KEY ? { name: 'groq-3.6' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY, 'qwen/qwen3.6-27b') } : null;
