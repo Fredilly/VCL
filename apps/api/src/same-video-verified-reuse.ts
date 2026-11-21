@@ -19,6 +19,7 @@ export type SameVideoReuseReason =
   | 'visual_unavailable'
   | 'incomplete_comparison'
   | 'head_to_head_required'
+  | 'roster_exceeds_visual_budget'
   | 'no_candidate';
 
 export type SameVideoReuseDecision = {
@@ -459,7 +460,31 @@ export function verifiedProductMemoryCandidates(input: {
   return [...unique.values()];
 }
 
+/**
+ * Most roster candidates one click can compare. The platform allows 50
+ * subrequests per invocation and the resolver needs about eight for retrieval,
+ * offers and the head-to-head round. Worst case is: one image attempt per
+ * candidate, up to eight fallback attempts when a primary image is dead (32
+ * attempts total, capped in candidate-images), four model calls for 24
+ * candidates, and three redirect hops — 47, inside the limit. A larger roster
+ * cannot be covered honestly and abstains (`roster_exceeds_visual_budget`).
+ */
 export const ROSTER_VISUAL_CANDIDATE_LIMIT = 24;
+
+/**
+ * One roster row per variant of one product family (Side Trunk, Neverfull, ...).
+ * Variants of a family are siblings that genuinely compete for the same click;
+ * rows from different families almost never do. Retrieval uses this grouping to
+ * spend a bounded comparison budget on breadth first, so a cut costs siblings of
+ * a family already seen rather than an entire family nobody looked at.
+ */
+export function rosterFamilyKey(identity: CanonicalProductIdentity): string {
+  const family = normalizeIdentityText(identity.family ?? '');
+  if (family) return family;
+  const model = normalizeIdentityText(identity.model ?? '');
+  if (model) return model;
+  return distinctiveWords([identity.title]).slice(0, 3).join(' ') || normalizeIdentityText(identity.title);
+}
 
 /** Two independent retrieval views prevent a guessed model/brand from consuming
  * every slot. Scores order work only; all unexamined identities remain visible
@@ -467,6 +492,8 @@ export const ROSTER_VISUAL_CANDIDATE_LIMIT = 24;
 export function retrieveSameVideoRosterCandidates(input: {
   description: ObjectDescription;
   candidates: SameVideoCanonicalCandidate[];
+  /** Explicit budget, for tests and callers that need a smaller shortlist. */
+  limit?: number;
 }): SameVideoCanonicalCandidate[] {
   const candidates = eligibleSameVideoCanonicalCandidates(input);
   const hypotheses = rankSameVideoRosterCandidates({ ...input, candidates });
@@ -480,14 +507,66 @@ export function retrieveSameVideoRosterCandidates(input: {
     ...input.description, brand_candidate: null, model_candidate: null,
     visible_text: [], contextual_text: [], logos_markings: [], search_terms: [],
   } });
-  const selected = new Map<string, SameVideoCanonicalCandidate>();
-  for (let i = 0; i < candidates.length && selected.size < ROSTER_VISUAL_CANDIDATE_LIMIT; i++) {
+  const ordered = new Map<string, SameVideoCanonicalCandidate>();
+  for (let i = 0; i < candidates.length; i++) {
     for (const row of [hypotheses[i], observations[i], structural[i]]) {
-      if (selected.size >= ROSTER_VISUAL_CANDIDATE_LIMIT) break;
-      if (row) selected.set(row.identity.canonical_key, row);
+      if (row && !ordered.has(row.identity.canonical_key)) ordered.set(row.identity.canonical_key, row);
     }
   }
-  return [...selected.values()];
+  if (ordered.size <= (input.limit ?? ROSTER_VISUAL_CANDIDATE_LIMIT)) return [...ordered.values()];
+
+  // Family round-robin: each family's best candidate is taken before any family
+  // contributes a second. Order is deterministic for a given rank order.
+  const byFamily = new Map<string, SameVideoCanonicalCandidate[]>();
+  for (const row of ordered.values()) {
+    const key = rosterFamilyKey(row.identity);
+    const bucket = byFamily.get(key);
+    if (bucket) bucket.push(row); else byFamily.set(key, [row]);
+  }
+  const limit = Math.max(0, input.limit ?? ROSTER_VISUAL_CANDIDATE_LIMIT);
+  const selected: SameVideoCanonicalCandidate[] = [];
+  for (let round = 0; selected.length < limit; round++) {
+    let added = false;
+    for (const bucket of byFamily.values()) {
+      const row = bucket[round];
+      if (!row) continue;
+      selected.push(row);
+      added = true;
+      if (selected.length >= limit) break;
+    }
+    if (!added) break;
+  }
+  return selected;
+}
+
+/**
+ * How far below the best family a family may score and still be compared in
+ * full. The family round exists to fit a click inside a bounded number of
+ * subrequests, not to decide identity: the band is wide, and a family whose
+ * representative could not be compared always advances.
+ */
+export const ROSTER_FAMILY_ADVANCE_MARGIN = 0.2;
+
+/** Families still in play after the family round. Empty only when no family
+ * comparison succeeded, which the caller treats as "compare everything". */
+export function advancingRosterFamilies(input: {
+  candidates: SameVideoCanonicalCandidate[];
+  comparisons: Map<string, ImageComparison>;
+  margin?: number;
+}): string[] {
+  const scores = new Map<string, number>();
+  const unexamined = new Set<string>();
+  for (const { identity } of input.candidates) {
+    const family = rosterFamilyKey(identity);
+    const comparison = input.comparisons.get(identity.canonical_key);
+    if (!comparison || !Number.isFinite(comparison.similarity)) { unexamined.add(family); continue; }
+    scores.set(family, Math.max(scores.get(family) ?? 0, comparison.similarity));
+  }
+  if (!scores.size) return [];
+  const best = Math.max(...scores.values());
+  const margin = input.margin ?? ROSTER_FAMILY_ADVANCE_MARGIN;
+  const advancing = [...scores].filter(([, score]) => score >= best - margin).map(([family]) => family);
+  return [...new Set([...advancing, ...unexamined])];
 }
 
 /** Missing comparison is uncertainty, not a negative. Only consistent, strong
@@ -544,15 +623,42 @@ export const PROBABLE_ROSTER_LIMIT = 3;
 export function probableRosterCandidates(input: {
   candidates: SameVideoCanonicalCandidate[];
   comparisons: Map<string, ImageComparison>;
+  /** What the crop itself showed. A matching detail that shares nothing with it
+   * is the model's own guess, not evidence about this object. */
+  description?: ObjectDescription;
 }): Array<{ candidate: SameVideoCanonicalCandidate; similarity: number; confidence: number }> {
+  // The vocabulary the click itself supports. Title overlap is deliberately
+  // absent: a shared word in a listing title neither qualifies a candidate nor
+  // disqualifies one. What counts is a visual detail the comparison claims AND
+  // the crop can corroborate.
+  const source = input.description ? new Set(distinctiveWords([
+    input.description.subcategory,
+    input.description.brand_candidate,
+    input.description.model_candidate,
+    input.description.color,
+    input.description.material,
+    input.description.shape_silhouette,
+    input.description.hardware_details,
+    input.description.logos_markings,
+    ...(input.description.distinctive_features ?? []),
+    ...(input.description.visible_text ?? []),
+    ...(input.description.style_attributes ?? []),
+  ].flatMap((value) => Array.isArray(value) ? value : [value]))) : null;
   return input.candidates.flatMap((candidate) => {
     const comparison = input.comparisons.get(candidate.identity.canonical_key);
     if (!validComparison(comparison)) return [];
     if (comparison.similarity < PROBABLE_ROSTER_SIMILARITY || comparison.confidence < PROBABLE_ROSTER_CONFIDENCE) return [];
-    if (!(comparison.matching_details ?? []).some(detail => distinctiveWords([detail]).length >= 2)) return [];
+    const details = (comparison.matching_details ?? []).filter((detail) => distinctiveWords([detail]).length >= 2);
+    if (!details.length) return [];
+    // Corroboration is a ranking signal, not a gate: the crop description does
+    // not enumerate every visible part, so requiring a shared word rejected
+    // honest matches ('rolled handles and front padlock' against a description
+    // that never mentioned a padlock). A detail that shares the crop's evidence is
+    // preferred below, and title overlap is never consulted.
+    const corroborated = Boolean(source && details.some((detail) => distinctiveWords([detail]).some((word) => source!.has(word))));
     if (criticalContradictionKey(comparison)) return [];
-    return [{ candidate, similarity: comparison.similarity, confidence: comparison.confidence }];
-  }).sort((a, b) => b.similarity - a.similarity || b.confidence - a.confidence
+    return [{ candidate, similarity: comparison.similarity, confidence: comparison.confidence, corroborated }];
+  }).sort((a, b) => Number(b.corroborated) - Number(a.corroborated) || b.similarity - a.similarity || b.confidence - a.confidence
     || a.candidate.identity.canonical_key.localeCompare(b.candidate.identity.canonical_key))
     .slice(0, PROBABLE_ROSTER_LIMIT);
 }

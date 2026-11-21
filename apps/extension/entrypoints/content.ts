@@ -211,6 +211,9 @@ type CommerceResponse = {
   timing?: { provider_retrieval_ms?: number; candidate_verification_ms?: number; total_ms?: number };
   verified_mapping?: {
     hit: boolean;
+    /** True when the server narrowed the roster by family, so identity is useful
+     * but not Exact: never badge it. */
+    narrowed?: boolean;
     provenance?: string;
     product_id?: string;
     canonical_key?: string;
@@ -835,7 +838,11 @@ async function showAnalysis(result: Extract<FrameCaptureResult, { ok: true }>, s
     stopSearchingQuips();
     panelTitle.textContent = 'Scoop results';
 
-    const verifiedProduct = commerce.verified_mapping?.hit
+    // A narrowed roster compares family representatives, not every variant, so
+    // its hit is not an Exact. Belt and braces with the server's hit:false: if
+    // either says narrowed, the Exact badge is unreachable.
+    const narrowedRoster = commerce.verified_mapping?.narrowed === true;
+    const verifiedProduct = commerce.verified_mapping?.hit && !narrowedRoster
       ? commerce.products.find((product) => product.result_class === 'EXACT') ?? commerce.products[0]
       : null;
     if (verifiedProduct) {

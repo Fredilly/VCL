@@ -1,15 +1,56 @@
 import type { ProductCandidate, ProductContext } from './commerce.js';
 import type { ObjectDescription } from './types.js';
+import type { SubrequestLedger } from './subrequest-ledger.js';
 import { attributes, canonical, type Evidence, type ImageComparison } from './verification-evidence.js';
 
 export type CatalogImage = { mimeType: string; data: string };
 type Image = CatalogImage;
 // Shared across query broadening. Leave eight subrequests for retrieval/OAuth on Workers Free.
-export type ImageRequestBudget = { remaining: number };
-export const imageRequestBudget = (): ImageRequestBudget => ({ remaining: 42 });
+/**
+ * Per-invocation request accounting. `remaining` counts image fetches and model
+ * calls; `redirects` counts hops separately, because a per-image redirect
+ * allowance multiplied the worst case by three and pushed a 32-row roster past
+ * the Workers Free subrequest limit. Bounding hops per invocation keeps the real
+ * worst case at `candidates + redirects + calls`, which is what the platform
+ * actually charges for.
+ */
+export type RedirectAllowance = { remaining: number };
+export type ImageRequestBudget = {
+  remaining: number;
+  redirects?: RedirectAllowance;
+  fetches?: RedirectAllowance;
+  /** Invocation-wide ledger: the real platform bound this pool only approximates. */
+  ledger?: SubrequestLedger;
+  /**
+   * The worker's own origin, when it is a loopback address in local dev or CI.
+   * Reference images are served from /product-reference/ on that origin, which
+   * safeImageUrl refuses by design (https, public hostnames only). Only that exact
+   * path on that exact host is let through, so nothing arbitrary is reachable.
+   */
+  localReferenceHost?: string;
+};
+export const MAX_IMAGE_REDIRECTS_PER_INVOCATION = 3;
+/**
+ * Hard ceiling on image fetch attempts per invocation, shared across every batch,
+ * fallback URL, retry and head-to-head round. Fallback URLs make the cost of a
+ * candidate variable, so the roster count alone cannot bound the subrequests the
+ * platform charges for.
+ */
+export const MAX_IMAGE_FETCHES_PER_INVOCATION = 32;
+export const imageRequestBudget = (): ImageRequestBudget => ({
+  remaining: 42,
+  redirects: { remaining: MAX_IMAGE_REDIRECTS_PER_INVOCATION },
+  fetches: { remaining: MAX_IMAGE_FETCHES_PER_INVOCATION },
+});
 function reserve(budget: ImageRequestBudget): boolean {
   if (budget.remaining <= 0) return false;
   budget.remaining--; return true;
+}
+function reserveRedirect(budget: ImageRequestBudget): boolean {
+  // Shared by reference across batches: the allowance is per invocation.
+  if (!budget.redirects) return true;
+  if (budget.redirects.remaining <= 0) return false;
+  budget.redirects.remaining--; return true;
 }
 export type GeminiVerificationUsage = {
   provider: 'gemini' | 'openrouter';
@@ -65,8 +106,23 @@ export function safeImageUrl(value: string): boolean {
   } catch { return false; }
 }
 
+function isLocalReference(url: string, budget: ImageRequestBudget): boolean {
+  if (!budget.localReferenceHost) return false;
+  try {
+    const parsed = new URL(url);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+      && parsed.host === budget.localReferenceHost
+      && parsed.pathname.startsWith('/product-reference/');
+  } catch { return false; }
+}
+
 async function fetchImage(url: string, failure: (reason: string) => void, budget: ImageRequestBudget): Promise<Image | null> {
-  if (!safeImageUrl(url)) { failure('image_url'); return null; }
+  if (!safeImageUrl(url) && !isLocalReference(url, budget)) { failure('image_url'); return null; }
+  if (budget.ledger && !budget.ledger.reserve('image')) { failure('subrequest_budget'); return null; }
+  if (budget.fetches) {
+    if (budget.fetches.remaining <= 0) { failure('image_budget'); return null; }
+    budget.fetches.remaining--;
+  }
   if (!reserve(budget)) { failure('image_budget'); return null; }
   try {
     // Handle redirects explicitly: different fetch runtimes/CDNs differ on redirect:error.
@@ -78,7 +134,9 @@ async function fetchImage(url: string, failure: (reason: string) => void, budget
       if (!location) { failure('image_redirect'); return null; }
       url = new URL(location, url).href;
       if (!safeImageUrl(url)) { failure('image_redirect'); return null; }
-      if (!reserve(budget)) { failure('image_budget'); return null; }
+      // Each hop is its own outbound request.
+      if (budget.ledger && !budget.ledger.reserve('redirect')) { failure('subrequest_budget'); return null; }
+      if (!reserveRedirect(budget)) { failure('image_redirect_budget'); return null; }
       response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(6000) });
     }
     const mimeType = response.headers.get('content-type')?.split(';')[0].trim() ?? '';
@@ -129,11 +187,13 @@ function blockedImageHost(url: string): boolean {
   } catch { return false; }
 }
 
-export function candidateImageUrls(product: ProductCandidate): string[] {
+export function candidateImageUrls(product: ProductCandidate, budget?: ImageRequestBudget): string[] {
+  const fetchable = (url: string | null | undefined): url is string =>
+    Boolean(url && (safeImageUrl(url) || (budget ? isLocalReference(url, budget) : false)));
   const urls = [...new Set([
     product.image_reference,
     ...(product.image_references ?? []),
-  ].filter((url): url is string => Boolean(url && safeImageUrl(url))))];
+  ].filter(fetchable))];
   // Stable partition: fetchable hosts keep their relative order, blocked hosts
   // move to the end. No URL is ever dropped.
   return [...urls.filter((url) => !blockedImageHost(url)), ...urls.filter(blockedImageHost)];
@@ -144,7 +204,7 @@ async function fetchCandidateImage(
   failure: (reason: string) => void,
   budget: ImageRequestBudget,
 ): Promise<Image | null> {
-  const urls = candidateImageUrls(product);
+  const urls = candidateImageUrls(product, budget);
   if (!urls.length) {
     failure('image_missing');
     return null;
@@ -333,6 +393,12 @@ function usageNumber(value: unknown): number {
 
 export type VerifierOptions = {
   provider?: 'gemini' | 'openrouter';
+  /** OpenAI-compatible chat-completions endpoint for the openrouter provider. */
+  endpoint?: string;
+  /** Vision model used when the primary model has no endpoint under the privacy policy. */
+  privacyFallbackModel?: string;
+  /** Total model time one interaction may spend before remaining batches fail fast. */
+  timeBudgetMs?: number;
   /** Verifier batches in flight at once. Bounded so a burst cannot trip provider rate limits. */
   concurrency?: number;
   /** Minimum gap between model calls, measured across concurrent batches. */
@@ -356,12 +422,6 @@ export type VerifierOptions = {
   pixelOnlySource?: boolean;
   /** With pixelOnlySource on OpenRouter: false keeps plain JSON mode (for comparison runs). */
   structuredOutput?: boolean;
-  /** Vision model used when the primary model has no endpoint under the privacy policy. */
-  privacyFallbackModel?: string;
-  /** Total model time one interaction may spend before remaining batches fail fast. */
-  timeBudgetMs?: number;
-  /** OpenAI-compatible chat-completions endpoint; defaults to OpenRouter's. */
-  endpoint?: string;
 };
 
 const HEAD_TO_HEAD_SUFFIX = ` The numbered candidates are close alternatives from one product list, and at most one of them is the selected object. Judge each on its own against the crop. Look for what separates them: size and proportions, colour, pattern, material, hardware, handles and straps, closures. Give high similarity only to a candidate whose distinguishing details are actually visible in the crop; when the crop cannot tell two candidates apart, give both the same moderate similarity and low confidence.`;
@@ -376,7 +436,7 @@ export async function compareCandidateImages(
   const failure_reasons: Record<string, number> = {};
   const verificationProvider = options.provider ?? 'gemini';
   const providerEndpoint = options.endpoint ?? 'https://openrouter.ai/api/v1/chat/completions';
-  const isDefaultRouter = providerEndpoint === 'https://openrouter.ai/api/v1/chat/completions';
+  const isDefaultOpenRouter = providerEndpoint === 'https://openrouter.ai/api/v1/chat/completions';
   const concurrency = Math.max(1, Math.min(4, Math.trunc(options.concurrency ?? 2) || 2));
   const pacingMs = Math.max(0, Math.min(5000, options.pacingMs ?? 0));
   const maxAttempts = Math.max(1, Math.min(3, Math.trunc(options.maxAttempts ?? 2) || 2));
@@ -388,10 +448,12 @@ export async function compareCandidateImages(
   // OpenRouter may have no endpoint for the configured model under the required
   // zero-retention policy. Give one other vision-capable ZDR-routed model a
   // chance, without ever relaxing the request's privacy restrictions.
-  // The privacy fallback must be a model the SAME provider actually serves.
-  // qwen/qwen3.8-27b is a Cloudflare/Groq id: OpenRouter answers 404 for it, so
-  // the reroute could never succeed and then poisoned the rest of the click.
-  const privacyFallbackModel = options.privacyFallbackModel ?? 'qwen/qwen2.5-vl-72b-instruct';
+  // The privacy fallback must be a model the SAME provider actually serves. The
+  // previous value, qwen/qwen3.8-27b, is a Cloudflare/Groq id: OpenRouter answers
+  // 404 for it, so the reroute could never succeed.
+  const privacyFallbackModel = options.privacyFallbackModel
+    ?? (globalThis as { __VCL_PRIVACY_FALLBACK_MODEL__?: string }).__VCL_PRIVACY_FALLBACK_MODEL__
+    ?? 'qwen/qwen2.5-vl-72b-instruct';
   let activeModel = model;
   // Pacing is shared across concurrent batches so the aggregate call rate is
   // bounded, not just each batch's. Retries go through the same gate.
@@ -419,11 +481,12 @@ export async function compareCandidateImages(
   // rate-limit response survives bounded recovery. Comparisons stay unknown;
   // no provider failure can promote a candidate.
   let providerUnavailableReason: string | null = null;
-  // A 404 under the privacy policy means "no endpoint satisfies it", a property of
-  // the request rather than a provider outage. Once established it holds for the
-  // click: further batches must fail fast instead of spending a timeout each.
+  // A 404 under the privacy policy means "no endpoint satisfies it", which is a
+  // property of the request, not an outage. Once established it holds for the
+  // whole click: further batches must fail fast instead of spending a timeout each.
   let privacyUnavailable = false;
-  // A click that spends minutes in the verifier is a failure even when it answers.
+  // A click that spends minutes in the verifier is a user-visible failure even when
+  // it eventually answers. Bound the total model time, not just each call.
   const timeBudgetMs = Math.max(5000, Math.min(180000, Math.trunc(options.timeBudgetMs ?? 60000) || 60000));
   const modelTimeStarted = Date.now();
   let timeBudgetSpent = false;
@@ -434,8 +497,13 @@ export async function compareCandidateImages(
   // returns unused budget it goes back to the shared pool for later batches, but
   // the reservation order is fixed so concurrent scheduling cannot change which
   // candidates get multimodal verification.
-  const batchBudgets: ImageRequestBudget[] = batches.map(() => ({ remaining: 0 }));
-  const imageCounts = batches.map((batch) => batch.reduce((sum, product) => sum + Math.max(1, candidateImageUrls(product).length), 0));
+  const batchBudgets: ImageRequestBudget[] = batches.map(() => ({
+    remaining: 0, redirects: budget.redirects, fetches: budget.fetches, ledger: budget.ledger,
+    // Without this each batch would reject the very reference images the caller
+    // allowed, and every representative would fail with image_url.
+    localReferenceHost: budget.localReferenceHost,
+  }));
+  const imageCounts = batches.map((batch) => batch.reduce((sum, product) => sum + Math.max(1, candidateImageUrls(product, budget).length), 0));
 
   // First reserve the minimum useful work in deterministic batch order:
   // one model slot plus one initial fetch slot per candidate image. Count only
@@ -453,6 +521,11 @@ export async function compareCandidateImages(
   // most two redirects, so each image can need two additional fetch slots.
   // Allocating this only after every batch gets its base share preserves
   // deterministic candidate priority without starving later batches.
+  //
+  // This is deliberate over-reservation of the application counter: when an
+  // invocation-wide redirect allowance is present, hops are charged to that
+  // allowance instead, so the real worst-case subrequest count is
+  // `images + allowance + model calls`, not three slots per image.
   for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
     if (batchBudgets[batchIndex].remaining <= 0) continue;
     for (let i = 0; i < imageCounts[batchIndex] * 2; i++) {
@@ -481,11 +554,11 @@ export async function compareCandidateImages(
       timing.batches.push(batchTiming);
       return;
     }
-    // This batch was pre-reserved before an earlier concurrent batch hit a hard
-    // provider failure. Return its unused reservations and mark the candidates
-    // unknown without fetching images or calling the provider again.
+    // The click has already spent its model-time allowance; further batches would
+    // only add latency to a failure the user has not asked to wait for.
     if (!timeBudgetSpent && Date.now() - modelTimeStarted > timeBudgetMs) {
       timeBudgetSpent = true;
+      failure('model_time_budget');
     }
     if (timeBudgetSpent) {
       failures += batch.length;
@@ -505,6 +578,9 @@ export async function compareCandidateImages(
       timing.batches.push(batchTiming);
       return;
     }
+    // This batch was pre-reserved before an earlier concurrent batch hit a hard
+    // provider failure. Return its unused reservations and mark the candidates
+    // unknown without fetching images or calling the provider again.
     if (providerUnavailableReason) {
       failures += batch.length;
       failure('model_provider_unavailable', batch.length);
@@ -562,9 +638,10 @@ export async function compareCandidateImages(
                       ? { type: 'text', text: part.text }
                       : { type: 'image_url', image_url: { url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` } }) },
                   ],
-                  // Routing fields only OpenRouter understands; another
-                  // OpenAI-compatible gateway can reject them outright.
-                  ...(isDefaultRouter ? { provider: { data_collection: 'deny', zdr: true } } : {}),
+                  // Match recognition's no-training / zero-retention routing for every
+                  // verifier attempt. These are OpenRouter routing fields; sending them
+                  // to another OpenAI-compatible gateway can be rejected outright.
+                  ...(isDefaultOpenRouter ? { provider: { data_collection: 'deny', zdr: true } } : {}),
                   response_format: structured
                     ? { type: 'json_schema', json_schema: { name: 'candidate_comparison', strict: true, schema: VERIFIER_JSON_SCHEMA } }
                     : { type: 'json_object' },
@@ -622,6 +699,9 @@ export async function compareCandidateImages(
             if (!reserve(batchBudget)) { reason = 'image_budget'; break; }
             if (delayMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
           }
+          // Every model attempt is a platform subrequest, including retries and
+          // the privacy reroute below.
+          if (budget.ledger && !budget.ledger.reserve('model')) { reason = 'subrequest_budget'; break; }
           await pace();
           let result: { ok: boolean; status: number; text: string; retryAfterMs: number | null; structured?: boolean };
           try {
@@ -642,7 +722,7 @@ export async function compareCandidateImages(
           }
           if (!result.ok) {
             reason = `model_http_${result.status}`;
-            if (result.status === 404 && verificationProvider === 'openrouter' && isDefaultRouter
+            if (result.status === 404 && verificationProvider === 'openrouter'
               && activeModel !== privacyFallbackModel && !privacyUnavailable) {
               // 404 may mean that none of this model's endpoints satisfy ZDR.
               // Reserve the extra model call; fail closed if there is no budget.
@@ -654,18 +734,19 @@ export async function compareCandidateImages(
               attempt--; // this is routing recovery, not a malformed response retry
               continue;
             }
-            if (result.status === 404 && verificationProvider === 'openrouter' && isDefaultRouter) {
-              // The fallback model is unavailable under the same policy: stop
-              // routing for this click and say so, without blaming availability.
+            if (result.status === 404 && verificationProvider === 'openrouter') {
+              // The fallback model itself is unavailable under the same policy:
+              // stop routing for this click and say so, without blaming the
+              // provider's availability.
               privacyUnavailable = true;
               failure('model_privacy_unavailable');
-              reason = '';
+              reason = ''; // already reported precisely; do not also record model_http_404
               break;
             }
             if (![429, 500, 502, 503, 504].includes(result.status)) {
               // Auth failures never heal by retrying, and later batches must not
               // spend their own calls discovering the same thing.
-              if ([401, 403].includes(result.status) || (result.status === 404 && !isDefaultRouter)) providerUnavailableReason = reason;
+              if ([401, 403].includes(result.status)) providerUnavailableReason = reason;
               break;
             }
             // A hard rate limit that survives recovery means the provider is

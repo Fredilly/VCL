@@ -212,13 +212,12 @@ test('single-SKU imported roster cannot bypass pixels or turn an outside item in
   assert.equal(comparisons, 1, 'the roster goes through the independent verifier');
 });
 
-test('HTTP resolver compares at most 24 of 73 same-family variants and exposes unresolved coverage', async () => {
+test('HTTP resolver abstains with a named budget reason instead of silently comparing 24 of 73', async () => {
   const { env } = environment();
   const rows = await learning.preparePartnerRoster(env, 'https://api.scoop.shop', input(
     Array.from({ length: 73 }, (_, i) => offer('Orbit', `SKU-${i}`))), deps);
   await learning.ingestPartnerRoster(env, rows);
   env.GEMINI_API_KEY = 'test-only'; env.BRAVE_SEARCH_API_KEY = 'test-only';
-  const title = reuse.retrieveSameVideoRosterCandidates({ description, candidates: rows })[0].identity.title;
   let verified = 0, modelCalls = 0, server;
   server = loadModule(new URL('../src/server.ts', import.meta.url).pathname, { console: { error() {}, warn() {} },
     fetch: async (url, options) => {
@@ -234,7 +233,7 @@ test('HTTP resolver compares at most 24 of 73 same-family variants and exposes u
         verified += products.length;
         return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: visual(.98).source,
           candidates: products.map(row => ({ index: row.index, attributes: visual(.98).candidate, confidence: .98,
-            similarity: row.title === title ? .98 : .4, matching_details: ['matching panel and clasp construction'] })) }) }] } }] });
+            similarity: .4, matching_details: ['matching panel and clasp construction'] })) }) }] } }] });
       }
       throw Error(`Unexpected fetch ${host}`);
     } });
@@ -244,14 +243,149 @@ test('HTTP resolver compares at most 24 of 73 same-family variants and exposes u
   }), env);
   const result = await response.json();
   assert.equal(response.status, 200, JSON.stringify(result));
-  assert.equal(verified, 24);
-  assert.equal(modelCalls, 4);
+  // A roster over the per-click comparison ceiling cannot be covered, so the
+  // resolver says so once and spends nothing: no silent 24-of-73 shortlist.
+  assert.equal(modelCalls, 0, 'no verifier spend on a roster that cannot be covered');
+  assert.equal(verified, 0);
   assert.equal(result.verified_mapping.hit, false);
-  assert.equal(result.verified_mapping.same_video_reason, 'incomplete_comparison');
+  assert.equal(result.verified_mapping.same_video_reason, 'roster_exceeds_visual_budget');
   assert.equal(result.verified_mapping.roster_retrieval.roster_count, 73);
-  assert.equal(result.verified_mapping.roster_retrieval.retrieved_keys.length, 24);
-  assert.equal(result.verified_mapping.roster_retrieval.unresolved_keys.length, 49);
+  assert.equal(result.verified_mapping.roster_retrieval.retrieved_keys.length, reuse.ROSTER_VISUAL_CANDIDATE_LIMIT);
+  assert.equal(result.verified_mapping.roster_retrieval.truncated, true);
   assert.ok(!result.products.some(row => row.result_class === 'EXACT'));
+});
+
+test('an unusable roster keeps its own reason even when commerce is unconfigured', async () => {
+  const { env } = environment();
+  const rows = await learning.preparePartnerRoster(env, 'https://api.scoop.shop', input(
+    Array.from({ length: reuse.ROSTER_VISUAL_CANDIDATE_LIMIT + 1 }, (_, i) => offer('Orbit', `SKU-${i}`))), deps);
+  await learning.ingestPartnerRoster(env, rows);
+  env.GEMINI_API_KEY = 'test-only';
+  // No commerce provider is configured: the shopping layer is unavailable.
+  let server;
+  server = loadModule(new URL('../src/server.ts', import.meta.url).pathname, { console: { error() {}, warn() {} },
+    fetch: async (url, options) => {
+      const host = new URL(String(url)).hostname;
+      if (host === 'api.scoop.shop') return server.default.fetch(new Request(url, options), env);
+      throw Error(`Unexpected fetch ${host}`);
+    } });
+  const response = await server.default.fetch(new Request('https://api.scoop.shop/resolve-products', { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, source_image: `data:${crop.mimeType};base64,${crop.data}`,
+      context: { platform: 'youtube', content_ref: 'video-A', timestamp_ms: 9000 } }),
+  }), env);
+  const result = await response.json();
+  assert.equal(response.status, 503);
+  assert.equal(result.reason, 'NO_CONFIGURED_PROVIDER');
+  // The shopping layer being down must not hide why identification abstained.
+  assert.equal(result.identification_reason, 'roster_exceeds_visual_budget');
+  assert.equal(result.roster_retrieval.truncated, true);
+  assert.equal(result.roster_retrieval.roster_count, reuse.ROSTER_VISUAL_CANDIDATE_LIMIT + 1);
+});
+
+test('HTTP resolver compares every variant of a roster at the ceiling before deciding', async () => {
+  const { env } = environment();
+  const rosterSize = reuse.ROSTER_VISUAL_CANDIDATE_LIMIT;
+  const rows = await learning.preparePartnerRoster(env, 'https://api.scoop.shop', input(
+    Array.from({ length: rosterSize }, (_, i) => offer('Orbit', `SKU-${i}`))), deps);
+  await learning.ingestPartnerRoster(env, rows);
+  env.GEMINI_API_KEY = 'test-only'; env.BRAVE_SEARCH_API_KEY = 'test-only';
+  let verified = 0, server;
+  server = loadModule(new URL('../src/server.ts', import.meta.url).pathname, { console: { error() {}, warn() {} },
+    fetch: async (url, options) => {
+      const host = new URL(String(url)).hostname;
+      if (host === 'api.scoop.shop') return server.default.fetch(new Request(url, options), env);
+      if (host === 'api.search.brave.com') return Response.json({ web: { results: [] } });
+      if (host === 'generativelanguage.googleapis.com') {
+        const request = JSON.parse(options.body);
+        const products = request.contents[0].parts.flatMap(part => {
+          try { const value = JSON.parse(part.text); return typeof value.index === 'number' ? [value] : []; } catch { return []; }
+        });
+        verified += products.length;
+        return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: visual(.98).source,
+          candidates: products.map(row => ({ index: row.index, attributes: visual(.98).candidate, confidence: .98,
+            similarity: .4, matching_details: ['matching panel and clasp construction'] })) }) }] } }] });
+      }
+      throw Error(`Unexpected fetch ${host}`);
+    } });
+  const response = await server.default.fetch(new Request('https://api.scoop.shop/resolve-products', { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, source_image: `data:${crop.mimeType};base64,${crop.data}`,
+      context: { platform: 'youtube', content_ref: 'video-A', timestamp_ms: 9000 } }),
+  }), env);
+  const result = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(result));
+  assert.notEqual(result.verified_mapping.same_video_reason, 'roster_exceeds_visual_budget');
+  assert.equal(result.verified_mapping.roster_retrieval.roster_count, rosterSize);
+  assert.equal(result.verified_mapping.roster_retrieval.truncated, undefined);
+  assert.equal(verified, rosterSize, 'every roster row is compared, not a shortlist');
+  assert.ok(!result.products.some(row => row.result_class === 'EXACT'));
+});
+
+test('a 41-row roster across ten families resolves through the family round and stays inside the subrequest budget', async () => {
+  const { env } = environment();
+  const rows = await learning.preparePartnerRoster(env, 'https://api.scoop.shop', input(
+    Array.from({ length: 41 }, (_, i) => offer(`Family${i % 10}`, `SKU-${i}`))), deps);
+  await learning.ingestPartnerRoster(env, rows);
+  Object.assign(env, { GEMINI_API_KEY: 'test-only', BRAVE_SEARCH_API_KEY: 'test-only', BENCHMARK_MODE: 'true' });
+  let verified = 0, imageFetches = 0, server;
+  server = loadModule(new URL('../src/server.ts', import.meta.url).pathname, { console: { error() {}, warn() {} },
+    fetch: async (url, options) => {
+      const host = new URL(String(url)).hostname;
+      if (host === 'api.scoop.shop') return server.default.fetch(new Request(url, options), env);
+      if (host === 'api.search.brave.com') return Response.json({ web: { results: [] } });
+      if (host !== 'generativelanguage.googleapis.com') {
+        imageFetches++;
+        return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+      }
+      {
+        const request = JSON.parse(options.body);
+        const products = request.contents[0].parts.flatMap(part => {
+          try { const value = JSON.parse(part.text); return typeof value.index === 'number' ? [value] : []; } catch { return []; }
+        });
+        verified += products.length;
+        // A batch spanning several families is the family round; a batch of one
+        // family is the variant round (batches hold six candidates).
+        const familyRound = new Set(products.map(p => (/Family\d+/.exec(p.title) ?? [''])[0])).size > 1;
+        const score = title => familyRound
+          ? (/(^|\s)Family3\b/.test(title) ? .9 : .05)
+          : (/(^|\s)SKU-3(\s|$)/.test(title) ? .97 : .4);
+        return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ source: visual(.98).source,
+          candidates: products.map(row => ({ index: row.index, attributes: visual(.98).candidate, confidence: .98,
+            similarity: score(row.title), matching_details: ['distinctive panel stitching and clasp construction'] })) }) }] } }] });
+      }
+      throw Error(`Unexpected fetch ${host}`);
+    } });
+  const response = await server.default.fetch(new Request('https://api.scoop.shop/resolve-products', { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description, source_image: `data:${crop.mimeType};base64,${crop.data}`,
+      context: { platform: 'youtube', content_ref: 'video-A', timestamp_ms: 9000 } }),
+  }), env);
+  const result = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(result).slice(0, 400));
+  console.error('DEBUG VM41', JSON.stringify({ keys: Object.keys(result.verified_mapping ?? {}), roster: result.verified_mapping?.roster_retrieval?.roster_count, reason: result.verified_mapping?.same_video_reason }));
+  const retrieval = result.verified_mapping.roster_retrieval;
+  assert.equal(retrieval.roster_count, 41);
+  assert.equal(retrieval.family_stage.families, 10);
+  assert.equal(retrieval.family_stage.advancing.join(','), 'family3');
+  // A narrowed roster never claims a verified hit; the extension badges an Exact
+  // match from that flag.
+  assert.equal(result.verified_mapping.hit, false);
+  assert.equal(result.verified_mapping.narrowed, true);
+  // The family round narrowed this roster, so the identity is useful but never
+  // presented as Exact: not every variant of the roster was compared.
+  const exact = result.products.filter(row => row.result_class === 'EXACT');
+  assert.equal(exact.length, 0, 'a narrowed roster must not return Exact');
+  const best = result.products[0];
+  assert.equal(best.title ?? best.model, 'Louis Vuitton Family3 brown SKU-3', 'the clicked variant wins, not a lookalike');
+  assert.equal(best.result_class, 'SIMILAR');
+  assert.ok((best.verification_reasons ?? []).some(reason => /family round narrowed/i.test(reason)));
+  // Two representatives per family (twenty), four variants of the clicked
+  // family, one four-way head-to-head: 28 comparisons instead of 41, and the
+  // click is answered instead of abstaining on coverage.
+  assert.equal(verified, 28);
+  // The ledger reports what the platform would actually be charged.
+  const subrequests = result.verified_mapping.subrequests;
+  console.error('MEASURED', JSON.stringify({ subrequests, compared: result.verified_mapping.candidates_compared, verified, stage: retrieval.family_stage }));
+  assert.ok(subrequests.total <= subrequests.limit, JSON.stringify(subrequests));
+  assert.ok(subrequests.total < 44, JSON.stringify(subrequests));
 });
 
 test('SKU and retail URL can recover an unavailable product reference automatically', async () => {
