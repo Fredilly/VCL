@@ -1,0 +1,142 @@
+name: roster-live-probe
+
+# Live measurement of the matching harness against a real partner roster.
+#
+# The roster is supplied as a repository secret, never committed: this repository
+# is public, and so are its Actions logs and artifacts.
+#
+# Triggers:
+#   - a pull request labelled `run-live-roster` (works pre-merge, same-repo PR)
+#   - manual dispatch once this file is on the default branch
+#
+# It spends real provider credit: one vision call and one resolver call per probe.
+
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      probe_limit:
+        description: 'How many variants to probe (one per family first)'
+        required: false
+        default: '6'
+
+concurrency:
+  group: scoop-live-vision-validation
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: (github.event_name == 'pull_request' && github.event.label.name == 'run-live-roster') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # The OpenRouter secret currently answers 401; the AI gateway key answers
+      # 200 for the same model, and this provider speaks the same API.
+      OPENROUTER_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+      OPENROUTER_BASE_URL: https://ai-gateway.vercel.sh/v1/chat/completions
+      VISION_PROVIDER: openrouter
+      BRAVE_ENABLED: 'false'
+      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+      VERCEL_AI_GATEWAY_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Deterministic regression suite
+        run: pnpm test
+
+      - name: Check provider credentials are present
+        run: |
+          set -euo pipefail
+          test -n "${OPENROUTER_API_KEY:-}" || { echo 'no vision key is available to this run'; exit 1; }
+          echo 'Provider credentials present'
+
+      # No paid provider pings: the real clicks below test gateway reachability.
+      # Never print provider response bodies or send gateway keys to OpenRouter.
+
+      - name: Write the partner roster from the secret
+        run: |
+          set -euo pipefail
+          printf '%s' "$PARTNER_ROSTER_LIST" > "$RUNNER_TEMP/partner-roster.md"
+          echo "roster bytes: $(wc -c < "$RUNNER_TEMP/partner-roster.md")"
+        env:
+          PARTNER_ROSTER_LIST: ${{ secrets.PARTNER_ROSTER_LIST }}
+
+      - name: Live intake
+        run: |
+          set -euo pipefail
+          pnpm --filter @vcl/api build
+          node tools/roster-intake.mjs "$RUNNER_TEMP/partner-roster.md" --local --evaluation-roster --out "$RUNNER_TEMP/intake"
+          node - "$RUNNER_TEMP/intake/report.json" <<'JS'
+          const report = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
+          const tally = key => report.items.reduce((acc, row) => {
+            acc[row[key] ?? 'unknown'] = (acc[row[key] ?? 'unknown'] ?? 0) + 1;
+            return acc;
+          }, {});
+          console.log(JSON.stringify({
+            variants: report.items.length,
+            status_counts: tally('status'),
+            image_ready: report.items.filter(item => item.verified_image).length,
+            families: new Set(report.items.map(item => (item.family ?? '').toLowerCase()).filter(Boolean)).size,
+          }));
+          JS
+
+      - name: Load the roster into a local worker and probe it
+        env:
+          ADMIN_CREDENTIAL: roster-live-probe
+        run: |
+          set -uo pipefail
+          : > apps/api/.dev.vars
+          printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY" >> apps/api/.dev.vars
+          printf 'OPENROUTER_BASE_URL=%s\n' "$OPENROUTER_BASE_URL" >> apps/api/.dev.vars
+          printf 'VISION_PROVIDER=openrouter\n' >> apps/api/.dev.vars
+          printf 'BRAVE_ENABLED=false\n' >> apps/api/.dev.vars
+          printf 'REFERENCE_ORIGIN=http://127.0.0.1:8787\n' >> apps/api/.dev.vars
+          printf 'BENCHMARK_MODE=true\n' >> apps/api/.dev.vars
+          # The gateway throttles a burst; pace the verifier and let a 429 recover.
+          printf 'VERIFIER_PACING_MS=1200\n' >> apps/api/.dev.vars
+          printf 'VERIFIER_MAX_ATTEMPTS=1\n' >> apps/api/.dev.vars
+          printf 'ALPHA_FEEDBACK_ADMIN_TOKEN=%s\n' "${ADMIN_CREDENTIAL:-roster-live-probe}" >> apps/api/.dev.vars
+          echo 'Worker configured for a local admin import'
+          pnpm --filter @vcl/api exec wrangler dev --port 8787 --local --ip 127.0.0.1 > "$RUNNER_TEMP/wrangler-dev.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/wrangler.pid"
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:8787/health > /dev/null 2>&1 && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8787/health || { tail -60 "$RUNNER_TEMP/wrangler-dev.log"; exit 1; }
+          status=0
+          node tools/roster-live-probe.mjs \
+            --endpoint http://127.0.0.1:8787 \
+            --manifest "$RUNNER_TEMP/intake/manifest.json" \
+            --limit "${{ inputs.probe_limit || '6' }}" \
+            --import \
+            --diagnose \
+            --out "$RUNNER_TEMP/live-probe.json" || status=1
+          kill "$(cat "$RUNNER_TEMP/wrangler.pid")" 2>/dev/null || true
+          pkill -f workerd 2>/dev/null || true
+          exit $status
+
+      - name: Vision failures logged by the worker
+        if: always()
+        run: |
+          grep -iE "vision|provider|model|402|429|401" "$RUNNER_TEMP/wrangler-dev.log" 2>/dev/null | tail -25 || true
+
+      - name: Verifier failure reasons logged by the worker
+        if: always()
+        run: |
+          grep -hoiE "(reason|stage|failure)[a-z_]*: *'?[a-z0-9_ ]{3,60}" "$RUNNER_TEMP/wrangler-dev.log" 2>/dev/null | tr 'A-Z' 'a-z' | sort | uniq -c | sort -rn | head -30 || true
