@@ -28,6 +28,10 @@ const endpoint = option('endpoint', 'http://127.0.0.1:8787');
 const manifestPath = option('manifest');
 const limit = Number(option('limit', '6'));
 const outPath = option('out');
+const minConfirmedRate = Number(option('min-confirmed-rate', '0.8'));
+if (!Number.isFinite(minConfirmedRate) || minConfirmedRate < 0 || minConfirmedRate > 1) {
+  throw new Error('--min-confirmed-rate must be within 0..1');
+}
 const labelsPath = option('labels');
 // Human labels can list acceptable destinations for a variant. Unlabelled alternative
 // merchants stay UNREVIEWED, never silently scored as a correct match.
@@ -228,8 +232,12 @@ const summary = {
   probes: rows.length,
   answered: answered.length,
   useful_results: useful.length,
-  useful_rate: reviewed.length ? Number((useful.length / reviewed.length).toFixed(2)) : null,
-  useful_rate_when_answered: reviewed.length ? Number((useful.length / reviewed.length).toFixed(2)) : null,
+  // Conservative lower bounds: unknown alternatives and no-results stay in the
+  // denominator. Separately report precision on the subset actually reviewed.
+  useful_rate: rows.length ? Number((useful.length / rows.length).toFixed(2)) : null,
+  useful_rate_when_answered: answered.length ? Number((useful.length / answered.length).toFixed(2)) : null,
+  reviewed_precision: reviewed.length ? Number((useful.length / reviewed.length).toFixed(2)) : null,
+  min_confirmed_rate: minConfirmedRate,
   reviewed: reviewed.length,
   confirmed_wrong: wrong.length,
   unreviewed: unreviewed.length,
@@ -252,4 +260,5 @@ if (outPath) await writeFile(outPath, JSON.stringify({ summary, cases: rows }, n
 // labelled comparison was actually measured. Keep infrastructure failure distinct
 // from wrong-product failures in the JSON report.
 const unmeasured = summary.reviewed === 0 || summary.provider_failures > 0;
-process.exitCode = summary.wrong_exact > 0 || summary.confirmed_wrong > 0 || unmeasured ? 1 : 0;
+process.exitCode = summary.wrong_exact > 0 || summary.confirmed_wrong > 0 || unmeasured
+  || (summary.useful_rate ?? 0) < minConfirmedRate ? 1 : 0;
