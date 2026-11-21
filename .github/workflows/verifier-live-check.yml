@@ -65,6 +65,12 @@ jobs:
             else console.log('crop_fetch_status', img.status);
           } catch (e) { console.log('crop_fetch_failed', e.message); }
           if (!dataUrl) { console.log(JSON.stringify({ result: 'no crop reachable from CI' })); process.exit(0); }
+          // Three samples: one refusal can be a burst, three in a row is the config.
+          for (let i = 1; i <= 3; i++) {
+            const probe = await post('/analyze-selection', { dataUrl, timestamp: 0, context: { platform: 'youtube', content_ref: 'n9u8ynhBdSo', timestamp_ms: 0 } });
+            console.log(JSON.stringify({ sample: i, status: probe.status, routing: probe.body.vision_routing ?? null }));
+            await new Promise((r) => setTimeout(r, 1500));
+          }
           const analysed = await post('/analyze-selection', { dataUrl, timestamp: 0, context: { platform: 'youtube', content_ref: 'n9u8ynhBdSo', timestamp_ms: 0 } });
           console.log(JSON.stringify({ analyze: { status: analysed.status, keys: Object.keys(analysed.body).slice(0, 14), error: analysed.body.error ?? null, routing: analysed.body.vision_routing ?? null } }));
           if (analysed.status !== 200) { process.exit(0); }
