@@ -45,3 +45,11 @@ test('with nothing identified, the gate keeps current behaviour', () => {
   const products = [{ result_class: 'RELATED', title: 'anything' }];
   assert.equal(mod.dropUnrelatedCommerce(products).length, 1);
 });
+
+// Substring collisions must never count as independent product identity evidence.
+test('identity comparison uses complete tokens, not substrings', () => {
+  const anchor = tokens('Side Trunk');
+  assert.equal(mod.sharesIdentity({ title: 'Beside Trunk' }, anchor), false);
+  assert.equal(mod.sharesIdentity({ title: 'Side Trunk' }, anchor), true);
+  assert.equal(mod.sharesIdentity({ title: 'Side Trunkcase' }, anchor), false);
+});

@@ -143,9 +143,9 @@ export function identityTokens(value: string): string[] {
 /** Does an unverified marketplace row actually describe the identified product? */
 export function sharesIdentity(product: { title?: string | null; model?: string | null; brand?: string | null }, tokens: string[]): boolean {
   if (!tokens.length) return true;
-  const haystack = `${product.title ?? ''} ${product.model ?? ''} ${product.brand ?? ''}`.toLowerCase();
-  const shared = tokens.filter((token) => haystack.includes(token)).length;
-  return shared >= 2 || (Boolean(product.model) && shared >= 1 && tokens.includes(String(product.model).toLowerCase()));
+  const listingTokens = new Set(identityTokens(`${product.title ?? ''} ${product.model ?? ''} ${product.brand ?? ''}`));
+  const shared = tokens.filter((token) => listingTokens.has(token)).length;
+  return shared >= 2;
 }
 
 export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIER_PACING_MS' | 'VERIFIER_MAX_ATTEMPTS' | 'VERIFIER_STRUCTURED_OUTPUT'> & { OPENROUTER_BASE_URL?: string; PRIVACY_FALLBACK_MODEL?: string; VERIFIER_TIME_BUDGET_MS?: string }, useOpenRouter: boolean): VerifierOptions {
