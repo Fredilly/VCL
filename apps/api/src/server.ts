@@ -74,6 +74,7 @@ export interface Env {
   ETSY_KEYSTRING?: string;
   ETSY_SHARED_SECRET?: string;
   BRAVE_SEARCH_API_KEY?: string;
+  BRAVE_ENABLED?: string;
   JEV_DECISION_ROUTER?: string;
   JEV_MODE?: string;
   BENCHMARK_MODE?: string;
@@ -264,7 +265,7 @@ function commerceProviders(env: Env): NamedCommerceProvider[] {
 
   let brave: NamedCommerceProvider | null = null;
   const braveCreds = resolveBraveCredentials(env);
-  if (braveCreds) brave = { name: 'brave', provider: new BraveCommerceProvider(braveCreds.apiKey), tier: 'fallback' };
+  if (braveCreds && env.BRAVE_ENABLED !== 'false') brave = { name: 'brave', provider: new BraveCommerceProvider(braveCreds.apiKey), tier: 'fallback' };
 
   if (env.COMMERCE_PROVIDER === 'serpapi') return serpapi ? [serpapi] : [];
   if (env.COMMERCE_PROVIDER === 'ebay') return ebay ? [ebay] : [];
