@@ -35,7 +35,7 @@ jobs:
       OPENROUTER_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
       OPENROUTER_BASE_URL: https://ai-gateway.vercel.sh/v1/chat/completions
       VISION_PROVIDER: openrouter
-      BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+      BRAVE_ENABLED: 'false'
       AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
       VERCEL_AI_GATEWAY_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
     steps:
@@ -56,29 +56,10 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${OPENROUTER_API_KEY:-}" || { echo 'no vision key is available to this run'; exit 1; }
-          test -n "${BRAVE_SEARCH_API_KEY:-}" || { echo 'BRAVE_SEARCH_API_KEY secret is not available to this run'; exit 1; }
           echo 'Provider credentials present'
 
-      - name: Provider reachability
-        run: |
-          set -uo pipefail
-          code=$(curl -s -o "$RUNNER_TEMP/key.json" -w '%{http_code}' https://openrouter.ai/api/v1/key -H "Authorization: Bearer $OPENROUTER_API_KEY")
-          echo "openrouter key endpoint: $code"
-          node -e 'const k=require(process.env.RUNNER_TEMP+"/key.json").data||{};console.log(JSON.stringify({label:k.label,limit:k.limit,usage:k.usage,free_tier:k.is_free_tier}))' 2>/dev/null || true
-          body=$(curl -s -o "$RUNNER_TEMP/lite.json" -w '%{http_code}' https://openrouter.ai/api/v1/chat/completions -H "Authorization: Bearer $OPENROUTER_API_KEY" -H 'content-type: application/json' -d '{"model":"google/gemini-2.5-flash-lite","messages":[{"role":"user","content":"reply with ok"}]}')
-          echo "openrouter vision model probe: $body"
-          head -c 300 "$RUNNER_TEMP/lite.json" 2>/dev/null; echo
-          brave=$(curl -s -o /dev/null -w '%{http_code}' 'https://api.search.brave.com/res/v1/web/search?q=test' -H "X-Subscription-Token: $BRAVE_SEARCH_API_KEY")
-          echo "brave: $brave"
-          if [ -n "${AI_GATEWAY_API_KEY:-}" ]; then
-            vg=$(curl -s -o "$RUNNER_TEMP/vercel.json" -w '%{http_code}' https://ai-gateway.vercel.sh/v1/chat/completions \
-              -H "Authorization: Bearer $AI_GATEWAY_API_KEY" -H 'content-type: application/json' \
-              -d '{"model":"google/gemini-2.5-flash-lite","messages":[{"role":"user","content":"reply with ok"}],"max_tokens":8}')
-            echo "vercel ai gateway vision probe: $vg"
-            head -c 300 "$RUNNER_TEMP/vercel.json"; echo
-          else
-            echo 'AI_GATEWAY_API_KEY not available'
-          fi
+      # No paid provider pings: the real clicks below test gateway reachability.
+      # Never print provider response bodies or send gateway keys to OpenRouter.
 
       - name: Write the partner roster from the secret
         run: |
@@ -116,12 +97,12 @@ jobs:
           printf 'OPENROUTER_API_KEY=%s\n' "$OPENROUTER_API_KEY" >> apps/api/.dev.vars
           printf 'OPENROUTER_BASE_URL=%s\n' "$OPENROUTER_BASE_URL" >> apps/api/.dev.vars
           printf 'VISION_PROVIDER=openrouter\n' >> apps/api/.dev.vars
-          [ -n "${BRAVE_SEARCH_API_KEY:-}" ] && printf 'BRAVE_SEARCH_API_KEY=%s\n' "$BRAVE_SEARCH_API_KEY" >> apps/api/.dev.vars
+          printf 'BRAVE_ENABLED=false\n' >> apps/api/.dev.vars
           printf 'REFERENCE_ORIGIN=http://127.0.0.1:8787\n' >> apps/api/.dev.vars
           printf 'BENCHMARK_MODE=true\n' >> apps/api/.dev.vars
           # The gateway throttles a burst; pace the verifier and let a 429 recover.
           printf 'VERIFIER_PACING_MS=1200\n' >> apps/api/.dev.vars
-          printf 'VERIFIER_MAX_ATTEMPTS=3\n' >> apps/api/.dev.vars
+          printf 'VERIFIER_MAX_ATTEMPTS=1\n' >> apps/api/.dev.vars
           printf 'ALPHA_FEEDBACK_ADMIN_TOKEN=%s\n' "${ADMIN_CREDENTIAL:-roster-live-probe}" >> apps/api/.dev.vars
           echo 'Worker configured for a local admin import'
           pnpm --filter @vcl/api exec wrangler dev --port 8787 --local --ip 127.0.0.1 > "$RUNNER_TEMP/wrangler-dev.log" 2>&1 &
