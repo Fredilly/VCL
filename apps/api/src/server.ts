@@ -57,6 +57,7 @@ export interface Env {
   VISION_PROVIDER?: string;
   GEMINI_MODEL?: string;
   OPENROUTER_API_KEY?: string;
+  OPENROUTER_BASE_URL?: string;
   OPENROUTER_MODEL?: string;
   EBAY_SANDBOX_CLIENT_ID?: string;
   EBAY_SANDBOX_CLIENT_SECRET?: string;
@@ -109,12 +110,26 @@ export interface Env {
  * clamped in compareCandidateImages; an absent or invalid value falls back to
  * the built-in default rather than failing the request.
  */
-export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIER_PACING_MS' | 'VERIFIER_MAX_ATTEMPTS' | 'VERIFIER_STRUCTURED_OUTPUT'> & { PRIVACY_FALLBACK_MODEL?: string; VERIFIER_TIME_BUDGET_MS?: string }, useOpenRouter: boolean): VerifierOptions {
+/**
+ * The OpenAI-compatible vision provider can be OpenRouter or any gateway that
+ * speaks the same API. A gateway deployment authenticates with its own key, so it
+ * must not require a working OpenRouter key.
+ */
+export function openAIVisionCredentials(env: Env): { key: string; model: string; endpoint?: string } | null {
+  const base = env.OPENROUTER_BASE_URL ?? '';
+  const viaGateway = Boolean(base) && !base.includes('openrouter.ai');
+  const key = viaGateway ? (env.AI_GATEWAY_API_KEY ?? env.OPENROUTER_API_KEY) : env.OPENROUTER_API_KEY;
+  if (!key) return null;
+  return { key, model: env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL, ...(base ? { endpoint: base } : {}) };
+}
+
+export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIER_PACING_MS' | 'VERIFIER_MAX_ATTEMPTS' | 'VERIFIER_STRUCTURED_OUTPUT'> & { PRIVACY_FALLBACK_MODEL?: string; VERIFIER_TIME_BUDGET_MS?: string; OPENROUTER_BASE_URL?: string }, useOpenRouter: boolean): VerifierOptions {
   const concurrency = Number(env.VERIFIER_CONCURRENCY);
   const pacing = Number(env.VERIFIER_PACING_MS);
   const attempts = Number(env.VERIFIER_MAX_ATTEMPTS);
   return {
     provider: useOpenRouter ? 'openrouter' : 'gemini',
+    ...(env.OPENROUTER_BASE_URL ? { endpoint: env.OPENROUTER_BASE_URL } : {}),
     ...(Number.isInteger(concurrency) && concurrency >= 1 && concurrency <= 4 ? { concurrency } : {}),
     ...(Number.isFinite(pacing) && pacing >= 0 && pacing <= 5000 ? { pacingMs: pacing } : {}),
     ...(Number.isInteger(attempts) && attempts >= 1 && attempts <= 3 ? { maxAttempts: attempts } : {}),
@@ -615,8 +630,9 @@ export async function refreshVerifiedOffers(
   let visualCompared = 0;
 
   if (visual?.sourceImage && needsVisual.length) {
-    const useOpenRouter = visual.env.VISION_PROVIDER === 'openrouter' && Boolean(visual.env.OPENROUTER_API_KEY);
-    const key = useOpenRouter ? visual.env.OPENROUTER_API_KEY : visual.env.GEMINI_API_KEY;
+    const openAIVision = visual.env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(visual.env) : null;
+    const useOpenRouter = Boolean(openAIVision);
+    const key = openAIVision?.key ?? visual.env.GEMINI_API_KEY;
     if (key) {
       const model = useOpenRouter
         ? (visual.env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL)
@@ -882,8 +898,9 @@ async function confirmSameVideoReuseWithImage(
     return { ...empty, decision: { ...noDecision, reason: visualCandidates.length ? 'visual_unavailable' : 'no_candidate' } };
   }
 
-  const useOpenRouter = env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
-  const key = useOpenRouter ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY;
+  const openAIVision = env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(env) : null;
+  const useOpenRouter = Boolean(openAIVision);
+  const key = openAIVision?.key ?? env.GEMINI_API_KEY;
   if (!key) return { ...empty, decision: { ...noDecision, reason: 'visual_unavailable' } };
   const model = useOpenRouter ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
 
@@ -1336,8 +1353,9 @@ async function confirmCrossVideoReuseWithImage(
   });
   if (!rows.length) return { ...empty, decision: { ...noDecision, reason: 'visual_rejected' } };
 
-  const useOpenRouter = env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
-  const key = useOpenRouter ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY;
+  const openAIVision = env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(env) : null;
+  const useOpenRouter = Boolean(openAIVision);
+  const key = openAIVision?.key ?? env.GEMINI_API_KEY;
   if (!key) return empty;
   const model = useOpenRouter
     ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL)

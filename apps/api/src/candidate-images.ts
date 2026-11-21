@@ -360,6 +360,8 @@ export type VerifierOptions = {
   privacyFallbackModel?: string;
   /** Total model time one interaction may spend before remaining batches fail fast. */
   timeBudgetMs?: number;
+  /** OpenAI-compatible chat-completions endpoint; defaults to OpenRouter's. */
+  endpoint?: string;
 };
 
 const HEAD_TO_HEAD_SUFFIX = ` The numbered candidates are close alternatives from one product list, and at most one of them is the selected object. Judge each on its own against the crop. Look for what separates them: size and proportions, colour, pattern, material, hardware, handles and straps, closures. Give high similarity only to a candidate whose distinguishing details are actually visible in the crop; when the crop cannot tell two candidates apart, give both the same moderate similarity and low confidence.`;
@@ -373,6 +375,8 @@ export async function compareCandidateImages(
   let failures = 0;
   const failure_reasons: Record<string, number> = {};
   const verificationProvider = options.provider ?? 'gemini';
+  const providerEndpoint = options.endpoint ?? 'https://openrouter.ai/api/v1/chat/completions';
+  const isDefaultRouter = providerEndpoint === 'https://openrouter.ai/api/v1/chat/completions';
   const concurrency = Math.max(1, Math.min(4, Math.trunc(options.concurrency ?? 2) || 2));
   const pacingMs = Math.max(0, Math.min(5000, options.pacingMs ?? 0));
   const maxAttempts = Math.max(1, Math.min(3, Math.trunc(options.maxAttempts ?? 2) || 2));
@@ -541,7 +545,7 @@ export async function compareCandidateImages(
           const base = options.headToHead ? INSTRUCTIONS + HEAD_TO_HEAD_SUFFIX : INSTRUCTIONS;
           const system = recovery ? base + RECOVERY_SUFFIX : base;
           const response = verificationProvider === 'openrouter'
-            ? await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            ? await fetch(providerEndpoint, {
                 method: 'POST',
                 headers: {
                   'Authorization': `Bearer ${apiKey}`,
@@ -558,8 +562,9 @@ export async function compareCandidateImages(
                       ? { type: 'text', text: part.text }
                       : { type: 'image_url', image_url: { url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` } }) },
                   ],
-                  // Match recognition's no-training / zero-retention routing for every verifier attempt.
-                  provider: { data_collection: 'deny', zdr: true },
+                  // Routing fields only OpenRouter understands; another
+                  // OpenAI-compatible gateway can reject them outright.
+                  ...(isDefaultRouter ? { provider: { data_collection: 'deny', zdr: true } } : {}),
                   response_format: structured
                     ? { type: 'json_schema', json_schema: { name: 'candidate_comparison', strict: true, schema: VERIFIER_JSON_SCHEMA } }
                     : { type: 'json_object' },
