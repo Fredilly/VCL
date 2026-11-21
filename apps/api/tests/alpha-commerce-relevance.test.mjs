@@ -19,8 +19,8 @@ test('visible verified SIMILAR excludes unrelated eBay RELATED clutter', () => {
 
 test('related results need a distinctive model and cannot pass on generic bag words', () => {
   const generic = [p('Random Leather Crossbody Bag', 'RELATED'),p('Other Canvas Tote', 'RELATED')];
-  assert.deepEqual(alphaCommerceRelevance(generic, null), []);
-  assert.deepEqual(alphaCommerceRelevance(generic, 'Crossbody Bag'), []);
+  assert.equal(alphaCommerceRelevance(generic, null).length, 0);
+  assert.equal(alphaCommerceRelevance(generic, 'Crossbody Bag').length, 0);
 });
 
 test('distinctive model tokens are required for RELATED suggestions', () => {
