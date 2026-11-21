@@ -77,6 +77,7 @@ export interface Env {
   ETSY_KEYSTRING?: string;
   ETSY_SHARED_SECRET?: string;
   BRAVE_SEARCH_API_KEY?: string;
+  BRAVE_ENABLED?: string;
   JEV_DECISION_ROUTER?: string;
   JEV_MODE?: string;
   BENCHMARK_MODE?: string;
@@ -113,6 +114,16 @@ export interface Env {
  * clamped in compareCandidateImages; an absent or invalid value falls back to
  * the built-in default rather than failing the request.
  */
+/** Resolve the actual OpenAI-compatible endpoint and credential, including the
+ * production AI Gateway which must not use the expired OpenRouter key. */
+export function openAIVisionCredentials(env: Env): { key: string; model: string; endpoint?: string } | null {
+  const base = env.OPENROUTER_BASE_URL ?? '';
+  const viaGateway = Boolean(base) && !base.includes('openrouter.ai');
+  const key = viaGateway ? (env.AI_GATEWAY_API_KEY ?? env.OPENROUTER_API_KEY) : env.OPENROUTER_API_KEY;
+  if (!key) return null;
+  return { key, model: env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL, ...(base ? { endpoint: base } : {}) };
+}
+
 export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIER_PACING_MS' | 'VERIFIER_MAX_ATTEMPTS' | 'VERIFIER_STRUCTURED_OUTPUT'> & { OPENROUTER_BASE_URL?: string; PRIVACY_FALLBACK_MODEL?: string; VERIFIER_TIME_BUDGET_MS?: string }, useOpenRouter: boolean): VerifierOptions {
   const concurrency = Number(env.VERIFIER_CONCURRENCY);
   const pacing = Number(env.VERIFIER_PACING_MS);
@@ -274,6 +285,10 @@ function makeEbayAuth(creds: EbayCredentials): EbayAuth {
   return new EbayAuth({ clientId: creds.clientId, clientSecret: creds.clientSecret, sandbox: creds.sandbox });
 }
 
+function activeBraveKey(env?: Env): string | undefined {
+  return env?.BRAVE_ENABLED === 'false' ? undefined : env?.BRAVE_SEARCH_API_KEY;
+}
+
 function commerceProviders(env: Env): NamedCommerceProvider[] {
   let serpapi: NamedCommerceProvider | null = null;
   if (env.SERPAPI_API_KEY) serpapi = { name: 'serpapi', provider: new SerpApiCommerceProvider(env.SERPAPI_API_KEY), tier: 'fallback' };
@@ -287,7 +302,7 @@ function commerceProviders(env: Env): NamedCommerceProvider[] {
   if (etsyCreds) etsy = { name: 'etsy', provider: new EtsyCommerceProvider(etsyCreds), tier: 'primary' };
 
   let brave: NamedCommerceProvider | null = null;
-  const braveCreds = resolveBraveCredentials(env);
+  const braveCreds = env.BRAVE_ENABLED === 'false' ? null : resolveBraveCredentials(env);
   if (braveCreds) brave = { name: 'brave', provider: new BraveCommerceProvider(braveCreds.apiKey), tier: 'fallback' };
 
   if (env.COMMERCE_PROVIDER === 'serpapi') return serpapi ? [serpapi] : [];
@@ -545,7 +560,7 @@ export async function refreshVerifiedOffers(
     ?? mapping.image_reference
     ?? merchantMetadata?.image_reference
     ?? await sourceImageForVerifiedMapping(mapping)
-    ?? (ledger && !ledger.reserve('commerce') ? null : await recoverVerifiedProductImage(visual?.env.BRAVE_SEARCH_API_KEY, mapping));
+    ?? (ledger && !ledger.reserve('commerce') ? null : await recoverVerifiedProductImage(activeBraveKey(visual?.env), mapping));
   const hydratedMapping: VerifiedProductMapping = {
     ...mapping,
     ...(sourceImage ? { image_reference: sourceImage } : {}),
@@ -657,8 +672,9 @@ export async function refreshVerifiedOffers(
   let visualCompared = 0;
 
   if (visual?.sourceImage && needsVisual.length) {
-    const useOpenRouter = visual.env.VISION_PROVIDER === 'openrouter' && Boolean(visual.env.OPENROUTER_API_KEY);
-    const key = useOpenRouter ? visual.env.OPENROUTER_API_KEY : visual.env.GEMINI_API_KEY;
+    const visionRoute = visual.env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(visual.env) : null;
+    const useOpenRouter = Boolean(visionRoute);
+    const key = visionRoute?.key ?? visual.env.GEMINI_API_KEY;
     if (key) {
       const model = useOpenRouter
         ? (visual.env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL)
@@ -938,8 +954,9 @@ async function confirmSameVideoReuseWithImage(
     return { ...empty, decision: { ...noDecision, reason: visualCandidates.length ? 'visual_unavailable' : 'no_candidate' } };
   }
 
-  const useOpenRouter = env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
-  const key = useOpenRouter ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY;
+  const visionRoute = env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(env) : null;
+  const useOpenRouter = Boolean(visionRoute);
+  const key = visionRoute?.key ?? env.GEMINI_API_KEY;
   if (!key) return { ...empty, decision: { ...noDecision, reason: 'visual_unavailable' } };
   const model = useOpenRouter ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
 
@@ -1178,9 +1195,9 @@ async function confirmSameVideoReuseWithImage(
       }
     }
 
-    if (!merchantRef?.image_reference && env.BRAVE_SEARCH_API_KEY) {
+    if (!merchantRef?.image_reference && activeBraveKey(env)) {
       const recovered = await recoverVerifiedProductImage(
-        env.BRAVE_SEARCH_API_KEY, { ...candidate.mapping, image_reference: null }, ledgerFetch(ledger, 'commerce'),
+        activeBraveKey(env), { ...candidate.mapping, image_reference: null }, ledgerFetch(ledger, 'commerce'),
       ).catch(() => null);
       if (recovered) {
         const recoveredRef = {
@@ -1341,7 +1358,7 @@ async function confirmSameVideoReuseWithImage(
       ].filter((url): url is string => Boolean(url && safeImageUrl(url) && url !== row.product.image_reference));
       const alternate = [...new Set(references)][0] ?? null;
       const recovered = alternate ?? await recoverVerifiedProductImage(
-        env.BRAVE_SEARCH_API_KEY,
+        activeBraveKey(env),
         { ...row.candidate.mapping, image_reference: null },
       ).catch(() => null);
       return recovered ? { ...row, product: { ...row.product, image_reference: recovered } } : null;
@@ -1612,8 +1629,9 @@ async function confirmCrossVideoReuseWithImage(
   });
   if (!rows.length) return { ...empty, decision: { ...noDecision, reason: 'visual_rejected' } };
 
-  const useOpenRouter = env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
-  const key = useOpenRouter ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY;
+  const visionRoute = env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(env) : null;
+  const useOpenRouter = Boolean(visionRoute);
+  const key = visionRoute?.key ?? env.GEMINI_API_KEY;
   if (!key) return empty;
   const model = useOpenRouter
     ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL)
@@ -1709,7 +1727,8 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     }>,
   };
   const commerceCalls: Record<string, number> = {};
-  const useOpenRouterVerification = env.VISION_PROVIDER === 'openrouter' && Boolean(env.OPENROUTER_API_KEY);
+  const commerceVisionRoute = env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(env) : null;
+  const useOpenRouterVerification = Boolean(commerceVisionRoute);
   const verificationUsage = {
     provider: useOpenRouterVerification ? 'openrouter' : 'gemini',
     model: useOpenRouterVerification ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite'),
@@ -1786,7 +1805,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     });
 
     const runImageVerification = async () => {
-      const verificationKey = useOpenRouterVerification ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY;
+      const verificationKey = commerceVisionRoute?.key ?? env.GEMINI_API_KEY;
       if (!sourceImage || !verificationKey || !viable.length) return;
       const verificationModel = useOpenRouterVerification ? (env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL) : (env.GEMINI_MODEL || 'gemini-3.5-flash-lite');
       const images = await imageVerifier(
@@ -1797,7 +1816,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
         viable,
         context,
         imageBudget,
-        { provider: useOpenRouterVerification ? 'openrouter' : 'gemini' },
+        verifierOptions(env, useOpenRouterVerification),
       );
       if (images.provider_unavailable) verifierUnavailable = images.provider_unavailable;
       verification.compared += images.compared;
@@ -1818,7 +1837,7 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
     if (!lightMode) await runImageVerification();
 
     let decisions = viable.map((product) => ({ product, decision: verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context, useMarkingEvidence) }));
-    if (lightMode && viable.length && !decisions.some(({ decision }) => decision.product) && sourceImage && (useOpenRouterVerification ? env.OPENROUTER_API_KEY : env.GEMINI_API_KEY)) {
+    if (lightMode && viable.length && !decisions.some(({ decision }) => decision.product) && sourceImage && (commerceVisionRoute?.key ?? env.GEMINI_API_KEY)) {
       verification.light_escalations++;
       await runImageVerification();
       decisions = viable.map((product) => ({ product, decision: verifyCandidate(description, product, imageEvidence.get(candidateKey(product)), context, useMarkingEvidence) }));
@@ -2309,7 +2328,10 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       }
       type ActiveVisionProvider = OpenRouterVisionProvider | GeminiVisionProvider | GroqVisionProvider | CloudflareVisionProvider;
       type NamedVisionProvider = { name: VisionProviderName; provider: ActiveVisionProvider };
-      const openrouter = env.OPENROUTER_API_KEY ? { name: 'openrouter' as const, provider: new OpenRouterVisionProvider(env.OPENROUTER_API_KEY, env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL, env.OPENROUTER_BASE_URL || undefined) } : null;
+      const openaiVision = env.VISION_PROVIDER === 'openrouter' ? openAIVisionCredentials(env) : null;
+      const openrouter = openaiVision
+        ? { name: 'openrouter' as const, provider: new OpenRouterVisionProvider(openaiVision.key, openaiVision.model, openaiVision.endpoint) }
+        : null;
       const gemini = env.GEMINI_API_KEY ? { name: 'gemini' as const, provider: new GeminiVisionProvider(env.GEMINI_API_KEY, env.GEMINI_MODEL) } : null;
       const groq38 = env.GROQ_API_KEY ? { name: 'groq-3.8' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY, 'qwen/qwen3.8-27b') } : null;
       const groq36 = env.GROQ_API_KEY ? { name: 'groq-3.6' as const, provider: new GroqVisionProvider(env.GROQ_API_KEY, 'qwen/qwen3.6-27b') } : null;
@@ -2518,7 +2540,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
         // roster must be one this worker answers for. A deployment whose public
         // origin differs from the request URL (local dev, CI, preview) sets it
         // explicitly; production keeps using the request origin.
-        const rows = await preparePartnerRoster(env, env.REFERENCE_ORIGIN || new URL(request.url).origin, input, undefined, env.BRAVE_SEARCH_API_KEY);
+        const rows = await preparePartnerRoster(env, env.REFERENCE_ORIGIN || new URL(request.url).origin, input, undefined, activeBraveKey(env));
         await ingestPartnerRoster(env, rows);
         await auditAdminAction(env, authorized.admin_id, 'partner_roster_ingested', { identities: rows.length, offers: input.offers.length, content_ref: input.content_ref });
         return jsonResponse({ accepted: true, distinct_variants: rows.length, merchant_offers: input.offers.length, reference_ready: rows.length });
