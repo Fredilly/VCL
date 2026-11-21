@@ -642,7 +642,7 @@ export async function compareCandidateImages(
           }
           if (!result.ok) {
             reason = `model_http_${result.status}`;
-            if (result.status === 404 && verificationProvider === 'openrouter'
+            if (result.status === 404 && verificationProvider === 'openrouter' && isDefaultRouter
               && activeModel !== privacyFallbackModel && !privacyUnavailable) {
               // 404 may mean that none of this model's endpoints satisfy ZDR.
               // Reserve the extra model call; fail closed if there is no budget.
@@ -654,7 +654,7 @@ export async function compareCandidateImages(
               attempt--; // this is routing recovery, not a malformed response retry
               continue;
             }
-            if (result.status === 404 && verificationProvider === 'openrouter') {
+            if (result.status === 404 && verificationProvider === 'openrouter' && isDefaultRouter) {
               // The fallback model is unavailable under the same policy: stop
               // routing for this click and say so, without blaming availability.
               privacyUnavailable = true;
@@ -665,7 +665,7 @@ export async function compareCandidateImages(
             if (![429, 500, 502, 503, 504].includes(result.status)) {
               // Auth failures never heal by retrying, and later batches must not
               // spend their own calls discovering the same thing.
-              if ([401, 403].includes(result.status)) providerUnavailableReason = reason;
+              if ([401, 403].includes(result.status) || (result.status === 404 && !isDefaultRouter)) providerUnavailableReason = reason;
               break;
             }
             // A hard rate limit that survives recovery means the provider is
