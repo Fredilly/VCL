@@ -124,6 +124,30 @@ export function openAIVisionCredentials(env: Env): { key: string; model: string;
   return { key, model: env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL, ...(base ? { endpoint: base } : {}) };
 }
 
+/**
+ * Words that appear in nearly every listing for a brand and therefore carry no
+ * identity: keeping a row because it says "Louis Vuitton" is how unrelated bags
+ * end up in results with a price attached.
+ */
+const LISTING_STOPWORDS = new Set(['louis', 'vuitton', 'gucci', 'chanel', 'hermes', 'dior', 'prada',
+  'bags', 'bag', 'women', 'womens', 'men', 'mens', 'the', 'and', 'with', 'for', 'from', 'new',
+  'pre', 'owned', 'authentic', 'genuine', 'luxury', 'designer', 'sale', 'used', 'leather', 'canvas',
+  // House patterns are shared by most of a brand's catalogue and so carry no identity.
+  'monogram', 'damier', 'checkered', 'multicolor']);
+
+export function identityTokens(value: string): string[] {
+  return [...new Set((value || '').toLowerCase().match(/[a-z0-9]{4,}/g) ?? [])]
+    .filter((token) => !LISTING_STOPWORDS.has(token));
+}
+
+/** Does an unverified marketplace row actually describe the identified product? */
+export function sharesIdentity(product: { title?: string | null; model?: string | null; brand?: string | null }, tokens: string[]): boolean {
+  if (!tokens.length) return true;
+  const haystack = `${product.title ?? ''} ${product.model ?? ''} ${product.brand ?? ''}`.toLowerCase();
+  const shared = tokens.filter((token) => haystack.includes(token)).length;
+  return shared >= 2 || (Boolean(product.model) && shared >= 1 && tokens.includes(String(product.model).toLowerCase()));
+}
+
 export function verifierOptions(env: Pick<Env, 'VERIFIER_CONCURRENCY' | 'VERIFIER_PACING_MS' | 'VERIFIER_MAX_ATTEMPTS' | 'VERIFIER_STRUCTURED_OUTPUT'> & { OPENROUTER_BASE_URL?: string; PRIVACY_FALLBACK_MODEL?: string; VERIFIER_TIME_BUDGET_MS?: string }, useOpenRouter: boolean): VerifierOptions {
   const concurrency = Number(env.VERIFIER_CONCURRENCY);
   const pacing = Number(env.VERIFIER_PACING_MS);
@@ -3180,6 +3204,26 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
           verification_reasons: ['strong visual match to a product in this video; not confirmed as the exact item'],
         };
       });
+      // An unverified marketplace row has to describe the identified product. A
+      // price on an unrelated bag is worse than no row: it reads as an offer for
+      // the thing the user clicked.
+      const anchorTokens = identityTokens([
+        rosterSuggestions[0]?.title,
+        rosterSuggestions[0]?.model,
+        // No roster suggestion means no identity anchor: fall back to the model the
+        // recognition step actually named, never to a brand alone.
+        resolved.query?.model ?? description.model_candidate ?? '',
+      ].filter(Boolean).join(' '));
+      if (anchorTokens.length) {
+        const before = resolved.products.length;
+        resolved.products = resolved.products.filter((product) =>
+          product.result_class !== 'RELATED' || sharesIdentity(product, anchorTokens));
+        const dropped = before - resolved.products.length;
+        if (dropped > 0) {
+          resolved.verification.contradictions['related_without_identity_evidence'] =
+            (resolved.verification.contradictions['related_without_identity_evidence'] ?? 0) + dropped;
+        }
+      }
       if (rosterSuggestions.length) {
         const suggested = new Set(rosterSuggestions.map(product => product.destination));
         const rest = resolved.products.filter(product => !product.destination || !suggested.has(product.destination));
