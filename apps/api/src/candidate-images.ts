@@ -451,9 +451,7 @@ export async function compareCandidateImages(
   // The privacy fallback must be a model the SAME provider actually serves. The
   // previous value, qwen/qwen3.8-27b, is a Cloudflare/Groq id: OpenRouter answers
   // 404 for it, so the reroute could never succeed.
-  const privacyFallbackModel = options.privacyFallbackModel
-    ?? (globalThis as { __VCL_PRIVACY_FALLBACK_MODEL__?: string }).__VCL_PRIVACY_FALLBACK_MODEL__
-    ?? 'qwen/qwen2.5-vl-72b-instruct';
+  const privacyFallbackModel = options.privacyFallbackModel ?? 'qwen/qwen2.5-vl-72b-instruct';
   let activeModel = model;
   // Pacing is shared across concurrent batches so the aggregate call rate is
   // bounded, not just each batch's. Retries go through the same gate.
@@ -722,7 +720,7 @@ export async function compareCandidateImages(
           }
           if (!result.ok) {
             reason = `model_http_${result.status}`;
-            if (result.status === 404 && verificationProvider === 'openrouter'
+            if (result.status === 404 && verificationProvider === 'openrouter' && isDefaultOpenRouter
               && activeModel !== privacyFallbackModel && !privacyUnavailable) {
               // 404 may mean that none of this model's endpoints satisfy ZDR.
               // Reserve the extra model call; fail closed if there is no budget.
@@ -734,7 +732,7 @@ export async function compareCandidateImages(
               attempt--; // this is routing recovery, not a malformed response retry
               continue;
             }
-            if (result.status === 404 && verificationProvider === 'openrouter') {
+            if (result.status === 404 && verificationProvider === 'openrouter' && isDefaultOpenRouter) {
               // The fallback model itself is unavailable under the same policy:
               // stop routing for this click and say so, without blaming the
               // provider's availability.
@@ -746,7 +744,7 @@ export async function compareCandidateImages(
             if (![429, 500, 502, 503, 504].includes(result.status)) {
               // Auth failures never heal by retrying, and later batches must not
               // spend their own calls discovering the same thing.
-              if ([401, 403].includes(result.status)) providerUnavailableReason = reason;
+              if ([401, 403].includes(result.status) || (result.status === 404 && !isDefaultOpenRouter)) providerUnavailableReason = reason;
               break;
             }
             // A hard rate limit that survives recovery means the provider is
