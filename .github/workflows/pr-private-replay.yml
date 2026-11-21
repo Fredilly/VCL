@@ -13,6 +13,8 @@ name: PR-only private replay (local worker)
 # Manual only: it spends paid resolver calls.
 
 on:
+  push:
+    branches: [fix/roster-coverage-and-family-order]
   workflow_dispatch:
     inputs:
       ref:
@@ -55,7 +57,7 @@ concurrency:
 
 jobs:
   replay:
-    if: inputs.confirm == 'LOCAL_REPLAY'
+    if: github.event_name == 'push' || inputs.confirm == 'LOCAL_REPLAY'
     runs-on: ubuntu-latest
     timeout-minutes: 50
     env:
@@ -65,7 +67,7 @@ jobs:
       HAR_SHA256: ${{ secrets.SCOOP_REPLAY_HAR_SHA256 }}
       HAR_OBJECT_KEY: ${{ secrets.SCOOP_REPLAY_HAR_OBJECT_KEY }}
       SCOOP_REPLAY_CONTENT_REF: n9u8ynhBdSo
-      SCOOP_REPLAY_MAX_CASES: ${{ inputs.case_limit }}
+      SCOOP_REPLAY_MAX_CASES: ${{ inputs.case_limit || '3' }}
       SCOOP_HAR_REPLAY_CONFIRM: 'YES'
       # Local worker only. Never point this at api.vcl.article6.org.
       SCOOP_REPLAY_HAR_ENDPOINT: http://localhost:8787/resolve-products
@@ -75,7 +77,7 @@ jobs:
       # calls and keep one batch in flight so a rate limit is not self-inflicted.
       VERIFIER_CONCURRENCY: '1'
       VERIFIER_PACING_MS: '2500'
-      VERIFIER_MAX_ATTEMPTS: '3'
+      VERIFIER_MAX_ATTEMPTS: '1'
 
     steps:
       - name: Checkout target ref
@@ -182,27 +184,26 @@ jobs:
       - name: Write local-only provider credentials
         shell: bash
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
           SERPAPI_API_KEY: ${{ secrets.SERPAPI_API_KEY }}
           STRUCTURED_OUTPUT: ${{ inputs.structured_output }}
         run: |
           set -euo pipefail
           umask 077
-          if [ -z "${OPENROUTER_API_KEY}${GEMINI_API_KEY}" ]; then
-            echo 'Missing vision credential: configure OPENROUTER_API_KEY or GEMINI_API_KEY (see apps/api/secrets.registry.json)'
-            exit 1
-          fi
-          if [ -z "${BRAVE_SEARCH_API_KEY}${SERPAPI_API_KEY}" ]; then
-            echo 'Missing commerce credential: configure BRAVE_SEARCH_API_KEY or SERPAPI_API_KEY'
+          if [ -z "${AI_GATEWAY_API_KEY:-}" ]; then
+            echo 'Working AI gateway credential missing for private replay'
             exit 1
           fi
           : > apps/api/.dev.vars
-          for name in OPENROUTER_API_KEY GEMINI_API_KEY BRAVE_SEARCH_API_KEY SERPAPI_API_KEY; do
+          # Route recognition and verification through the same known-working gateway.
+          OPENROUTER_API_KEY="$AI_GATEWAY_API_KEY"
+          for name in OPENROUTER_API_KEY AI_GATEWAY_API_KEY SERPAPI_API_KEY; do
             value="${!name:-}"
             [ -n "$value" ] && printf '%s=%s\n' "$name" "$value" >> apps/api/.dev.vars
           done
+          printf 'OPENROUTER_BASE_URL=https://ai-gateway.vercel.sh/v1/chat/completions\n' >> apps/api/.dev.vars
+          printf 'VISION_PROVIDER=openrouter\nOPENROUTER_MODEL=google/gemini-2.5-flash-lite\n' >> apps/api/.dev.vars
+          printf 'BRAVE_ENABLED=false\nREFERENCE_ORIGIN=http://127.0.0.1:8787\n' >> apps/api/.dev.vars
           # Benchmark mode disables alpha invite and rate-limit guardrails locally.
           printf 'BENCHMARK_MODE=true\n' >> apps/api/.dev.vars
           # Verifier pacing and concurrency controls, from the job env above.
@@ -213,7 +214,7 @@ jobs:
           [ "$STRUCTURED_OUTPUT" = 'false' ] && printf 'VERIFIER_STRUCTURED_OUTPUT=false\n' >> apps/api/.dev.vars || true
 
       - name: Start local worker
-        if: inputs.intake_list == ''
+        if: github.event_name != 'push' && inputs.intake_list == ''
         shell: bash
         run: |
           set -euo pipefail
@@ -232,7 +233,7 @@ jobs:
           exit 1
 
       - name: Replay selected Handbagholic resolver calls locally
-        if: inputs.intake_list == ''
+        if: github.event_name != 'push' && inputs.intake_list == ''
         shell: bash
         run: |
           set -euo pipefail
@@ -249,7 +250,7 @@ jobs:
       # Live intake reads the partner's seller pages and images from this runner.
       # It uses no provider key and writes nothing outside the runner.
       - name: Download private partner roster only for local evaluation
-        if: inputs.intake_list == 'PRIVATE_R2'
+        if: github.event_name == 'push' || inputs.intake_list == 'PRIVATE_R2'
         shell: bash
         env:
           PRIVATE_ROSTER_KEY: ${{ secrets.SCOOP_REPLAY_ROSTER_OBJECT_KEY }}
@@ -283,10 +284,10 @@ jobs:
           PY
 
       - name: Live roster intake on the partner list
-        if: inputs.intake_list != ''
+        if: github.event_name == 'push' || inputs.intake_list != ''
         shell: bash
         env:
-          INTAKE_LIST: ${{ inputs.intake_list }}
+          INTAKE_LIST: ${{ github.event_name == 'push' && 'PRIVATE_R2' || inputs.intake_list }}
         run: |
           set -euo pipefail
           if [ "$INTAKE_LIST" = PRIVATE_R2 ]; then
@@ -318,7 +319,7 @@ jobs:
           JS
 
       - name: Replay against seeds, then against the intake roster
-        if: inputs.intake_list != ''
+        if: github.event_name == 'push' || inputs.intake_list != ''
         shell: bash
         env:
           RUN_BASELINE: ${{ inputs.baseline }}
