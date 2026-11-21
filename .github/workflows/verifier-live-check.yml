@@ -1,11 +1,11 @@
 name: verifier-live-check
 
-# One isolated live verification of the verifier fallback, running this branch's
-# code on Cloudflare with the Worker's own bindings and secrets.
+# One isolated live verification of the verifier fallback: this branch's code runs
+# under `wrangler dev --remote`, so it talks to the real Worker bindings and the
+# real secrets, while production traffic keeps serving the deployed version.
 #
-# It uploads a VERSION (production traffic keeps serving the deployed one), finds
-# that version's preview URL through the API, makes one resolve request, and then
-# deletes the version it created. Counts and reason names only; no secret values.
+# One resolve request is made — the same thing a single user click does. Counts and
+# reason names only; no secret values, no product titles.
 
 on:
   push:
@@ -36,36 +36,23 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Upload a version of this branch (no traffic)
+      - name: Start this branch against the real bindings
         run: |
           set -euo pipefail
           cd apps/api
-          pnpm exec wrangler versions upload 2>&1 | tail -20
+          pnpm exec wrangler dev --remote --port 8787 --ip 127.0.0.1 > "$RUNNER_TEMP/dev.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/dev.pid"
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:8787/health > /dev/null 2>&1 && { echo "healthy after ${i}"; break; }
+            sleep 5
+          done
+          curl -fsS http://127.0.0.1:8787/health || { tail -40 "$RUNNER_TEMP/dev.log"; exit 1; }
 
-      - name: Find its preview URL and pin the version
-        id: preview
-        run: |
-          set -euo pipefail
-          sleep 5
-          curl -sS "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/vcl-api/versions" \
-            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" > "$RUNNER_TEMP/versions.json"
-          node - "$RUNNER_TEMP/versions.json" <<'JS' >> "$GITHUB_OUTPUT"
-          const data = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
-          const items = (data.result?.items ?? []).slice().sort((a, b) => (b.number ?? 0) - (a.number ?? 0));
-          const newest = items[0];
-          if (!newest) { console.log('missing=true'); process.exit(0); }
-          console.log(`id=${newest.id}`);
-          console.log(`url=${newest.preview_url ?? ''}`);
-          console.log(`created=${newest.created_on}`);
-          JS
-          cat "$GITHUB_OUTPUT" | tail -3
-
-      - name: One resolve click against the preview
-        if: steps.preview.outputs.url != ''
+      - name: One resolve click
         run: |
           set -uo pipefail
-          node - "${{ steps.preview.outputs.url }}" <<'JS'
-          const base = process.argv[2].replace(/\/$/, '');
+          node - <<'JS'
+          const base = 'http://127.0.0.1:8787';
           const cropUrl = 'https://di2ponv0v5otw.cloudfront.net/posts/2026/10/09/6ac9b3b1ebb1a50f2b94b217/m_6ac9b4024fcf26fa59fcf316.jpg';
           const post = async (path, body) => {
             const r = await fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-scoop-install-id': 'verifier-live-check' }, body: JSON.stringify(body) });
@@ -94,10 +81,6 @@ jobs:
           }, null, 1));
           JS
 
-      - name: Delete the version this job created
-        if: always() && steps.preview.outputs.id != ''
-        run: |
-          set -uo pipefail
-          curl -sS -X DELETE \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/vcl-api/versions/${{ steps.preview.outputs.id }}" \
-            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -o /dev/null -w 'delete_version_http=%{http_code}\n' || true
+      - name: Stop the worker
+        if: always()
+        run: kill "$(cat "$RUNNER_TEMP/dev.pid")" 2>/dev/null || true; pkill -f workerd 2>/dev/null || true
