@@ -74,6 +74,7 @@ export interface Env {
   ETSY_KEYSTRING?: string;
   ETSY_SHARED_SECRET?: string;
   BRAVE_SEARCH_API_KEY?: string;
+  BRAVE_ENABLED?: string;
   JEV_DECISION_ROUTER?: string;
   JEV_MODE?: string;
   BENCHMARK_MODE?: string;
@@ -250,6 +251,10 @@ function makeEbayAuth(creds: EbayCredentials): EbayAuth {
   return new EbayAuth({ clientId: creds.clientId, clientSecret: creds.clientSecret, sandbox: creds.sandbox });
 }
 
+function activeBraveKey(env?: Env): string | undefined {
+  return env?.BRAVE_ENABLED === 'false' ? undefined : env?.BRAVE_SEARCH_API_KEY;
+}
+
 function commerceProviders(env: Env): NamedCommerceProvider[] {
   let serpapi: NamedCommerceProvider | null = null;
   if (env.SERPAPI_API_KEY) serpapi = { name: 'serpapi', provider: new SerpApiCommerceProvider(env.SERPAPI_API_KEY), tier: 'fallback' };
@@ -263,7 +268,7 @@ function commerceProviders(env: Env): NamedCommerceProvider[] {
   if (etsyCreds) etsy = { name: 'etsy', provider: new EtsyCommerceProvider(etsyCreds), tier: 'primary' };
 
   let brave: NamedCommerceProvider | null = null;
-  const braveCreds = resolveBraveCredentials(env);
+  const braveCreds = env.BRAVE_ENABLED === 'false' ? null : resolveBraveCredentials(env);
   if (braveCreds) brave = { name: 'brave', provider: new BraveCommerceProvider(braveCreds.apiKey), tier: 'fallback' };
 
   if (env.COMMERCE_PROVIDER === 'serpapi') return serpapi ? [serpapi] : [];
@@ -519,7 +524,7 @@ export async function refreshVerifiedOffers(
     ?? mapping.image_reference
     ?? merchantMetadata?.image_reference
     ?? await sourceImageForVerifiedMapping(mapping)
-    ?? await recoverVerifiedProductImage(visual?.env.BRAVE_SEARCH_API_KEY, mapping);
+    ?? await recoverVerifiedProductImage(activeBraveKey(visual?.env), mapping);
   const hydratedMapping: VerifiedProductMapping = {
     ...mapping,
     ...(sourceImage ? { image_reference: sourceImage } : {}),
@@ -963,9 +968,9 @@ async function confirmSameVideoReuseWithImage(
       }
     }
 
-    if (!merchantRef?.image_reference && env.BRAVE_SEARCH_API_KEY) {
+    if (!merchantRef?.image_reference && activeBraveKey(env)) {
       const recovered = await recoverVerifiedProductImage(
-        env.BRAVE_SEARCH_API_KEY, { ...candidate.mapping, image_reference: null },
+        activeBraveKey(env), { ...candidate.mapping, image_reference: null },
       ).catch(() => null);
       if (recovered) {
         const recoveredRef = {
@@ -1124,7 +1129,7 @@ async function confirmSameVideoReuseWithImage(
       ].filter((url): url is string => Boolean(url && safeImageUrl(url) && url !== row.product.image_reference));
       const alternate = [...new Set(references)][0] ?? null;
       const recovered = alternate ?? await recoverVerifiedProductImage(
-        env.BRAVE_SEARCH_API_KEY,
+        activeBraveKey(env),
         { ...row.candidate.mapping, image_reference: null },
       ).catch(() => null);
       return recovered ? { ...row, product: { ...row.product, image_reference: recovered } } : null;
@@ -2245,7 +2250,7 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       try {
         if (path === '/learning-export') return jsonResponse(await verifiedLedgerRequest(env, '/learning/export', {}));
         const input = await request.json() as { platform: string; content_ref: string; offers: Array<RosterOfferInput | string> };
-        const rows = await preparePartnerRoster(env, new URL(request.url).origin, input, undefined, env.BRAVE_SEARCH_API_KEY);
+        const rows = await preparePartnerRoster(env, new URL(request.url).origin, input, undefined, activeBraveKey(env));
         await ingestPartnerRoster(env, rows);
         await auditAdminAction(env, authorized.admin_id, 'partner_roster_ingested', { identities: rows.length, offers: input.offers.length, content_ref: input.content_ref });
         return jsonResponse({ accepted: true, distinct_variants: rows.length, merchant_offers: input.offers.length, reference_ready: rows.length });
