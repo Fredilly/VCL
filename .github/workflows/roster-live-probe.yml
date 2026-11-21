@@ -12,6 +12,8 @@ name: roster-live-probe
 # It spends real provider credit: one vision call and one resolver call per probe.
 
 on:
+  push:
+    branches: [fix/roster-coverage-and-family-order]
   pull_request:
     types: [labeled]
   workflow_dispatch:
@@ -26,7 +28,7 @@ permissions:
 
 jobs:
   probe:
-    if: (github.event_name == 'pull_request' && github.event.label.name == 'run-live-roster') || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.label.name == 'run-live-roster') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
