@@ -30,7 +30,8 @@ permissions:
 
 jobs:
   probe:
-    if: (github.event_name == 'pull_request' && github.event.label.name == 'run-live-roster') || github.event_name == 'workflow_dispatch'
+    # Never run secret-bearing live probes on fork PR code.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.label.name == 'run-live-roster' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
