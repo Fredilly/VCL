@@ -1,13 +1,11 @@
 name: verifier-live-check
 
-# One isolated live verification of the verifier fallback, running the branch's code
-# on Cloudflare with the Worker's own bindings and secrets.
+# One isolated live verification of the verifier fallback, running this branch's
+# code on Cloudflare with the Worker's own bindings and secrets.
 #
-# It uploads a VERSION with a preview alias: production traffic keeps serving the
-# deployed version. The alias is deleted at the end. One resolve request is made,
-# which is what a single user click does.
-#
-# Nothing secret is printed: only status codes, counts and reason names.
+# It uploads a VERSION (production traffic keeps serving the deployed one), finds
+# that version's preview URL through the API, makes one resolve request, and then
+# deletes the version it created. Counts and reason names only; no secret values.
 
 on:
   push:
@@ -38,34 +36,36 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Upload a preview version of this branch
-        id: upload
+      - name: Upload a version of this branch (no traffic)
         run: |
           set -euo pipefail
           cd apps/api
-          pnpm exec wrangler versions upload --preview-alias verifier-check 2>&1 | tee "$RUNNER_TEMP/upload.log"
-          url=$(grep -rhoE 'https://[a-z0-9-]+-verifier-check[a-z0-9.-]*\.workers\.dev' "$RUNNER_TEMP/upload.log" | head -1)
-          [ -n "$url" ] || { echo 'no preview url in upload output'; exit 1; }
-          echo "url=$url" >> "$GITHUB_OUTPUT"
-          version=$(grep -oE 'Version ID: *[0-9a-f-]{36}' "$RUNNER_TEMP/upload.log" | grep -oE '[0-9a-f-]{36}' | head -1 || true)
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "preview ready"
+          pnpm exec wrangler versions upload 2>&1 | tail -20
 
-      - name: Wait for the preview to answer
+      - name: Find its preview URL and pin the version
+        id: preview
         run: |
           set -euo pipefail
-          for i in $(seq 1 30); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "${{ steps.upload.outputs.url }}/health" || true)
-            [ "$code" = "200" ] && { echo "healthy after ${i}0s"; break; }
-            sleep 10
-          done
-          curl -fsS "${{ steps.upload.outputs.url }}/health" | head -c 200; echo
+          sleep 5
+          curl -sS "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/vcl-api/versions" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" > "$RUNNER_TEMP/versions.json"
+          node - "$RUNNER_TEMP/versions.json" <<'JS' >> "$GITHUB_OUTPUT"
+          const data = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
+          const items = (data.result?.items ?? []).slice().sort((a, b) => (b.number ?? 0) - (a.number ?? 0));
+          const newest = items[0];
+          if (!newest) { console.log('missing=true'); process.exit(0); }
+          console.log(`id=${newest.id}`);
+          console.log(`url=${newest.preview_url ?? ''}`);
+          console.log(`created=${newest.created_on}`);
+          JS
+          cat "$GITHUB_OUTPUT" | tail -3
 
-      - name: One resolve click
+      - name: One resolve click against the preview
+        if: steps.preview.outputs.url != ''
         run: |
           set -uo pipefail
-          node - "${{ steps.upload.outputs.url }}" <<'JS'
-          const base = process.argv[2];
+          node - "${{ steps.preview.outputs.url }}" <<'JS'
+          const base = process.argv[2].replace(/\/$/, '');
           const cropUrl = 'https://di2ponv0v5otw.cloudfront.net/posts/2026/10/09/6ac9b3b1ebb1a50f2b94b217/m_6ac9b4024fcf26fa59fcf316.jpg';
           const post = async (path, body) => {
             const r = await fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-scoop-install-id': 'verifier-live-check' }, body: JSON.stringify(body) });
@@ -75,12 +75,11 @@ jobs:
           try {
             const img = await fetch(cropUrl, { signal: AbortSignal.timeout(15000) });
             if (img.ok) dataUrl = `data:${img.headers.get('content-type')?.split(';')[0] ?? 'image/jpeg'};base64,${Buffer.from(await img.arrayBuffer()).toString('base64')}`;
-            else console.log('crop fetch status', img.status);
-          } catch (e) { console.log('crop fetch failed', e.message); }
-          if (!dataUrl) { console.log(JSON.stringify({ result: 'no crop image reachable from CI' })); process.exit(0); }
-
+            else console.log('crop_fetch_status', img.status);
+          } catch (e) { console.log('crop_fetch_failed', e.message); }
+          if (!dataUrl) { console.log(JSON.stringify({ result: 'no crop reachable from CI' })); process.exit(0); }
           const analysed = await post('/analyze-selection', { dataUrl, timestamp: 0, context: { platform: 'youtube', content_ref: 'n9u8ynhBdSo', timestamp_ms: 0 } });
-          if (analysed.status !== 200) { console.log(JSON.stringify({ stage: 'analyze', status: analysed.status, reason: analysed.body.reason })); process.exit(0); }
+          if (analysed.status !== 200) { console.log(JSON.stringify({ stage: 'analyze', status: analysed.status, reason: analysed.body.reason, routing: analysed.body.vision_routing })); process.exit(0); }
           const description = analysed.body.description ?? (analysed.body.category ? analysed.body : null);
           const resolved = await post('/resolve-products', { description, source_image: dataUrl, context: { platform: 'youtube', content_ref: 'n9u8ynhBdSo', timestamp_ms: 0 } });
           const vm = resolved.body.verified_mapping ?? {};
@@ -89,18 +88,16 @@ jobs:
             products: (resolved.body.products ?? []).length,
             classes: (resolved.body.products ?? []).map((p) => p.result_class),
             compared: resolved.body.verification?.compared ?? vm.candidates_compared ?? null,
-            visual_failure_reasons: resolved.body.verification?.image_failure_reasons ?? vm.visual_failure_reasons ?? null,
-            vision_routing: analysed.body.vision_routing ?? null,
-            first_destination_host: (() => { try { return new URL((resolved.body.products ?? [])[0]?.destination ?? '').host; } catch { return null; } })(),
+            failure_reasons: resolved.body.verification?.image_failure_reasons ?? vm.visual_failure_reasons ?? null,
+            analyze_routing: analysed.body.vision_routing ?? null,
+            merchant: (() => { try { return new URL((resolved.body.products ?? [])[0]?.destination ?? '').host; } catch { return null; } })(),
           }, null, 1));
           JS
 
-      - name: Remove the preview version
-        if: always()
+      - name: Delete the version this job created
+        if: always() && steps.preview.outputs.id != ''
         run: |
           set -uo pipefail
-          version="${{ steps.upload.outputs.version }}"
-          [ -n "$version" ] || { echo 'no version id to delete'; exit 0; }
           curl -sS -X DELETE \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/vcl-api/versions/${version}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/vcl-api/versions/${{ steps.preview.outputs.id }}" \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -o /dev/null -w 'delete_version_http=%{http_code}\n' || true
