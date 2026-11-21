@@ -134,7 +134,7 @@ for (const offer of probes) {
   const started = Date.now();
   // Space the probes: a burst trips the provider's rate limit and reads as an
   // outage, which hides the matching signal this run exists to measure.
-  if (!firstProbe) await new Promise((resolve) => setTimeout(resolve, 3000));
+  if (!firstProbe) await new Promise((resolve) => setTimeout(resolve, 20000));
   firstProbe = false;
   try {
     const crop = await dataUrlFor(offer.image_reference);
