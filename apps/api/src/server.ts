@@ -57,6 +57,7 @@ export interface Env {
   GROQ_API_KEY?: string;
   VISION_PROVIDER?: string;
   OPENROUTER_BASE_URL?: string;
+  OPS_RUN_ID?: string;
   PRIVACY_FALLBACK_MODEL?: string;
   REFERENCE_ORIGIN?: string;
   GEMINI_MODEL?: string;
@@ -2057,6 +2058,23 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
 export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promise: Promise<unknown>): void }): Promise<Response> {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
   const path = new URL(request.url).pathname;
+  // TEMPORARY ops endpoint (throwaway branch, never merged): one-time roster import
+  // for a deployment where no admin credential is held by the operator. The run id
+  // is supplied by the deployer and must match, so it cannot be called by anyone
+  // who is not already able to deploy this Worker.
+  if (path === '/ops/import-roster' && request.method === 'POST') {
+    const runId = request.headers.get('x-ops-run') ?? '';
+    if (!runId || runId !== (env as { OPS_RUN_ID?: string }).OPS_RUN_ID) {
+      return jsonResponse({ error: 'Not found' }, 404);
+    }
+    const input = await request.json() as { platform: string; content_ref: string; offers: Array<never> };
+    const rows = await preparePartnerRoster(env, new URL(request.url).origin === 'http://127.0.0.1:8787'
+      ? (env.REFERENCE_ORIGIN || 'http://127.0.0.1:8787')
+      : new URL(request.url).origin, input, undefined, env.BRAVE_SEARCH_API_KEY);
+    await ingestPartnerRoster(env, rows);
+    return jsonResponse({ accepted: true, rows: rows.length, offers: input.offers.length, content_ref: input.content_ref });
+  }
+
   if (request.method === 'GET' && path === '/health') {
     return jsonResponse({ service: 'vcl-api', status: 'ok' });
   }
