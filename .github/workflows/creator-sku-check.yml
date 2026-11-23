@@ -46,7 +46,7 @@ jobs:
           const cropUrl='https://di2ponv0v5otw.cloudfront.net/posts/2026/10/09/6ac9b3b1ebb1a50f2b94b217/m_6ac9b4024fcf26fa59fcf316.jpg';
           const img=await fetch(cropUrl);
           const dataUrl=`data:${img.headers.get('content-type')?.split(';')[0]??'image/jpeg'};base64,${Buffer.from(await img.arrayBuffer()).toString('base64')}`;
-          for (const ts of [249744, 60000]) {
+          for (const ts of [249744, 300000, 400000, 500000, 673000]) {
             const install=crypto.randomUUID();
             const post=async(p,b)=>{const r=await fetch(base+p,{method:'POST',headers:{'content-type':'application/json','x-scoop-install-id':install},body:JSON.stringify(b)});return{status:r.status,body:await r.json().catch(()=>({}))}};
             const a=await post('/analyze-selection',{dataUrl,timestamp:ts,context:{platform:'youtube',content_ref:'n9u8ynhBdSo',timestamp_ms:ts}});
