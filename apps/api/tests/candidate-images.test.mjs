@@ -760,3 +760,23 @@ test('an endpoint that refuses the schema falls back to plain JSON mode once, wi
   assert.equal(JSON.stringify(formats), JSON.stringify(['json_schema', 'json_object']));
   assert.equal(result.failure_reasons.structured_output_unsupported, 1);
 });
+
+test('a billing refusal is discovered once, not once per batch', async () => {
+  const { candidate, description } = example(apparelCases[0]);
+  let modelCalls = 0;
+  const { compareCandidateImages } = loadModule(filename, { fetch: async (url) => {
+    if (!String(url).includes('openrouter.ai') && !String(url).includes('ai-gateway')) {
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+    }
+    modelCalls++;
+    return new Response('{"error":{"message":"Insufficient credits"}}', { status: 402 });
+  } });
+  const products = Array.from({ length: 18 }, (_, i) => ({
+    ...candidate, id: 'billing-' + i, image_reference: `https://cdn.shopify.com/billing-${i}.png`,
+  }));
+  const result = await compareCandidateImages('key', 'model', image, description, products,
+    undefined, undefined, { provider: 'openrouter', concurrency: 1, maxAttempts: 2 });
+  assert.equal(modelCalls, 1, 'the first refusal ends the interaction');
+  assert.equal(result.provider_unavailable, 'billing_unavailable');
+  assert.equal(result.compared, 0);
+});

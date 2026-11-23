@@ -742,9 +742,13 @@ export async function compareCandidateImages(
               break;
             }
             if (![429, 500, 502, 503, 504].includes(result.status)) {
-              // Auth failures never heal by retrying, and later batches must not
-              // spend their own calls discovering the same thing.
-              if ([401, 403].includes(result.status) || (result.status === 404 && !isDefaultOpenRouter)) providerUnavailableReason = reason;
+              // Auth and billing failures never heal by retrying, and later batches
+              // must not spend their own calls discovering the same thing: a 402 from
+              // the gateway is an empty account, and eight batches must not each pay
+              // for that discovery.
+              if ([401, 402, 403].includes(result.status) || (result.status === 404 && !isDefaultOpenRouter)) {
+                providerUnavailableReason = result.status === 402 ? 'billing_unavailable' : reason;
+              }
               break;
             }
             // A hard rate limit that survives recovery means the provider is
