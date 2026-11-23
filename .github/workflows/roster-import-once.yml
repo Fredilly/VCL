@@ -47,7 +47,9 @@ jobs:
         run: |
           set -euo pipefail
           cd apps/api
-          pnpm exec wrangler dev --remote --port 8787 --ip 127.0.0.1 --var OPS_RUN_ID:"$OPS_RUN" > "$RUNNER_TEMP/dev.log" 2>&1 &
+          # Durable Objects are not supported by `dev --remote`; this flag keeps the
+          # Worker local and attaches the real remote bindings instead.
+          pnpm exec wrangler dev --x-remote-bindings --port 8787 --ip 127.0.0.1 --var OPS_RUN_ID:"$OPS_RUN" > "$RUNNER_TEMP/dev.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/dev.pid"
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8787/health >/dev/null 2>&1 && break; sleep 5; done
           curl -fsS http://127.0.0.1:8787/health || { tail -40 "$RUNNER_TEMP/dev.log"; exit 1; }
