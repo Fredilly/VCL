@@ -60,9 +60,12 @@ jobs:
               headers: { 'content-type': 'application/json', 'x-ops-run': process.argv[3] },
               body: JSON.stringify(manifest),
             });
-            console.log('import_status', res.status, await res.text());
+            console.log('import_status', res.status, (await res.text()).slice(0, 300));
           })();
           JS
+          sleep 3
+          echo '--- worker log ---'
+          grep -iE "error|exception|stack|PartnerRoster|ingest" "$RUNNER_TEMP/dev.log" | tail -20 || true
       - name: Verify the roster is visible at several timestamps
         run: |
           set -uo pipefail
