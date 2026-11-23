@@ -339,9 +339,24 @@ function normalizeContext(value: unknown): ProductContext | undefined {
   return {
     platform: typeof v.platform === 'string' ? v.platform.slice(0, 40) : null,
     title: typeof v.title === 'string' ? v.title.slice(0, 300) : null,
-    content_ref: typeof v.content_ref === 'string' ? v.content_ref.slice(0, 180) : null,
+    content_ref: typeof v.content_ref === 'string' ? normaliseContentRef(platformOf(v), v.content_ref) : null,
     timestamp_ms: typeof v.timestamp_ms === 'number' && Number.isFinite(v.timestamp_ms) && v.timestamp_ms >= 0 ? Math.round(v.timestamp_ms) : null,
   };
+}
+
+/**
+ * Clients differ on whether the content reference carries its platform prefix:
+ * the extension sends "youtube:<id>" while a partner roster is imported as
+ * "youtube" + "<id>". Left alone, the roster is invisible to every real click.
+ */
+export function normaliseContentRef(platform: string | null, value: string): string {
+  const ref = value.trim().slice(0, 180);
+  const prefix = platform ? `${platform.toLowerCase()}:` : '';
+  return prefix && ref.toLowerCase().startsWith(prefix) ? ref.slice(prefix.length) : ref;
+}
+
+function platformOf(v: Record<string, unknown>): string | null {
+  return typeof v.platform === 'string' ? v.platform.slice(0, 40) : null;
 }
 
 function makeEbayAuth(creds: EbayCredentials): EbayAuth {
