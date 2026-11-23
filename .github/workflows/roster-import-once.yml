@@ -1,11 +1,13 @@
 name: roster-import-once
 
-# One-time operational import of the partner roster into production.
+# Import the partner roster into production through the validated ingestion path,
+# then restore the exact commit production was running when this job started.
 #
-# Runs this throwaway branch under `wrangler dev --remote` (real bindings, real
-# secrets, no traffic change), imports through the same preparePartnerRoster +
-# ingestPartnerRoster path the admin endpoint uses, then verifies the roster is
-# visible at several timestamps. The branch is deleted after the run.
+# The branch differs from main in two files: this workflow, and one guarded route in
+# server.ts. wrangler.jsonc is byte-identical, so bindings, routes, Durable Object
+# migrations, vars and secret references are untouched.
+#
+# Restoration targets an explicit SHA, never "whatever main points to afterwards".
 
 on:
   push:
@@ -19,74 +21,101 @@ permissions:
 jobs:
   import:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       PARTNER_ROSTER_LIST: ${{ secrets.PARTNER_ROSTER_LIST }}
+      RESTORE_SHA: 1422bcdf674f8fb5e72d94ed89a28944ab747bae
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ops/roster-import
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @vcl/api build
+
       - name: Intake the partner list
         run: |
           set -euo pipefail
           printf '%s' "$PARTNER_ROSTER_LIST" > "$RUNNER_TEMP/list.md"
+          pnpm --filter @vcl/api build
           node tools/roster-intake.mjs "$RUNNER_TEMP/list.md" --local --out "$RUNNER_TEMP/intake"
-          node -e "const r=require(process.env.RUNNER_TEMP+'/intake/report.json');console.log(JSON.stringify({variants:r.items.length,ready:r.items.filter(i=>i.status==='READY').length,offers:r.offers}))"
-      - name: Start the worker and import
+          node -e "const r=require(process.env.RUNNER_TEMP+'/intake/report.json');console.log('INTAKE '+JSON.stringify({variants:r.items.length,ready:r.items.filter(i=>i.status==='READY').length,offers:r.offers}))"
+
+      - name: Deploy the import build
         env:
           OPS_RUN: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
+          echo "OPS_RUN=$OPS_RUN" >> "$GITHUB_ENV"
           cd apps/api
-          # Durable Objects are not supported by `dev --remote`; this flag keeps the
-          # Worker local and attaches the real remote bindings instead.
-          pnpm exec wrangler dev --x-remote-bindings --port 8787 --ip 127.0.0.1 --var OPS_RUN_ID:"$OPS_RUN" > "$RUNNER_TEMP/dev.log" 2>&1 &
-          echo $! > "$RUNNER_TEMP/dev.pid"
-          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8787/health >/dev/null 2>&1 && break; sleep 5; done
-          curl -fsS http://127.0.0.1:8787/health || { tail -40 "$RUNNER_TEMP/dev.log"; exit 1; }
+          pnpm exec wrangler deploy --var OPS_RUN_ID:"$OPS_RUN" 2>&1 | tee "$RUNNER_TEMP/deploy-import.log" | tail -14
+          grep -oE 'Current Version ID: *[0-9a-f-]{36}' "$RUNNER_TEMP/deploy-import.log" | head -1 || true
+
+      - name: Import
+        run: |
+          set -uo pipefail
           node - "$RUNNER_TEMP/intake/manifest.json" "$OPS_RUN" <<'JS'
           const fs = require('fs');
+          const base = 'https://api.vcl.article6.org';
           const manifest = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
           (async () => {
-            const res = await fetch('http://127.0.0.1:8787/ops/import-roster', {
+            const res = await fetch(`${base}/ops/import-roster`, {
               method: 'POST',
               headers: { 'content-type': 'application/json', 'x-ops-run': process.argv[3] },
               body: JSON.stringify(manifest),
             });
-            console.log('import_status', res.status, (await res.text()).slice(0, 300));
+            console.log('IMPORT', res.status, (await res.text()).slice(0, 300));
           })();
           JS
           sleep 3
-          echo '--- worker log ---'
-          grep -iE "error|exception|stack|PartnerRoster|ingest" "$RUNNER_TEMP/dev.log" | tail -20 || true
-      - name: Verify the roster is visible at several timestamps
+
+      - name: Verify persistence across eight timestamps
         run: |
           set -uo pipefail
           node - <<'JS'
-          const base='http://127.0.0.1:8787';
+          const base='https://api.vcl.article6.org';
           const cropUrl='https://di2ponv0v5otw.cloudfront.net/posts/2026/10/09/6ac9b3b1ebb1a50f2b94b217/m_6ac9b4024fcf26fa59fcf316.jpg';
           const img=await fetch(cropUrl);
           const dataUrl=`data:${img.headers.get('content-type')?.split(';')[0]??'image/jpeg'};base64,${Buffer.from(await img.arrayBuffer()).toString('base64')}`;
           const out=[];
-          for (const ts of [60000, 150000, 250000, 300000, 400000, 500000, 673000, 800000]) {
+          for (const ts of [60000,150000,250000,300000,400000,500000,673000,800000]) {
             const install=crypto.randomUUID();
             const post=async(p,b)=>{const r=await fetch(base+p,{method:'POST',headers:{'content-type':'application/json','x-scoop-install-id':install},body:JSON.stringify(b)});return await r.json().catch(()=>({}))};
-            await post('/analyze-selection',{dataUrl,timestamp:ts,context:{platform:'youtube',content_ref:'n9u8ynhBdSo',timestamp_ms:ts}});
-            const r=await post('/resolve-products',{description:{category:'accessories',subcategory:'bag',brand_candidate:'Louis Vuitton',color:'brown',material:'canvas',visible_text:[],logos_markings:[],distinctive_features:[],shape_silhouette:[],style_attributes:[],hardware_details:[],search_terms:[],confidence:.9,identity_confidence:0},source_image:dataUrl,context:{platform:'youtube',content_ref:'n9u8ynhBdSo',timestamp_ms:ts}});
+            const a=await post('/analyze-selection',{dataUrl,timestamp:ts,context:{platform:'youtube',content_ref:'n9u8ynhBdSo',timestamp_ms:ts}});
+            const r=await post('/resolve-products',{description:a.description??a,source_image:dataUrl,context:{platform:'youtube',content_ref:'n9u8ynhBdSo',timestamp_ms:ts}});
             const ret=(r.verified_mapping||{}).roster_retrieval||{};
-            out.push({ts, roster_count: ret.roster_count ?? null, retrieved:(ret.retrieved_keys||[]).length, products:(r.products||[]).length});
+            out.push({ts, roster_count: ret.roster_count ?? null, products:(r.products||[]).length});
           }
-          console.log('VERIFY ' + JSON.stringify(out));
+          console.log('VERIFY_IMPORT '+JSON.stringify(out));
           JS
-      - name: Stop
+
+      - name: Restore the previous production commit
         if: always()
-        run: kill "$(cat "$RUNNER_TEMP/dev.pid")" 2>/dev/null || true; pkill -f workerd 2>/dev/null || true
+        run: |
+          set -uo pipefail
+          git checkout --force "$RESTORE_SHA"
+          pnpm install --frozen-lockfile
+          pnpm --filter @vcl/api build
+          cd apps/api
+          pnpm exec wrangler deploy 2>&1 | tee "$RUNNER_TEMP/deploy-restore.log" | tail -14
+          echo "RESTORED_TO=$RESTORE_SHA"
+
+      - name: Verify restoration
+        if: always()
+        run: |
+          set -uo pipefail
+          curl -fsS https://api.vcl.article6.org/health; echo
+          node - <<'JS'
+          const base='https://api.vcl.article6.org';
+          const install=crypto.randomUUID();
+          const r=await fetch(`${base}/resolve-products`,{method:'POST',headers:{'content-type':'application/json','x-scoop-install-id':install},body:JSON.stringify({description:{category:'accessories',subcategory:'bag',brand_candidate:'Louis Vuitton',color:'brown',material:'canvas',visible_text:[],logos_markings:[],distinctive_features:[],shape_silhouette:[],style_attributes:[],hardware_details:[],search_terms:[],confidence:.9,identity_confidence:0},context:{platform:'youtube',content_ref:'n9u8ynhBdSo',timestamp_ms:300000}})});
+          const b=await r.json().catch(()=>({}));
+          const ret=(b.verified_mapping||{}).roster_retrieval||{};
+          console.log('AFTER_RESTORE '+JSON.stringify({status:r.status, roster_count:ret.roster_count??null, products:(b.products||[]).length}));
+          JS
