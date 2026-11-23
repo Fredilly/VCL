@@ -1,0 +1,70 @@
+name: deploy-443
+
+# Deploy this branch to production for validation, recording the version that was
+# live before it (ROLLBACK_VERSION) so the change can be reverted without guessing.
+
+on:
+  push:
+    paths:
+      - '.github/workflows/deploy-443.yml'
+      - 'apps/api/src/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/content-ref-normalisation
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Record the version currently serving production
+        run: |
+          set -euo pipefail
+          curl -sS "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/vcl-api/deployments" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" > "$RUNNER_TEMP/deployments.json"
+          node - "$RUNNER_TEMP/deployments.json" <<'JS' >> "$GITHUB_ENV"
+          const data = require('fs').readFileSync(process.argv[2], 'utf8');
+          const parsed = JSON.parse(data);
+          const current = (parsed.result?.deployments ?? []).find((d) => d.versions?.[0]?.percentage === 100);
+          console.log(`ROLLBACK_VERSION=${current?.versions?.[0]?.version_id ?? ''}`);
+          console.log(`ROLLBACK_CREATED=${current?.created_on ?? ''}`);
+          JS
+
+      - name: Deploy
+        run: |
+          set -euo pipefail
+          pnpm --filter @vcl/api build
+          cd apps/api
+          pnpm exec wrangler deploy 2>&1 | tee "$RUNNER_TEMP/deploy.log" | tail -14
+          echo "DEPLOYED_VERSION=$(grep -oE 'Current Version ID: *[0-9a-f-]{36}' "$RUNNER_TEMP/deploy.log" | grep -oE '[0-9a-f-]{36}' | head -1)"
+          echo "ROLLBACK_WAS=$ROLLBACK_VERSION ($ROLLBACK_CREATED)"
+
+      - name: Verify the extension's own content_ref reaches the roster
+        run: |
+          set -uo pipefail
+          node - <<'JS'
+          const base='https://api.vcl.article6.org';
+          const out=[];
+          for (const ts of [30000, 300000, 500000, 700000]) {
+            const install=crypto.randomUUID();
+            const r=await fetch(`${base}/resolve-products`,{method:'POST',headers:{'content-type':'application/json','x-scoop-install-id':install},body:JSON.stringify({description:{category:'accessories',subcategory:'bag',brand_candidate:'Louis Vuitton',color:'brown',material:'canvas',visible_text:[],logos_markings:[],distinctive_features:[],shape_silhouette:[],style_attributes:[],hardware_details:[],search_terms:[],confidence:.9,identity_confidence:0},context:{platform:'youtube',content_ref:'youtube:n9u8ynhBdSo',timestamp_ms:ts}})});
+            const b=await r.json().catch(()=>({}));
+            const ret=(b.verified_mapping||{}).roster_retrieval||{};
+            out.push({ts, status:r.status, roster_count:ret.roster_count??null, products:(b.products||[]).length});
+          }
+          console.log('PREFIX_VERIFY '+JSON.stringify(out));
+          JS
