@@ -3239,12 +3239,36 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
             (resolved.verification.contradictions['related_without_identity_evidence'] ?? 0) + dropped;
         }
       }
-      if (rosterSuggestions.length) {
-        const suggested = new Set(rosterSuggestions.map(product => product.destination));
+      // The creator's roster is the product. When the click resolves to a model the
+      // roster also carries, the creator's own listing is the purchasable answer
+      // even if its photo lost the visual round to a seed or a marketplace row.
+      // It is claimed as likeness of the model, never as the exact variant.
+      const creatorSkus: ProductCandidate[] = rosterSuggestions.length ? [] : (() => {
+        const winner = resolved.products[0];
+        const winnerTokens = identityTokens(`${winner?.title ?? ''} ${winner?.model ?? ''}`);
+        if (!winnerTokens.length) return [];
+        return canonicalRows.filter((row) => {
+          const rowTokens = identityTokens(`${row.identity.title ?? ''} ${row.identity.model ?? ''}`);
+          if (!rowTokens.length) return false;
+          // Every distinctive token of the roster row must appear in what was
+          // identified; a single shared word is how "Speedy" becomes "Speedy Soft".
+          return rowTokens.every((token) => winnerTokens.includes(token));
+        }).slice(0, 2).map((row) => ({
+          ...verifiedMappingProduct(row.mapping),
+          id: `creator-sku:${row.identity.canonical_key}`,
+          result_class: 'SIMILAR' as const,
+          relationship: 'SIMILAR' as const,
+          identity_key: `creator-sku:${verifiedIdentityKey(row.mapping.product_id)}`,
+          verification_reasons: ['the creator listed this model for this video; the exact variant is not visually confirmed'],
+        }));
+      })();
+      const leads = [...rosterSuggestions, ...creatorSkus];
+      if (leads.length) {
+        const suggested = new Set(leads.map(product => product.destination));
         const rest = resolved.products.filter(product => !product.destination || !suggested.has(product.destination));
         const exactCount = rest.filter(product => product.result_class === 'EXACT').length;
-        // Anything already Exact stays on top; suggestions lead everything else.
-        resolved.products = [...rest.slice(0, exactCount), ...rosterSuggestions, ...rest.slice(exactCount)];
+        // Anything already Exact stays on top; leads come next.
+        resolved.products = [...rest.slice(0, exactCount), ...leads, ...rest.slice(exactCount)];
         if (resolved.state === 'NO_RESULTS') resolved.state = 'RESULTS';
       }
       const feedbackEvidenceKey = evidenceFingerprint(description);
