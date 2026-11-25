@@ -12,10 +12,10 @@
   },
   "vars": {
     "VISION_PROVIDER": "openrouter",
-    "OPENROUTER_MODEL": "google/gemini-2.5-flash-lite",
-    // The OpenRouter account is out of credit and refuses the verifier's ZDR
-    // policy; the AI gateway serves the same model with the Worker's gateway key.
-    "OPENROUTER_BASE_URL": "https://ai-gateway.vercel.sh/v1/chat/completions",
+    // This account has credit, but no Zero-Data-Retention endpoint for the Gemini
+    // models: with zdr enforced they answer 404. gpt-4o-mini does have one, so the
+    // verifier keeps its privacy guarantee instead of buying gateway credit.
+    "OPENROUTER_MODEL": "openai/gpt-4o-mini",
     "GEMINI_MODEL": "gemini-3.5-flash-lite",
     "BRAVE_ENABLED": "false",
     "VERIFIER_MAX_ATTEMPTS": "1",
