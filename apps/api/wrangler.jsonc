@@ -16,6 +16,11 @@
     // models: with zdr enforced they answer 404. gpt-4o-mini does have one, so the
     // verifier keeps its privacy guarantee instead of buying gateway credit.
     "OPENROUTER_MODEL": "openai/gpt-4o-mini",
+    // Pinned explicitly: a stale value from an earlier deployment survived the
+    // config removal and silently kept the verifier on the gateway. The provider
+    // treats this exact string as "native OpenRouter", which is what applies the
+    // zero-retention routing block.
+    "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1/chat/completions",
     "GEMINI_MODEL": "gemini-3.5-flash-lite",
     "BRAVE_ENABLED": "false",
     "VERIFIER_MAX_ATTEMPTS": "1",
