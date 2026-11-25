@@ -28,9 +28,11 @@ export type SubrequestLedger = {
 
 const KINDS: SubrequestKind[] = ['page', 'image', 'redirect', 'model', 'commerce'];
 
-/** Conservative default: 50 platform subrequests minus headroom for the response
- * path and the commerce fan-out that happens after identification. */
-export const DEFAULT_SUBREQUEST_LIMIT = 44;
+/** A 34-row partner roster needs one image fetch per row, plus model batches,
+ * page metadata and the commerce fan-out. Measured on a real Bagholic click, the old
+ * 44 refused 68 requests and left most rows uncompared. 60 is the paid-plan headroom;
+ * the platform still enforces its own hard ceiling below this. */
+export const DEFAULT_SUBREQUEST_LIMIT = 60;
 
 export function createSubrequestLedger(limit = DEFAULT_SUBREQUEST_LIMIT): SubrequestLedger {
   const cap = Number.isFinite(limit) && limit > 0 ? Math.trunc(limit) : DEFAULT_SUBREQUEST_LIMIT;
