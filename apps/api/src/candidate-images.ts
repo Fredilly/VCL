@@ -217,7 +217,18 @@ async function fetchCandidateImage(
 }
 
 function parseModelJson(text: string): unknown {
-  return JSON.parse(text.trim().replace(/^\`\`\`json\s*/i, '').replace(/\s*\`\`\`$/, ''));
+  const direct = text.trim().replace(/^\`\`\`(?:json)?\s*/i, '').replace(/\s*\`\`\`\s*$/, '');
+  try {
+    return JSON.parse(direct);
+  } catch {
+    // Gemini wraps the object in prose often enough to matter: six of ten batches
+    // failed to parse on a real click. Parse the outermost object instead of
+    // failing the batch, which used to cost every comparison in it.
+    const start = direct.indexOf('{');
+    const end = direct.lastIndexOf('}');
+    if (start === -1 || end <= start) throw new SyntaxError('no JSON object in model output');
+    return JSON.parse(direct.slice(start, end + 1).replace(/,\s*([}\]])/g, '$1'));
+  }
 }
 
 const INSTRUCTIONS = `Compare the selected object crop with each numbered candidate product image.
