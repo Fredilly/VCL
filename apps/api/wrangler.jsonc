@@ -12,10 +12,10 @@
   },
   "vars": {
     "VISION_PROVIDER": "openrouter",
-    // This account has credit, but no Zero-Data-Retention endpoint for the Gemini
-    // models: with zdr enforced they answer 404. gpt-4o-mini does have one, so the
-    // verifier keeps its privacy guarantee instead of buying gateway credit.
-    "OPENROUTER_MODEL": "openai/gpt-4o-mini",
+    // The Gemini 2.5 models have no Zero-Data-Retention endpoint on this account
+    // (404 under zdr); the 3.x Flash-Lite line does, and costs a fraction of the
+    // OpenAI models for the same comparison.
+    "OPENROUTER_MODEL": "google/gemini-3.5-flash-lite",
     // Pinned explicitly: a stale value from an earlier deployment survived the
     // config removal and silently kept the verifier on the gateway. The provider
     // treats this exact string as "native OpenRouter", which is what applies the
