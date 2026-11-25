@@ -2072,6 +2072,35 @@ export async function resolveProducts(providers: NamedCommerceProvider[], querie
 export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promise: Promise<unknown>): void }): Promise<Response> {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
   const path = new URL(request.url).pathname;
+  // TEMPORARY: what does OpenRouter actually answer for a verification-shaped call?
+  if (path === '/__diag/402') {
+    const key = env.OPENROUTER_API_KEY ?? '';
+    const model = env.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
+    const one = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const send = async (label: string, body: unknown) => {
+      try {
+        const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(12000),
+        });
+        return { label, status: r.status, body: (await r.text()).slice(0, 240) };
+      } catch (error) { return { label, error: String(error).slice(0, 120) }; }
+    };
+    const image = { type: 'image_url', image_url: { url: `data:image/png;base64,${one}` } };
+    const probes = [
+      await send('text-only', { model, messages: [{ role: 'user', content: 'ok' }], max_tokens: 8 }),
+      await send('zdr-text', { model, messages: [{ role: 'user', content: 'ok' }], max_tokens: 8, provider: { data_collection: 'deny', zdr: true } }),
+      await send('zdr-2images', { model, max_tokens: 16, provider: { data_collection: 'deny', zdr: true },
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'compare' }, image, image] }] }),
+      await send('key', { model: 'noop', messages: [] }),
+    ];
+    const balance = await fetch('https://openrouter.ai/api/v1/key', { headers: { authorization: `Bearer ${key}` } })
+      .then((r) => r.text()).catch(() => 'unavailable');
+    return jsonResponse({ model, endpoint: env.OPENROUTER_BASE_URL ?? 'openrouter-default', key_len: key.length, balance: balance.slice(0, 300), probes });
+  }
+
   if (request.method === 'GET' && path === '/health') {
     return jsonResponse({ service: 'vcl-api', status: 'ok' });
   }
