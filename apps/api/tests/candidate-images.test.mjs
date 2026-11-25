@@ -760,3 +760,18 @@ test('an endpoint that refuses the schema falls back to plain JSON mode once, wi
   assert.equal(JSON.stringify(formats), JSON.stringify(['json_schema', 'json_object']));
   assert.equal(result.failure_reasons.structured_output_unsupported, 1);
 });
+
+test('a JSON object wrapped in prose still yields its comparisons', async () => {
+  const { candidate, description } = example(apparelCases[0]);
+  const payload = { source: { category: { value: 'apparel', confidence: 0.9, basis: 'image' } }, candidates: [
+    { index: 0, attributes: { category: { value: 'apparel', confidence: 0.9, basis: 'image' } }, similarity: 0.8, confidence: 0.8, matching_details: [] },
+  ] };
+  const text = 'Sure — here is the comparison:\n\`\`\`json\n' + JSON.stringify(payload) + '\n\`\`\`\nLet me know if you need more.';
+  const { compareCandidateImages } = loadModule(filename, { fetch: async (url) => {
+    if (!String(url).includes('openrouter.ai')) return new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'image/png' } });
+    return new Response(JSON.stringify({ choices: [{ message: { content: text } }] }), { headers: { 'content-type': 'application/json' } });
+  } });
+  const result = await compareCandidateImages('key', 'model', image, description, [candidate],
+    undefined, undefined, { provider: 'openrouter', concurrency: 1, maxAttempts: 1 });
+  assert.equal(result.compared, 1);
+});
