@@ -2089,7 +2089,18 @@ export default { async fetch(request: Request, env: Env, ctx?: { waitUntil(promi
       } catch (error) { return { label, error: String(error).slice(0, 120) }; }
     };
     const image = { type: 'image_url', image_url: { url: `data:image/png;base64,${one}` } };
+    const geminiModels = ['google/gemini-3.5-flash-lite', 'google/gemini-3.1-flash-lite', 'google/gemini-3.8-flash', 'google/gemini-2.5-flash-lite'];
+    const gemini = [];
+    for (const m of geminiModels) {
+      gemini.push(await send(`zdr:${m}`, { model: m, messages: [{ role: 'user', content: 'ok' }], max_tokens: 8, provider: { data_collection: 'deny', zdr: true } }));
+    }
+    const direct = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY ?? '' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: 'ok' }] }] }),
+    }).then(async (r) => ({ status: r.status, body: (await r.text()).slice(0, 160) })).catch((e) => ({ error: String(e).slice(0, 80) }));
     const probes = [
+      ...gemini,
+      { label: 'gemini-direct', ...direct },
       await send('text-only', { model, messages: [{ role: 'user', content: 'ok' }], max_tokens: 8 }),
       await send('zdr-text', { model, messages: [{ role: 'user', content: 'ok' }], max_tokens: 8, provider: { data_collection: 'deny', zdr: true } }),
       await send('zdr-2images', { model, max_tokens: 16, provider: { data_collection: 'deny', zdr: true },
