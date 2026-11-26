@@ -959,7 +959,7 @@ type SameVideoVisualCheck = {
   retrieval?: {
     roster_count: number; retrieved_keys: string[]; verified_keys: string[]; unresolved_keys: string[];
     truncated?: boolean;
-    family_stage?: { families: number; compared: number; advancing: string[] };
+    family_stage?: { families: number; compared: number; advancing: string[]; best_similarity?: number | null; best_confidence?: number | null };
     /** Why rows in play did not reach the verifier. Counts only. */
     coverage?: { shortlisted: number; comparable_rows: number; compared: number; skipped: Record<string, number> };
     image_hosts?: Record<string, number>;
@@ -1079,7 +1079,7 @@ async function confirmSameVideoReuseWithImage(
   // Without a family round the entire roster has to be compared, or none of it:
   // a shortlist would leave the coverage gate unsatisfiable.
   let shortlisted = eligible;
-  let familyStage: { families: number; compared: number; advancing: string[] } | null = null;
+  let familyStage: { families: number; compared: number; advancing: string[]; best_similarity?: number | null; best_confidence?: number | null } | null = null;
   let shortlistCost = 0;
   // Best family evidence per family key, used to rank variants when the ledger
   // cannot pay for all of them.
@@ -1140,7 +1140,9 @@ async function confirmSameVideoReuseWithImage(
         ...representatives.filter(({ candidate }) => !familyComparisons.has(candidate.identity.canonical_key)).map(({ family }) => family),
         ...familiesWithoutImage,
       ]);
-      familyStage = { families: familyMap.size, compared: familyCall?.compared ?? 0, advancing: [...advancingSet] };
+      familyStage = { families: familyMap.size, compared: familyCall?.compared ?? 0, advancing: [...advancingSet],
+        best_similarity: Math.max(0, ...[...familyComparisons.values()].map((comparison) => comparison.similarity)),
+        best_confidence: Math.max(0, ...[...familyComparisons.values()].map((comparison) => comparison.confidence)) };
       shortlistCost = familyCall?.compared ?? 0;
       // Variants of the families still in play, plus the already-compared
       // representative of any eliminated family that was close enough to matter:
@@ -1171,7 +1173,9 @@ async function confirmSameVideoReuseWithImage(
       // roster cannot be covered in full, answer from the representatives that
       // were compared and label it a partial, SIMILAR-only result rather than
       // returning nothing: a useful near-miss beats an empty panel.
-      familyStage = { families: familyMap.size, compared: familyCall?.compared ?? 0, advancing: [] };
+      familyStage = { families: familyMap.size, compared: familyCall?.compared ?? 0, advancing: [],
+        best_similarity: familyComparisons.size ? Math.max(0, ...[...familyComparisons.values()].map((comparison) => comparison.similarity)) : null,
+        best_confidence: familyComparisons.size ? Math.max(0, ...[...familyComparisons.values()].map((comparison) => comparison.confidence)) : null };
       (familyStage as Record<string, unknown>).representatives = representatives.length;
       (familyStage as Record<string, unknown>).rows_with_image = eligible.filter((row) => Boolean(storedImage(row))).length;
       (familyStage as Record<string, unknown>).sample_image = storedImage(eligible.find((row) => Boolean(storedImage(row))) ?? eligible[0])?.slice(0, 40) ?? null;
